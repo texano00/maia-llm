@@ -26,17 +26,17 @@ description: "Task list for Desktop LLM Suite implementation"
 
 **Purpose**: Create the monorepo, toolchain, app shells, and CI skeletons.
 
-- [ ] T001 Create npm-workspaces root with Node 22 engine and scripts (`dev`, `build`, `test`, `test:contract`, `test:integration`, `test:telemetry-allowlist`, `release:verify`) in `package.json`
-- [ ] T002 [P] Add strict TypeScript base config and project references in `tsconfig.base.json`, `apps/desktop/tsconfig.json`, `apps/telemetry-api/tsconfig.json`
-- [ ] T003 [P] Configure ESLint, Prettier, and import boundaries in `eslint.config.js` and `.prettierrc`
-- [ ] T004 [P] Configure Vitest workspace and Playwright Electron runner in `vitest.workspace.ts` and `apps/desktop/playwright.config.ts`
-- [ ] T005 [P] Scaffold Electron main, preload, and renderer with electron-vite in `apps/desktop/electron.vite.config.ts`, `apps/desktop/src/main/bootstrap/main.ts`, `apps/desktop/src/preload/index.ts`, `apps/desktop/src/renderer/index.html`
-- [ ] T006 [P] Scaffold the Fastify telemetry service entry point in `apps/telemetry-api/src/server.ts` and `apps/telemetry-api/package.json`
-- [ ] T007 [P] Add local PostgreSQL 16 and MinIO services in `infra/docker-compose.yml`
-- [ ] T008 [P] Add environment template, ignore rules, and development setup notes in `.env.example`, `.gitignore`, `docs/development.md`
-- [ ] T009 [P] Create shared package exports in `packages/contracts/src/index.ts` and `packages/shared/src/index.ts`
-- [ ] T010 [P] Add verify-only PR workflows in `.github/workflows/desktop-ci.yml` and `.github/workflows/telemetry-ci.yml`
-- [ ] T011 [P] Create test scaffolding for integration and performance suites in `apps/desktop/tests/integration/README.md`, `apps/desktop/tests/perf/README.md`, and `apps/telemetry-api/tests/integration/README.md`
+- [x] T001 Create npm-workspaces root with Node 22 engine and scripts (`dev`, `build`, `test`, `test:contract`, `test:integration`, `test:telemetry-allowlist`, `release:verify`) in `package.json`
+- [x] T002 [P] Add strict TypeScript base config and path aliases in `tsconfig.base.json`, `apps/desktop/tsconfig.json`, `apps/telemetry-api/tsconfig.json`
+- [x] T003 [P] Configure ESLint, Prettier, and import boundaries in `eslint.config.js` and `.prettierrc`
+- [x] T004 [P] Configure Vitest runner and Playwright Electron runner in `vitest.config.ts` and `apps/desktop/playwright.config.ts`
+- [x] T005 [P] Scaffold Electron main, preload, and renderer with electron-vite in `apps/desktop/electron.vite.config.ts`, `apps/desktop/src/main/bootstrap/main.ts`, `apps/desktop/src/preload/index.ts`, `apps/desktop/src/renderer/index.html`
+- [x] T006 [P] Scaffold the Fastify telemetry service entry point in `apps/telemetry-api/src/server.ts` and `apps/telemetry-api/package.json`
+- [x] T007 [P] Add local PostgreSQL 16 and MinIO services in `infra/docker-compose.yml`
+- [x] T008 [P] Add environment template, ignore rules, and development setup notes in `.env.example`, `.gitignore`, `docs/development.md`
+- [x] T009 [P] Create shared package exports in `packages/contracts/src/index.ts` and `packages/shared/src/index.ts`
+- [x] T010 [P] Add verify-only PR workflows in `.github/workflows/desktop-ci.yml` and `.github/workflows/telemetry-ci.yml`
+- [x] T011 [P] Create test scaffolding for integration and performance suites in `apps/desktop/tests/integration/README.md`, `apps/desktop/tests/perf/README.md`, and `apps/telemetry-api/tests/integration/README.md`
 
 **Checkpoint**: Repository builds, lint runs, and both app shells start.
 
