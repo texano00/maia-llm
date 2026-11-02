@@ -12,9 +12,9 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
-    "pack:win": "npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win dir --x64",
-    "dist:win": "npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win nsis --x64",
-    "dist:win:msi": "npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win msi --x64"
+    "pack:win": "npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win dir --x64 --publish never",
+    "dist:win": "npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win nsis --x64 --publish never",
+    "dist:win:msi": "npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win msi --x64 --publish never"
   },
   "dependencies": {
     "react": "19.3.1",
