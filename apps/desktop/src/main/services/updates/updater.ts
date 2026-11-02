@@ -264,7 +264,7 @@ export class UpdateService {
   }
 
   private fail(error: unknown, fallbackMessage: string): void {
-    const message = toMessage(error, fallbackMessage);
+    const message = describeUpdateError(error, fallbackMessage);
     this.logger?.error("Update workflow failed", { message });
     this.update({ phase: "error", errorMessage: message });
   }
@@ -337,4 +337,23 @@ function toMessage(error: unknown, fallback: string): string {
   }
 
   return fallback;
+}
+
+/**
+ * Turns transport failures into something a user can act on. The feed lives in a
+ * GitHub Release, so a 404 usually means the release is a draft, the repository
+ * is private, or no release was published yet.
+ */
+function describeUpdateError(error: unknown, fallback: string): string {
+  const raw = toMessage(error, fallback);
+
+  if (/\b404\b/.test(raw)) {
+    return "The update feed was not found (HTTP 404). Draft releases, private repositories, and releases without latest.yml are not readable by the app.";
+  }
+
+  if (/ENOTFOUND|EAI_AGAIN|ENETUNREACH|ECONNREFUSED|ETIMEDOUT/i.test(raw)) {
+    return "The update feed is unreachable. Check the network connection and try again.";
+  }
+
+  return raw;
 }

@@ -165,6 +165,18 @@ describe("UpdateService", () => {
     });
   });
 
+  it("explains an unreachable feed instead of leaking a bare HTTP status", async () => {
+    const updater = new FakeUpdater();
+    updater.checkError = new Error("HttpError: 404 Not Found");
+
+    const { service } = createService(updater);
+    const status = await service.check();
+
+    expect(status.phase).toBe("error");
+    expect(status.errorMessage).toContain("HTTP 404");
+    expect(status.errorMessage).toContain("private repositories");
+  });
+
   it("downloads with progress, then installs on request", async () => {
     const updater = new FakeUpdater();
     const { service, statuses } = createService(updater);
