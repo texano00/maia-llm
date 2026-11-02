@@ -15,6 +15,9 @@ let mainWindow: BrowserWindow | null = null;
 let database: DatabaseConnection | null = null;
 let registry: IpcRegistry | null = null;
 
+app.setName("Maia LLM");
+app.setAppUserModelId("com.texano00.maiallm");
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1280,

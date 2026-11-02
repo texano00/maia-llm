@@ -2,6 +2,7 @@
   "name": "@maia/desktop",
   "version": "0.1.0",
   "private": true,
+  "productName": "Maia LLM",
   "description": "Maia LLM desktop client",
   "author": {
     "name": "texano00"
