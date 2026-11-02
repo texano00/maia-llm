@@ -21,7 +21,8 @@
     "test:integration": "vitest run --passWithNoTests apps/desktop/tests/integration apps/telemetry-api/tests/integration",
     "test:telemetry-allowlist": "vitest run apps/telemetry-api/tests/contract/telemetry-allowlist.test.ts",
     "release:verify": "tsx scripts/release/verify-version.ts",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "postinstall": "node ./node_modules/electron/install.js"
   },
   "devDependencies": {
     "@eslint/js": "9.39.5",
@@ -34,6 +35,7 @@
     "vitest": "4.1.12"
   },
   "allowScripts": {
-    "esbuild@0.28.2": true
+    "esbuild@0.28.2": true,
+    "electron-winstaller@5.4.0": true
   }
 }
