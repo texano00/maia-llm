@@ -23,6 +23,7 @@ nsis:
   artifactName: MaiaLLM-Setup-${version}-${arch}.${ext}
   oneClick: false
   perMachine: false
+  packElevateHelper: false
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
