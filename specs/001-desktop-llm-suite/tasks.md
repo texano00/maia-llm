@@ -297,7 +297,9 @@ description: "Task list for Desktop LLM Suite implementation"
 - [ ] T132 Implement SHA-256/SHA-512 checksums, `SHA256SUMS.txt`, and `release-manifest.json` generation in `scripts/release/generate-manifest.ts`
 - [ ] T133 Implement `latest.yml` and `latest-beta.yml` generation in `scripts/release/generate-feed.ts`
 - [x] T134 Configure electron-builder NSIS/MSI artifact names, Authenticode signing, and GitHub publish provider in `apps/desktop/electron-builder.yml`
+  - Note: NSIS upgrade detection (in-place update + confirmation) lives in `apps/desktop/resources/installer.nsh`.
 - [ ] T135 Implement the updater with signature verification and stable/beta channel selection in `apps/desktop/src/main/services/updates/updater.ts` and `apps/desktop/src/main/ipc/updates.ts`
+  - Note: channel selection, in-app notification banner, download with progress, and restart-to-install are implemented; Authenticode verification before install is still outstanding.
 - [ ] T136 Create `release.yml` with verify/build-desktop/build-telemetry/publish jobs, pinned actions, and least-privilege permissions in `.github/workflows/release.yml`
 - [ ] T137 Add CycloneDX SBOM generation and provenance attestation steps in `scripts/release/sbom.ts` and `.github/workflows/release.yml`
 - [ ] T138 Add GHCR build, vulnerability scan, and digest-pinned push in `.github/workflows/release.yml`
@@ -322,6 +324,48 @@ description: "Task list for Desktop LLM Suite implementation"
 - [ ] T148 Run `quickstart.md` scenarios V1–V9 and record results in `docs/validation-report.md`
 - [ ] T149 Remove mock-only branches from the production bundle and finalize tree-shaking in `apps/desktop/src/main/services/providers/mock.ts`
 - [ ] T150 Update `README.md` with download, install, update, and channel instructions
+
+---
+
+## Phase 11: GPU economy strategy (intelligent pause/resume vs always on)
+
+**Goal**: Let the user choose, per catalogue run, whether the rented GPU pauses itself after
+N idle minutes (state persisted to vast.ai storage, resumed on demand) or stays on until a
+manual stop — and guarantee that quitting the app never leaves a chargeable instance behind.
+
+**Why this is its own phase**: The strategy touches session setup, provisioning, storage,
+reconciliation, and receipts, and it extends FR-012/FR-013 without changing the US1 happy
+path. Schedule it after Phase 6 (US4) and before the release phase when shipping in v1.
+
+**Independent Test**: Run a modelled session on the mock provider in Intelligent tier with
+N = 2 minutes, leave it idle, confirm the pause event and stored state, send a message and
+confirm automatic resume on a new instance, then quit the app and confirm a startup audit
+reports zero running instances; repeat with Always on and confirm no pause occurs.
+
+**Covers**: FR-068–FR-075, SC-024, SC-025.
+
+### Tests for the economy strategy
+
+- [ ] T151 [P] Unit test inactivity detection, N-boundary behavior, and pause/resume state machine in `apps/desktop/tests/unit/economy-strategy.test.ts`
+- [ ] T152 [P] Contract test the vast.ai storage checkpoint/resume payloads and the resumed-instance reconciliation in `apps/desktop/tests/contract/vast-checkpoint.test.ts`
+- [ ] T153 [P] E2E intelligent tier pause → resume and always-on no-pause flows with the mock provider in `apps/desktop/tests/e2e/economy-strategy.spec.ts`
+- [ ] T154 [P] Integration test app-quit teardown, forced-kill orphan detection, and next-start reconciliation in `apps/desktop/tests/integration/shutdown-teardown.spec.ts`
+
+### Implementation for the economy strategy
+
+- [ ] T155 Add `economy_strategy` (`intelligent` | `always_on`) to the session contract and the `sessions` table, with `idle_pause_minutes` copied from settings at session start, in `packages/contracts/src/domain.ts` and the next SQLite migration
+- [ ] T156 Persist the inactivity value and the user's default strategy in Settings (default 10 minutes, range 1–120) and expose them through `settings` IPC in `apps/desktop/src/main/services/settings/economy.ts` and `apps/desktop/src/renderer/features/settings/SettingsPage.tsx`
+- [ ] T157 Implement the strategy state machine (running → pausing → paused → resuming → running, plus always-on) in `apps/desktop/src/main/services/sessions/economy.ts`, driven by a single activity clock shared by chat and the local endpoint
+- [ ] T158 Implement pause: flush in-flight work, checkpoint model artifacts and session state to vast.ai storage, stop the instance, and record storage location and pause timestamp in `apps/desktop/src/main/services/vast/checkpoint.ts`
+- [ ] T159 Implement resume-on-demand: provision a replacement GPU, restore the checkpoint without re-downloading stored artifacts, and continue the pending turn with an explicit user-visible stage in `apps/desktop/src/main/services/sessions/resume.ts`
+- [ ] T160 Implement guaranteed teardown on quit, update restart, and OS shutdown signals, with a bounded wait, a user warning when a stop cannot be confirmed, and a persisted orphan list in `apps/desktop/src/main/services/sessions/teardown.ts`
+- [ ] T161 Extend startup reconciliation to running instances and paused volumes created by the app, offering resume or release and never leaving an untracked chargeable resource, in `apps/desktop/src/main/services/sessions/reconcile.ts`
+- [ ] T162 Add the strategy picker to the run dialog and the estimate line showing strategy, N, running rate, paused/storage rate, and the projected difference in `apps/desktop/src/renderer/features/session/SessionSetupPage.tsx`
+- [ ] T163 Record pause, resume, forced release, and storage charges in the session record and receipt, and surface them in the usage view in `apps/desktop/src/main/services/cost/receipts.ts`
+- [ ] T164 Surface strategy state in chat (running / paused with resume hint / always-on badge) and add announceable status text for screen readers in `apps/desktop/src/renderer/features/chat/ChatPage.tsx`
+
+**Checkpoint**: Quitting the app leaves no chargeable GPU behind, and an idle Intelligent-tier
+session costs storage only until the user needs it again.
 
 ---
 
@@ -442,6 +486,10 @@ The MVP includes the pre-session estimate and basic receipt because Constitution
 8. Release → signed GitHub Releases and update feed.
 9. Polish → security, accessibility, documentation, full quickstart run.
 
+Phase 11 (economy strategy) depends on US1 session orchestration (T044, T045) and US4
+receipts/reconciliation (T087, T092). Run it right after US4 when it is in scope for the
+release, and always before the release phase so the teardown audit ships with it.
+
 ### Parallel Team Strategy
 
 After Foundation:
@@ -464,6 +512,7 @@ After Foundation:
 - `T020` owns the conversation/message repository; US1 writes through it and US2 extends it. Do not re-create it.
 - US2 tests seed conversations through `T020`, so the story does not depend on the US1 chat flow.
 - `T040` owns the pre-session estimate in US1; US4 owns the meter, caps, and usage.
+- `T155`–`T164` (Phase 11) own the economy strategy; they extend `T044`/`T045` and must not duplicate the idle timer.
 - Commit after each task or logical group.
 - Never run live GPU or provider calls in CI; use `MAIA_PROVIDER_MODE=mock` and recorded fixtures.
 - Stop at each checkpoint and run that story's independent test before continuing.

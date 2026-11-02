@@ -106,27 +106,183 @@ nav {
 .topbar {
   display: flex;
   justify-content: flex-end;
-  padding: 1rem 2rem;
+  padding: 1rem 2rem 0;
 }
 
-.status-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.55rem;
-  padding: 0.45rem 0.8rem;
+.info {
+  position: relative;
+}
+
+.icon-button {
+  display: grid;
+  place-items: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
   border: 1px solid rgb(255 255 255 / 12%);
   border-radius: 999px;
   background: rgb(255 255 255 / 4%);
-  color: #c8d4e6;
+  color: #a9b7ce;
+}
+
+.icon-button:hover,
+.icon-button[aria-expanded="true"] {
+  border-color: rgb(72 104 255 / 55%);
+  background: rgb(72 104 255 / 18%);
+  color: #ffffff;
+}
+
+.info-popover {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  z-index: 20;
+  display: grid;
+  gap: 0.9rem;
+  width: 19rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 0.9rem;
+  background: rgb(12 16 26 / 96%);
+  box-shadow: 0 24px 60px rgb(0 0 0 / 45%);
+}
+
+.info-title {
+  margin: 0;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.info-list {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
   font-size: 0.82rem;
 }
 
-.status-dot {
-  width: 0.55rem;
-  height: 0.55rem;
-  border-radius: 50%;
-  background: #35e7b1;
-  box-shadow: 0 0 0 4px rgb(53 231 177 / 14%);
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.info-row dt {
+  color: #8fa3c8;
+}
+
+.info-row dd {
+  margin: 0;
+  color: #e7ecf5;
+  font-variant-numeric: tabular-nums;
+}
+
+.info-update {
+  display: grid;
+  gap: 0.55rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid rgb(255 255 255 / 8%);
+  color: #a9b7ce;
+  font-size: 0.8rem;
+}
+
+.update-toast {
+  position: fixed;
+  top: 4.25rem;
+  right: 1.5rem;
+  z-index: 30;
+  display: grid;
+  gap: 0.7rem;
+  width: min(22rem, calc(100vw - 3rem));
+  padding: 1rem 1.1rem;
+  border: 1px solid rgb(72 104 255 / 45%);
+  border-radius: 0.9rem;
+  background: rgb(14 20 34 / 97%);
+  box-shadow: 0 24px 60px rgb(0 0 0 / 50%);
+}
+
+.update-toast-head {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-size: 0.9rem;
+}
+
+.update-badge {
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  background: rgb(72 104 255 / 25%);
+  color: #cfd9ff;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.update-notes,
+.update-meta {
+  margin: 0;
+  color: #a9b7ce;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  white-space: pre-line;
+}
+
+.update-progress {
+  overflow: hidden;
+  height: 0.4rem;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 10%);
+}
+
+.update-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #4868ff, #35e7b1);
+  transition: width 200ms ease;
+}
+
+.update-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.update-actions button,
+.info-update button {
+  padding: 0.5rem 0.8rem;
+  font-size: 0.8rem;
+}
+
+.ghost-button {
+  border-color: rgb(255 255 255 / 14%);
+  background: transparent;
+  color: #c8d4e6;
+}
+
+.ghost-button:hover:not(:disabled) {
+  background: rgb(255 255 255 / 8%);
+}
+
+.ghost-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.settings-card {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.1rem 1.25rem;
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 0.9rem;
+  background: rgb(255 255 255 / 3%);
+}
+
+.settings-card h2 {
+  margin: 0 0 0.35rem;
+  font-size: 1rem;
 }
 
 .page,

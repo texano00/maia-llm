@@ -89,6 +89,11 @@ The user wants no billing surprises. They can see live spend during a session, s
 4. **Given** the cap is reached, **When** the session is still running, **Then** the app stops generation, ends the session, releases the GPU, and records the final cost.
 5. **Given** a monthly budget, **When** the user starts a session that would exceed it, **Then** the app blocks the session until the budget is raised or the user explicitly overrides.
 6. **Given** completed sessions, **When** the user opens the usage view, **Then** total spend, spend by model, and spend by day are displayed.
+7. **Given** the user starts a run for a catalogue model, **When** the run dialog opens, **Then** the user must pick an economy strategy (Intelligent tier or Always on) before the estimate is confirmed.
+8. **Given** the Intelligent tier with an inactivity value of N minutes, **When** N minutes pass with no in-app or endpoint activity, **Then** the GPU is paused, the model and session state are persisted to vast.ai storage, compute charges stop, and the session stays resumable.
+9. **Given** a paused Intelligent-tier session, **When** the user sends the next message, **Then** a new GPU is provisioned automatically, the persisted state is restored, and generation continues without the user managing any instance.
+10. **Given** an Always-on session, **When** the user leaves the app idle beyond the inactivity value, **Then** the GPU keeps running and the UI keeps showing the always-on state with accrued cost until the user stops it.
+11. **Given** any running or paused session, **When** the user quits the application, **Then** every GPU instance owned by the app is stopped before exit; if shutdown cannot be confirmed, the user is warned and the instance is reconciled automatically on the next start.
 
 ---
 
@@ -239,6 +244,17 @@ The user decides to protect themselves against Hugging Face outages or the remov
 - **FR-066**: The release pipeline MUST fail closed: no artifact is published when tests, signing, or checksum verification fails, and each published version MUST be immutable and accompanied by a machine-readable release manifest consumed by the in-app updater.
 - **FR-067**: Users MUST be able to obtain installers and updates from the project's GitHub Releases page, with a stable channel and an opt-in beta channel, and the application MUST verify the signature before installing an update.
 
+#### GPU Economy Strategy and Orphan Prevention
+
+- **FR-068**: When the user starts a run for a selected catalogue model, System MUST require choosing an economy strategy before the cost estimate is confirmed: **Intelligent tier** (automatic pause) or **Always on** (manual stop only).
+- **FR-069**: In Intelligent tier, System MUST pause the rented GPU after N minutes without in-app chat or local-endpoint activity; N MUST be user-configurable in Settings (default 10 minutes, allowed range 1–120 minutes) and MUST be shown in the run dialog and the estimate.
+- **FR-070**: Pausing MUST persist the model artifacts and session state to vast.ai storage before the instance is stopped, and MUST resume automatically on a newly provisioned GPU when the user next needs the model, without requiring the user to manage instances; a resume that reuses already-stored artifacts MUST NOT re-download them.
+- **FR-071**: Always on MUST keep the rented GPU available until the user explicitly stops the session, MUST NOT apply the automatic pause, and MUST keep the always-on state and accrued cost visible for the whole session.
+- **FR-072**: The pre-session estimate MUST state the selected strategy, the effective inactivity value, running and paused/storage rates, and the projected cost difference between strategies for the expected session length.
+- **FR-073**: On application exit — user quit, restart to install an update, or an operating-system shutdown request — System MUST persist session state and then stop or destroy every GPU instance it owns; it MUST NOT exit while silently leaving a chargeable instance behind, and if shutdown cannot be confirmed it MUST warn the user and record the instance for reconciliation.
+- **FR-074**: On startup, System MUST detect instances and paused storage volumes created by the app, present them to the user, and resume or release them per user choice, so no orphaned chargeable resource survives a crash, forced kill, or failed shutdown.
+- **FR-075**: Every pause, resume, forced release, and storage charge MUST be recorded in the session record and the post-session receipt so compute and storage costs remain auditable separately.
+
 ### Key Entities *(include if feature involves data)*
 
 - **Model Catalogue Entry**: A model family published on Hugging Face; key attributes are identifier, publisher, license, parameter count, context window, access status, and popularity/recency signals.
@@ -286,6 +302,8 @@ The user decides to protect themselves against Hugging Face outages or the remov
 - **SC-021**: 100% of telemetry deletion requests are completed within 30 days.
 - **SC-022**: 100% of published Windows installers are signed, checksum-verifiable, and installable from the project's public release page, and an installation on the previous stable version updates successfully to the new stable release.
 - **SC-023**: 100% of release runs with a failing test, invalid signature, or checksum mismatch publish no artifacts.
+- **SC-024**: 100% of audited application exits, including crash-kill simulations, leave zero running GPU instances or unreported paused volumes, with any unresolved shutdown surfaced to the user and reconciled on the next start.
+- **SC-025**: For Intelligent-tier sessions, compute charges stop accruing within one minute of a pause, and a resume after a pause reaches first token within the wait time shown for a new provisioning run (±50%).
 
 ## Assumptions
 

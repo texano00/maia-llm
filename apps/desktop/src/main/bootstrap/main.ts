@@ -1,10 +1,14 @@
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, Menu } from "electron";
 import { join } from "node:path";
 import { z } from "zod";
+import { updateEventChannel } from "@maia/contracts";
 import { closeDatabase, openDatabase, type DatabaseConnection } from "../storage/db";
 import { HistoryRepository } from "../services/history/repository";
 import { CredentialVault } from "../services/credentials/vault";
+import { UpdateService, type UpdateLogger } from "../services/updates/updater";
+import { createElectronUpdater } from "../services/updates/electron-updater";
 import { IpcRegistry } from "../ipc/registry";
+import { registerUpdateHandlers } from "../ipc/updates";
 import { loadConfig } from "./config";
 import { ensureAppDirectories, resolveAppPaths } from "./paths";
 import { enforceSingleInstance, registerLifecycleHooks } from "./lifecycle";
@@ -14,9 +18,27 @@ import { startCrashReporter } from "./crash-reporter";
 let mainWindow: BrowserWindow | null = null;
 let database: DatabaseConnection | null = null;
 let registry: IpcRegistry | null = null;
+let updates: UpdateService | null = null;
+let updateTimer: NodeJS.Timeout | null = null;
 
 app.setName("Maia LLM");
 app.setAppUserModelId("com.texano00.maiallm");
+
+/**
+ * The suite ships its own navigation, so the default Electron menu (File, Edit,
+ * View, Window) is removed on Windows and Linux. macOS keeps the minimal app
+ * menu it needs for standard shortcuts and quit behavior.
+ */
+function configureApplicationMenu(): void {
+  if (process.platform === "darwin") {
+    Menu.setApplicationMenu(
+      Menu.buildFromTemplate([{ role: "appMenu" }, { role: "editMenu" }, { role: "windowMenu" }])
+    );
+    return;
+  }
+
+  Menu.setApplicationMenu(null);
+}
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -25,6 +47,8 @@ function createWindow(): void {
     minWidth: 960,
     minHeight: 640,
     show: false,
+    autoHideMenuBar: true,
+    backgroundColor: "#080b12",
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),
       contextIsolation: true,
@@ -46,6 +70,27 @@ function createWindow(): void {
   }
 }
 
+function toUpdateLogger(logger: ReturnType<typeof createLogger>): UpdateLogger {
+  return {
+    info: (message, context) => logger.info(context ?? {}, message),
+    warn: (message, context) => logger.warn(context ?? {}, message),
+    error: (message, context) => logger.error(context ?? {}, message)
+  };
+}
+
+function scheduleUpdateChecks(service: UpdateService, intervalHours: number): void {
+  const run = (): void => {
+    void service.check();
+  };
+
+  if (mainWindow) {
+    mainWindow.webContents.once("did-finish-load", run);
+  }
+
+  updateTimer = setInterval(run, intervalHours * 60 * 60 * 1000);
+  updateTimer.unref?.();
+}
+
 async function bootstrap(): Promise<void> {
   const config = loadConfig();
   const paths = resolveAppPaths();
@@ -59,14 +104,32 @@ async function bootstrap(): Promise<void> {
   const repository = new HistoryRepository(database);
   const vault = new CredentialVault(paths.vaultDir);
 
+  configureApplicationMenu();
+
+  const updateLogger = toUpdateLogger(logger);
+  updates = new UpdateService({
+    currentVersion: app.getVersion(),
+    channel: config.releaseChannel,
+    updater: createElectronUpdater(updateLogger),
+    logger: updateLogger,
+    simulatedVersion: config.simulatedUpdateVersion,
+    onStatus: (status) => {
+      mainWindow?.webContents.send(updateEventChannel, status);
+    }
+  });
+
   registry = new IpcRegistry();
   registry.register("app.info", z.unknown(), () => ({
     app: app.getVersion(),
     electron: process.versions.electron,
     chrome: process.versions.chrome,
     node: process.versions.node,
-    platform: process.platform
+    platform: process.platform,
+    arch: process.arch,
+    channel: config.releaseChannel,
+    packaged: app.isPackaged
   }));
+  registerUpdateHandlers(registry, updates);
   registry.install();
 
   logger.info(
@@ -75,7 +138,8 @@ async function bootstrap(): Promise<void> {
       releaseChannel: config.releaseChannel,
       database: paths.database,
       conversations: repository.listConversations(1).length,
-      vaultDirectory: paths.vaultDir
+      vaultDirectory: paths.vaultDir,
+      updateCheckIntervalHours: config.updateCheckIntervalHours
     },
     "Application services initialized"
   );
@@ -83,6 +147,13 @@ async function bootstrap(): Promise<void> {
   void vault;
 
   registerLifecycleHooks(() => {
+    if (updateTimer) {
+      clearInterval(updateTimer);
+      updateTimer = null;
+    }
+
+    updates?.dispose();
+    updates = null;
     registry?.dispose();
     if (database) {
       closeDatabase(database);
@@ -91,6 +162,7 @@ async function bootstrap(): Promise<void> {
   });
 
   createWindow();
+  scheduleUpdateChecks(updates, config.updateCheckIntervalHours);
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {

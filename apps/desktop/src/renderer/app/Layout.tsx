@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 import { NavLink } from "react-router-dom";
+import { InfoButton } from "../shared/InfoButton";
+import { UpdateToast } from "../shared/updates/UpdateToast";
 
 const navigation = [
   { to: "/catalogue", label: "Catalogue" },
@@ -37,12 +39,10 @@ export function Layout({ children }: { children: ReactNode }) {
 
       <div className="content">
         <header className="topbar">
-          <span className="status-pill">
-            <span className="status-dot" aria-hidden="true" />
-            Foundation
-          </span>
+          <InfoButton />
         </header>
         <main className="page">{children}</main>
+        <UpdateToast />
       </div>
     </div>
   );

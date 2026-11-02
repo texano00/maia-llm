@@ -1,15 +1,20 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 import {
   fail,
   ipcChannels,
+  updateEventChannel,
+  updateStatusSchema,
   type AppInfo,
   type IpcChannel,
-  type Result
+  type Result,
+  type UpdateStatus
 } from "@maia/contracts";
 
 export interface MaiaBridge {
   invoke<T = unknown>(channel: IpcChannel, payload?: unknown): Promise<Result<T>>;
   getVersions(): Promise<AppInfo>;
+  /** Subscribes to update status pushes from the main process. */
+  onUpdateStatus(listener: (status: UpdateStatus) => void): () => void;
 }
 
 const allowedChannels = new Set<string>(ipcChannels);
@@ -31,6 +36,21 @@ const bridge: MaiaBridge = {
     }
 
     return result.data;
+  },
+
+  onUpdateStatus(listener: (status: UpdateStatus) => void): () => void {
+    const handler = (_event: IpcRendererEvent, payload: unknown): void => {
+      const parsed = updateStatusSchema.safeParse(payload);
+      if (parsed.success) {
+        listener(parsed.data);
+      }
+    };
+
+    ipcRenderer.on(updateEventChannel, handler);
+
+    return () => {
+      ipcRenderer.removeListener(updateEventChannel, handler);
+    };
   }
 };
 

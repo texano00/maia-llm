@@ -21,13 +21,18 @@ win:
 
 nsis:
   artifactName: MaiaLLM-Setup-${version}-${arch}.${ext}
+  include: resources/installer.nsh
   oneClick: false
   perMachine: false
   packElevateHelper: false
-  allowToChangeInstallationDirectory: true
+  # Upgrades reuse the detected install folder, so the assisted installer only
+  # needs a single confirmation step. See resources/installer.nsh.
+  allowToChangeInstallationDirectory: false
+  differentialPackage: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: Maia LLM
+  runAfterFinish: true
   deleteAppDataOnUninstall: false
 
 msi:
