@@ -48,23 +48,23 @@ description: "Task list for Desktop LLM Suite implementation"
 
 **⚠️ CRITICAL**: No user story work begins until this phase is complete.
 
-- [ ] T012 Define IPC envelope, `Result<T>`, and error-code schemas in `packages/contracts/src/ipc.ts`
-- [ ] T013 [P] Define shared domain enums for session states, backup states, conversation origins, message roles, and channels in `packages/contracts/src/domain.ts`
-- [ ] T014 [P] Implement SQLite connection, WAL, and migration runner in `apps/desktop/src/main/storage/db.ts` and `apps/desktop/src/main/storage/migrations/0000_init.sql`
-- [ ] T015 [P] Create catalogue migration with `gated` CHECK in (`none`, `auto`, `manual`), artifact `format` CHECK in (`safetensors`, `gguf`, `other`), and `size_bytes > 0` in `apps/desktop/src/main/storage/migrations/0001_catalogue.sql`
-- [ ] T016 [P] Create history migration with conversation `title` 1–200 chars, `origin` CHECK in (`app`, `ide`), message `role` CHECK in (`system`, `user`, `assistant`, `tool`), and `sequence` unique per conversation in `apps/desktop/src/main/storage/migrations/0002_history.sql`
-- [ ] T017 [P] Create session and cost migration with `state` CHECK in (`estimated`, `provisioning`, `ready`, `active`, `ending`, `ended`, `cancelled`, `failed`), `runtime` CHECK in (`vllm`, `llamacpp`), `hourly_rate_microusd > 0`, `currency = 'USD'`, and a partial unique index allowing only one non-terminal session in `apps/desktop/src/main/storage/migrations/0003_sessions_costs.sql`
-- [ ] T018 [P] Create backup migration with `bucket` 3–63 chars and no spaces, `prefix` with no leading `/`, no `..`, ≤1024 chars, and `status` CHECK in (`queued`, `validating`, `uploading`, `paused`, `verifying`, `completed`, `failed`, `broken`) in `apps/desktop/src/main/storage/migrations/0004_backups.sql`
-- [ ] T019 [P] Create settings/telemetry migration with `local_endpoint_runs.address = '127.0.0.1'`, `port` 1024–65535, and `telemetry_outbox.bytes ≤ 262144` in `apps/desktop/src/main/storage/migrations/0005_settings_telemetry.sql`
-- [ ] T020 [P] Implement the conversation/message repository core with per-conversation `sequence` ordering, transactional inserts, and FTS triggers in `apps/desktop/src/main/services/history/repository.ts`
-- [ ] T021 [P] Implement OS credential vault wrapper with opaque handles in `apps/desktop/src/main/services/credentials/vault.ts`
-- [ ] T022 [P] Implement typed IPC registry with sender validation and Zod payload checks in `apps/desktop/src/main/ipc/registry.ts` and the preload allowlist in `apps/desktop/src/preload/index.ts`
-- [ ] T023 Implement structured logging with redaction and the Electron `crashReporter` hook in `apps/desktop/src/main/bootstrap/logging.ts` and `apps/desktop/src/main/bootstrap/crash-reporter.ts`
-- [ ] T024 [P] Implement the provider HTTP client with timeouts, retry/backoff, rate limiting, and secret redaction in `apps/desktop/src/main/services/providers/http.ts`
-- [ ] T025 [P] Implement app paths, single-instance lock, and shutdown hooks in `apps/desktop/src/main/bootstrap/paths.ts` and `apps/desktop/src/main/bootstrap/lifecycle.ts`
-- [ ] T026 Implement renderer shell, routing, error boundary, and design tokens in `apps/desktop/src/renderer/app/App.tsx`, `apps/desktop/src/renderer/app/routes.tsx`, and `apps/desktop/src/renderer/shared/theme.css`
-- [ ] T027 [P] Create the recorded-provider fixture harness and `MAIA_PROVIDER_MODE=mock` switch in `apps/desktop/tests/contract/fixtures/` and `apps/desktop/src/main/services/providers/mock.ts`
-- [ ] T028 [P] Implement configuration for mock mode, release channel, and idle-timeout defaults in `apps/desktop/src/main/bootstrap/config.ts`
+- [x] T012 Define IPC envelope, `Result<T>`, and error-code schemas in `packages/contracts/src/ipc.ts`
+- [x] T013 [P] Define shared domain enums for session states, backup states, conversation origins, message roles, and channels in `packages/contracts/src/domain.ts`
+- [x] T014 [P] Implement SQLite connection, WAL, and migration runner in `apps/desktop/src/main/storage/db.ts` and `apps/desktop/src/main/storage/migrations/0000_init.sql`
+- [x] T015 [P] Create catalogue migration with `gated` CHECK in (`none`, `auto`, `manual`), artifact `format` CHECK in (`safetensors`, `gguf`, `other`), and `size_bytes > 0` in `apps/desktop/src/main/storage/migrations/0001_catalogue.sql`
+- [x] T016 [P] Create history migration with conversation `title` 1–200 chars, `origin` CHECK in (`app`, `ide`), message `role` CHECK in (`system`, `user`, `assistant`, `tool`), and `sequence` unique per conversation in `apps/desktop/src/main/storage/migrations/0002_history.sql`
+- [x] T017 [P] Create session and cost migration with `state` CHECK in (`estimated`, `provisioning`, `ready`, `active`, `ending`, `ended`, `cancelled`, `failed`), `runtime` CHECK in (`vllm`, `llamacpp`), `hourly_rate_microusd > 0`, `currency = 'USD'`, and a partial unique index allowing only one non-terminal session in `apps/desktop/src/main/storage/migrations/0003_sessions_costs.sql`
+- [x] T018 [P] Create backup migration with `bucket` 3–63 chars and no spaces, `prefix` with no leading `/`, no `..`, ≤1024 chars, and `status` CHECK in (`queued`, `validating`, `uploading`, `paused`, `verifying`, `completed`, `failed`, `broken`) in `apps/desktop/src/main/storage/migrations/0004_backups.sql`
+- [x] T019 [P] Create settings/telemetry migration with `local_endpoint_runs.address = '127.0.0.1'`, `port` 1024–65535, and `telemetry_outbox.bytes ≤ 262144` in `apps/desktop/src/main/storage/migrations/0005_settings_telemetry.sql`
+- [x] T020 [P] Implement the conversation/message repository core with per-conversation `sequence` ordering, transactional inserts, and FTS triggers in `apps/desktop/src/main/services/history/repository.ts`
+- [x] T021 [P] Implement OS credential vault wrapper with opaque handles in `apps/desktop/src/main/services/credentials/vault.ts`
+- [x] T022 [P] Implement typed IPC registry with sender validation and Zod payload checks in `apps/desktop/src/main/ipc/registry.ts` and the preload allowlist in `apps/desktop/src/preload/index.ts`
+- [x] T023 Implement structured logging with redaction and the Electron `crashReporter` hook in `apps/desktop/src/main/bootstrap/logging.ts` and `apps/desktop/src/main/bootstrap/crash-reporter.ts`
+- [x] T024 [P] Implement the provider HTTP client with timeouts, retry/backoff, rate limiting, and secret redaction in `apps/desktop/src/main/services/providers/http.ts`
+- [x] T025 [P] Implement app paths, single-instance lock, and shutdown hooks in `apps/desktop/src/main/bootstrap/paths.ts` and `apps/desktop/src/main/bootstrap/lifecycle.ts`
+- [x] T026 Implement renderer shell, routing, error boundary, and design tokens in `apps/desktop/src/renderer/app/App.tsx`, `apps/desktop/src/renderer/app/routes.tsx`, and `apps/desktop/src/renderer/shared/theme.css`
+- [x] T027 [P] Create the recorded-provider fixture harness and `MAIA_PROVIDER_MODE=mock` switch in `apps/desktop/tests/contract/fixtures/` and `apps/desktop/src/main/services/providers/mock.ts`
+- [x] T028 [P] Implement configuration for mock mode, release channel, and idle-timeout defaults in `apps/desktop/src/main/bootstrap/config.ts`
 
 **Checkpoint**: Foundation ready — user stories can start. `T020` is the single owner of conversation/message persistence so US1 and US2 do not duplicate it.
 

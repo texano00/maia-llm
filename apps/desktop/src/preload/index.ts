@@ -1,22 +1,36 @@
-import { contextBridge } from "electron";
+import { contextBridge, ipcRenderer } from "electron";
+import {
+  fail,
+  ipcChannels,
+  type AppInfo,
+  type IpcChannel,
+  type Result
+} from "@maia/contracts";
 
 export interface MaiaBridge {
-  getVersions(): Promise<{
-    app: string;
-    electron: string;
-    chrome: string;
-    node: string;
-  }>;
+  invoke<T = unknown>(channel: IpcChannel, payload?: unknown): Promise<Result<T>>;
+  getVersions(): Promise<AppInfo>;
 }
 
+const allowedChannels = new Set<string>(ipcChannels);
+
 const bridge: MaiaBridge = {
-  async getVersions() {
-    return {
-      app: "0.1.0",
-      electron: process.versions.electron,
-      chrome: process.versions.chrome,
-      node: process.versions.node
-    };
+  async invoke<T = unknown>(channel: IpcChannel, payload?: unknown): Promise<Result<T>> {
+    if (!allowedChannels.has(channel)) {
+      return fail("VALIDATION_FAILED", `Unsupported IPC channel: ${channel}`, false) as Result<T>;
+    }
+
+    return (await ipcRenderer.invoke(channel, payload)) as Result<T>;
+  },
+
+  async getVersions(): Promise<AppInfo> {
+    const result = await bridge.invoke<AppInfo>("app.info");
+
+    if (!result.ok) {
+      throw new Error(result.error.message);
+    }
+
+    return result.data;
   }
 };
 

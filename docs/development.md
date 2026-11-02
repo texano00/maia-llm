@@ -29,6 +29,11 @@ MAIA_PROVIDER_MODE=mock npm run -w @maia/desktop dev
 npm run -w @maia/telemetry-api dev
 ```
 
+`npm run -w @maia/desktop dev` rebuilds `better-sqlite3` for the Electron ABI
+before starting. Node-based unit tests expect the Node ABI; after running the
+desktop app, restore it with `npm rebuild better-sqlite3` before running
+`npm test` again.
+
 ## Verify
 
 ```bash
