@@ -2,11 +2,19 @@
   "name": "@maia/desktop",
   "version": "0.1.0",
   "private": true,
+  "description": "Maia LLM desktop client",
+  "author": {
+    "name": "texano00"
+  },
+  "license": "UNLICENSED",
   "main": "./out/main/main.js",
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
-    "preview": "electron-vite preview"
+    "preview": "electron-vite preview",
+    "pack:win": "npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win dir --x64",
+    "dist:win": "npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win nsis --x64",
+    "dist:win:msi": "npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win msi --x64"
   },
   "dependencies": {
     "react": "19.3.1",
@@ -17,6 +25,7 @@
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.2.1",
+    "cross-env": "10.1.0",
     "electron": "45.2.1",
     "electron-builder": "26.18.0",
     "electron-vite": "6.0.0",

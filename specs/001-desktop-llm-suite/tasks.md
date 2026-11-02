@@ -296,7 +296,7 @@ description: "Task list for Desktop LLM Suite implementation"
 - [ ] T131 Implement version/tag/`main` verification in `scripts/release/verify-version.ts`
 - [ ] T132 Implement SHA-256/SHA-512 checksums, `SHA256SUMS.txt`, and `release-manifest.json` generation in `scripts/release/generate-manifest.ts`
 - [ ] T133 Implement `latest.yml` and `latest-beta.yml` generation in `scripts/release/generate-feed.ts`
-- [ ] T134 Configure electron-builder NSIS/MSI artifact names, Authenticode signing, and GitHub publish provider in `apps/desktop/electron-builder.yml`
+- [x] T134 Configure electron-builder NSIS/MSI artifact names, Authenticode signing, and GitHub publish provider in `apps/desktop/electron-builder.yml`
 - [ ] T135 Implement the updater with signature verification and stable/beta channel selection in `apps/desktop/src/main/services/updates/updater.ts` and `apps/desktop/src/main/ipc/updates.ts`
 - [ ] T136 Create `release.yml` with verify/build-desktop/build-telemetry/publish jobs, pinned actions, and least-privilege permissions in `.github/workflows/release.yml`
 - [ ] T137 Add CycloneDX SBOM generation and provenance attestation steps in `scripts/release/sbom.ts` and `.github/workflows/release.yml`
