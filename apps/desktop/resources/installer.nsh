@@ -52,3 +52,24 @@
 !macro customInstallMode
   StrCpy $isForceCurrentInstall "1"
 !macroend
+
+!ifndef BUILD_UNINSTALLER
+  ; electron-builder's default finish page launches the app through
+  ; ${StdUtils.ExecShellAsUser}, which duplicates a shell token and blocks the
+  ; wizard for several seconds after "Finish" is clicked. This installer is
+  ; per-user (same token, no elevation), so a plain Exec is immediate.
+  !macro customFinishPage
+    !define MUI_FINISHPAGE_RUN
+    !define MUI_FINISHPAGE_RUN_TEXT "Launch Maia LLM"
+    !define MUI_FINISHPAGE_RUN_FUNCTION "MaiaLaunchApp"
+    !insertmacro MUI_PAGE_FINISH
+
+    Function MaiaLaunchApp
+      ${If} ${isUpdated}
+        Exec '"$INSTDIR\${APP_EXECUTABLE_FILENAME}" --updated'
+      ${Else}
+        Exec '"$INSTDIR\${APP_EXECUTABLE_FILENAME}"'
+      ${EndIf}
+    FunctionEnd
+  !macroend
+!endif
