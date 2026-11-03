@@ -73,6 +73,9 @@ export const ipcChannels = [
   "app.info",
   "settings.get",
   "settings.update",
+  "settings.credentials.status",
+  "settings.credentials.set",
+  "settings.credentials.test",
   "catalogue.search",
   "catalogue.detail",
   "catalogue.refresh",
@@ -83,6 +86,8 @@ export const ipcChannels = [
   "session.end",
   "conversation.list",
   "conversation.get",
+  "conversation.rename",
+  "conversation.setPinned",
   "conversation.switchModel",
   "chat.send",
   "chat.abort",
@@ -118,6 +123,30 @@ export const appSettingsSchema = z.object({
 
 export const settingsUpdateSchema = appSettingsSchema.partial();
 
+const credentialSecretSchema = z.string().min(1).max(4_000);
+
+export const credentialProviderSchema = z.enum(["huggingface", "vastai", "s3"]);
+
+export const setCredentialSchema = z.object({
+  provider: credentialProviderSchema,
+  secret: credentialSecretSchema
+});
+
+export const testCredentialSchema = z.object({
+  provider: credentialProviderSchema
+});
+
+export const credentialStatusSchema = z.object({
+  huggingface: z.boolean(),
+  vastai: z.boolean(),
+  s3: z.boolean()
+});
+
+export const credentialTestResultSchema = z.object({
+  ok: z.boolean(),
+  message: z.string()
+});
+
 export const ipcChannelSchema = z.enum(ipcChannels);
 
 export type ErrorCode = z.infer<typeof errorCodeSchema>;
@@ -125,6 +154,9 @@ export type ApiError = z.infer<typeof apiErrorSchema>;
 export type AppInfo = z.infer<typeof appInfoSchema>;
 export type AppSettings = z.infer<typeof appSettingsSchema>;
 export type SettingsUpdate = z.infer<typeof settingsUpdateSchema>;
+export type CredentialProvider = z.infer<typeof credentialProviderSchema>;
+export type CredentialStatus = z.infer<typeof credentialStatusSchema>;
+export type CredentialTestResult = z.infer<typeof credentialTestResultSchema>;
 export type IpcChannel = z.infer<typeof ipcChannelSchema>;
 export type UpdatePhase = z.infer<typeof updatePhaseSchema>;
 export type UpdateStatus = z.infer<typeof updateStatusSchema>;

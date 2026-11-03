@@ -1,5 +1,11 @@
 import { useEffect, useState } from "react";
-import { DEFAULT_DIAGNOSTICS_URL, type AppSettings, type GpuFilters } from "@maia/contracts";
+import {
+  DEFAULT_DIAGNOSTICS_URL,
+  type AppSettings,
+  type CredentialStatus,
+  type CredentialTestResult,
+  type GpuFilters
+} from "@maia/contracts";
 import { useUpdates } from "../../shared/updates/UpdatesProvider";
 import { describeUpdateStatus } from "../../shared/updates/UpdateToast";
 
@@ -15,6 +21,9 @@ export function SettingsPage() {
   const [maxHourlyUsd, setMaxHourlyUsd] = useState("");
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [gpuState, setGpuState] = useState<"idle" | "saving" | "saved">("idle");
+  const [hfToken, setHfToken] = useState("");
+  const [credentialStatus, setCredentialStatus] = useState<CredentialStatus | null>(null);
+  const [credentialMessage, setCredentialMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -40,6 +49,46 @@ export function SettingsPage() {
       mounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    void window.maia?.invoke<CredentialStatus>("settings.credentials.status").then((result) => {
+      if (result.ok) {
+        setCredentialStatus(result.data);
+      }
+    });
+  }, []);
+
+  async function saveHuggingFaceToken(): Promise<void> {
+    const bridge = window.maia;
+    if (!bridge || hfToken.trim().length === 0) {
+      return;
+    }
+
+    const result = await bridge.invoke<CredentialStatus>("settings.credentials.set", {
+      provider: "huggingface",
+      secret: hfToken.trim()
+    });
+
+    if (result.ok) {
+      setCredentialStatus(result.data);
+      setHfToken("");
+      setCredentialMessage("Token saved in the OS credential vault.");
+    } else {
+      setError(result.error.message);
+    }
+  }
+
+  async function testHuggingFaceToken(): Promise<void> {
+    const result = await window.maia?.invoke<CredentialTestResult>("settings.credentials.test", {
+      provider: "huggingface"
+    });
+
+    if (!result) {
+      return;
+    }
+
+    setCredentialMessage(result.ok ? result.data.message : result.error.message);
+  }
 
   function applyGpuFilters(filters: GpuFilters): void {
     setCountries(filters.countries.join(", "));
@@ -155,6 +204,50 @@ export function SettingsPage() {
           )}
         </div>
       </div>
+
+      <form
+        className="settings-card settings-card-stacked"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void saveHuggingFaceToken();
+        }}
+      >
+        <div>
+          <h2>Hugging Face access token</h2>
+          <p className="lede">
+            Stored with the operating-system credential vault and used for gated models and live
+            catalogue refreshes. The public catalogue works without a token.
+          </p>
+          <label className="field">
+            <span>Token</span>
+            <input
+              type="password"
+              autoComplete="off"
+              spellCheck={false}
+              placeholder={credentialStatus?.huggingface ? "saved — enter a new token to replace" : "hf_…"}
+              value={hfToken}
+              onChange={(event) => setHfToken(event.target.value)}
+            />
+          </label>
+          <p className="field-hint">
+            Status: {credentialStatus?.huggingface ? "token stored" : "no token stored"}
+          </p>
+          {credentialMessage ? <p className="field-hint">{credentialMessage}</p> : null}
+        </div>
+        <div className="update-actions">
+          <button type="submit" disabled={!bridgeAvailable || hfToken.trim().length === 0}>
+            Save token
+          </button>
+          <button
+            type="button"
+            className="ghost-button"
+            disabled={!credentialStatus?.huggingface}
+            onClick={() => void testHuggingFaceToken()}
+          >
+            Test connection
+          </button>
+        </div>
+      </form>
 
       <form
         className="settings-card settings-card-stacked"

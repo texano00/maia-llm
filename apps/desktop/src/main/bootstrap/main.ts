@@ -18,6 +18,8 @@ import { SettingsStore } from "../services/settings/store";
 import { CatalogueRepository } from "../services/catalogue/repository";
 import { CatalogueService } from "../services/catalogue/service";
 import { createFixtureCatalogueSource } from "../services/catalogue/fixture-source";
+import { createHuggingFaceSource, testHuggingFaceToken } from "../services/catalogue/huggingface-source";
+import { CredentialStore } from "../services/credentials/store";
 import { SessionOrchestrator } from "../services/sessions/orchestrator";
 import { SessionStore } from "../services/sessions/store";
 import { createMockComputeProvider, createMockInference } from "../services/providers/mock-runtime";
@@ -166,10 +168,14 @@ async function bootstrap(): Promise<void> {
 
   const repository = new HistoryRepository(database);
   const vault = new CredentialVault(paths.vaultDir);
+  const credentials = new CredentialStore(database, vault);
 
   const catalogue = new CatalogueService({
     repository: new CatalogueRepository(database),
-    source: createFixtureCatalogueSource(),
+    source:
+      config.providerMode === "live"
+        ? createHuggingFaceSource({ getToken: () => credentials.get("huggingface") })
+        : createFixtureCatalogueSource(),
     logger,
     ...(config.providerMode === "mock" ? { ttlMs: 0 } : {})
   });
@@ -223,10 +229,32 @@ async function bootstrap(): Promise<void> {
     packaged: app.isPackaged
   }));
   registerUpdateHandlers(registry, updates);
-  registerSettingsHandlers(registry, settings, (next) => {
-    const endpoint = resolveDiagnosticsEndpoint(next.diagnosticsUrl);
-    if (endpoint && diagnostics) {
-      diagnostics.setUrl(endpoint);
+  registerSettingsHandlers({
+    registry,
+    store: settings,
+    credentials,
+    onChange: (next) => {
+      const endpoint = resolveDiagnosticsEndpoint(next.diagnosticsUrl);
+      if (endpoint && diagnostics) {
+        diagnostics.setUrl(endpoint);
+      }
+    },
+    testCredential: async (provider, secret) => {
+      if (provider !== "huggingface") {
+        return { ok: false, message: `${provider} connection tests are not wired yet.` };
+      }
+
+      try {
+        const ok = await testHuggingFaceToken(secret);
+        return ok
+          ? { ok: true, message: "Hugging Face accepted the token." }
+          : { ok: false, message: "Hugging Face rejected the token." };
+      } catch (error) {
+        return {
+          ok: false,
+          message: error instanceof Error ? error.message : "Hugging Face request failed"
+        };
+      }
     }
   });
   registerWorkspaceHandlers({
@@ -248,7 +276,8 @@ async function bootstrap(): Promise<void> {
       conversations: repository.listConversations(1).length,
       vaultDirectory: paths.vaultDir,
       updateCheckIntervalHours: config.updateCheckIntervalHours,
-      diagnosticsEndpoint: diagnostics?.getUrl() ?? null
+      diagnosticsEndpoint: diagnostics?.getUrl() ?? null,
+      credentials: credentials.status()
     },
     "Application services initialized"
   );

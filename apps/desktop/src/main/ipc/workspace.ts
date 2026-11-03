@@ -39,6 +39,16 @@ const switchModelSchema = z.object({
   confirm: z.literal(true)
 });
 
+const renameConversationSchema = z.object({
+  id: z.string().min(1).max(100),
+  title: z.string().trim().min(1).max(200)
+});
+
+const pinConversationSchema = z.object({
+  id: z.string().min(1).max(100),
+  pinned: z.boolean()
+});
+
 export interface WorkspaceHandlersOptions {
   registry: IpcRegistry;
   catalogue: CatalogueService;
@@ -101,10 +111,21 @@ export function registerWorkspaceHandlers(options: WorkspaceHandlersOptions): vo
         modelId: summary.modelId,
         updatedAt: summary.updatedAt,
         messageCount: summary.messageCount,
+        pinned: summary.pinned,
         frozen: summary.modelId !== null && !running.has(summary.modelId)
       }));
     }
   );
+
+  registry.register("conversation.rename", renameConversationSchema, (payload) => {
+    history.renameConversation(payload.id, payload.title);
+    return registryResult(history, sessions, payload.id);
+  });
+
+  registry.register("conversation.setPinned", pinConversationSchema, (payload) => {
+    history.setPinned(payload.id, payload.pinned);
+    return registryResult(history, sessions, payload.id);
+  });
 
   registry.register("conversation.get", conversationIdSchema, (payload): ConversationDetail => {
     const found = history.getConversation(payload.id);

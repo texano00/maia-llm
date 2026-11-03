@@ -61,6 +61,7 @@ export interface ConversationSummary {
   origin: ConversationOrigin;
   updatedAt: string;
   messageCount: number;
+  pinned: boolean;
   snippet?: string;
 }
 
@@ -209,10 +210,10 @@ export class HistoryRepository {
 
     const rows = this.db
       .prepare(
-        `SELECT c.id, c.title, c.model_id, c.origin, c.updated_at,
+        `SELECT c.id, c.title, c.model_id, c.origin, c.updated_at, c.pinned,
                 (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id) AS message_count
          FROM conversations c
-         ORDER BY c.updated_at DESC
+         ORDER BY c.pinned DESC, c.updated_at DESC
          LIMIT ? OFFSET ?`
       )
       .all(safeLimit, safeOffset) as Array<{
@@ -221,6 +222,7 @@ export class HistoryRepository {
       model_id: string | null;
       origin: ConversationOrigin;
       updated_at: string;
+      pinned: number;
       message_count: number;
     }>;
 
@@ -230,7 +232,8 @@ export class HistoryRepository {
       modelId: row.model_id,
       origin: row.origin,
       updatedAt: row.updated_at,
-      messageCount: row.message_count
+      messageCount: row.message_count,
+      pinned: row.pinned === 1
     }));
   }
 
@@ -245,7 +248,7 @@ export class HistoryRepository {
 
     const rows = this.db
       .prepare(
-        `SELECT c.id, c.title, c.model_id, c.origin, c.updated_at,
+        `SELECT c.id, c.title, c.model_id, c.origin, c.updated_at, c.pinned,
                 MIN(m.sequence) AS first_sequence,
                 (SELECT COUNT(*) FROM messages m2 WHERE m2.conversation_id = c.id) AS message_count
          FROM messages_fts
@@ -253,7 +256,7 @@ export class HistoryRepository {
          JOIN conversations c ON c.id = m.conversation_id
          WHERE messages_fts MATCH ?
          GROUP BY c.id
-         ORDER BY c.updated_at DESC
+         ORDER BY c.pinned DESC, c.updated_at DESC
          LIMIT ?`
       )
       .all(match, safeLimit) as Array<{
@@ -262,6 +265,7 @@ export class HistoryRepository {
       model_id: string | null;
       origin: ConversationOrigin;
       updated_at: string;
+      pinned: number;
       first_sequence: number;
       message_count: number;
     }>;
@@ -286,9 +290,21 @@ export class HistoryRepository {
         origin: row.origin,
         updatedAt: row.updated_at,
         messageCount: row.message_count,
+        pinned: row.pinned === 1,
         ...(snippetRow ? { snippet: snippetRow.snippet } : {})
       };
     });
+  }
+
+  /** Pins or unpins a conversation so it sorts above the rest. */
+  setPinned(id: string, pinned: boolean): void {
+    const result = this.db
+      .prepare("UPDATE conversations SET pinned = ? WHERE id = ?")
+      .run(pinned ? 1 : 0, id);
+
+    if (result.changes === 0) {
+      throw new Error("Conversation not found");
+    }
   }
 
   /** Re-binds a conversation to another model after an explicit switch. */

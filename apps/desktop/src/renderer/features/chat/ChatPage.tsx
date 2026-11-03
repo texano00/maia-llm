@@ -24,6 +24,9 @@ export function ChatPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [creating, setCreating] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const transcriptRef = useRef<HTMLDivElement>(null);
 
@@ -125,6 +128,56 @@ export function ChatPage() {
     transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight, behavior: "smooth" });
   }, [detail?.messages.length, streaming?.content]);
 
+  async function togglePinned(conversation: ConversationSummary): Promise<void> {
+    const bridge = window.maia;
+    if (!bridge) {
+      return;
+    }
+
+    const result = await bridge.invoke("conversation.setPinned", {
+      id: conversation.id,
+      pinned: !conversation.pinned
+    });
+
+    if (result.ok) {
+      await loadConversations();
+    } else {
+      setError(result.error.message);
+    }
+  }
+
+  async function commitRename(id: string): Promise<void> {
+    const bridge = window.maia;
+    const title = renameDraft.trim();
+    setRenamingId(null);
+
+    if (!bridge || title.length === 0) {
+      return;
+    }
+
+    const result = await bridge.invoke("conversation.rename", { id, title });
+
+    if (result.ok) {
+      await loadConversations();
+      if (id === activeConversationId) {
+        setDetail((current) =>
+          current ? { ...current, conversation: { ...current.conversation, title } } : current
+        );
+      }
+    } else {
+      setError(result.error.message);
+    }
+  }
+
+  function startNewChat(): void {
+    setCreating(true);
+    setActiveConversationId(null);
+    setDetail(null);
+    setStreaming(null);
+    setActiveSessionId(sessions[0]?.id ?? null);
+    setDraft("");
+  }
+
   async function send(): Promise<void> {
     const bridge = window.maia;
     const content = draft.trim();
@@ -168,6 +221,7 @@ export function ChatPage() {
 
     if (!activeConversationId) {
       setActiveConversationId(result.data.conversationId);
+      setCreating(false);
       await loadConversations();
     }
   }
@@ -250,27 +304,83 @@ export function ChatPage() {
       <aside className="chat-history" aria-label="Chat history">
         <div className="chat-history-head">
           <strong>Chats</strong>
-          <Link className="ghost-button" to="/catalogue">
+          <button type="button" className="ghost-button" onClick={startNewChat}>
             New
-          </Link>
+          </button>
         </div>
         <ul>
           {conversations.length === 0 ? <li className="muted small">No conversations yet.</li> : null}
           {conversations.map((conversation) => (
-            <li key={conversation.id}>
-              <button
-                type="button"
-                className={
-                  conversation.id === activeConversationId ? "history-item selected" : "history-item"
-                }
-                onClick={() => void openConversation(conversation.id)}
-              >
-                <span className="history-title">{conversation.title}</span>
-                <span className="history-meta">
-                  {conversation.modelId ?? "unknown model"}
-                  {conversation.frozen ? " · frozen" : ""}
-                </span>
-              </button>
+            <li key={conversation.id} className="history-row">
+              {renamingId === conversation.id ? (
+                <input
+                  className="history-rename"
+                  autoFocus
+                  value={renameDraft}
+                  onChange={(event) => setRenameDraft(event.target.value)}
+                  onBlur={() => void commitRename(conversation.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      void commitRename(conversation.id);
+                    }
+                    if (event.key === "Escape") {
+                      setRenamingId(null);
+                    }
+                  }}
+                />
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    className={
+                      conversation.id === activeConversationId && !creating
+                        ? "history-item selected"
+                        : "history-item"
+                    }
+                    onClick={() => {
+                      setCreating(false);
+                      void openConversation(conversation.id);
+                    }}
+                    onDoubleClick={() => {
+                      setRenamingId(conversation.id);
+                      setRenameDraft(conversation.title);
+                    }}
+                  >
+                    <span className="history-title">
+                      {conversation.pinned ? "★ " : ""}
+                      {conversation.title}
+                    </span>
+                    <span className="history-meta">
+                      {conversation.modelId ?? "unknown model"}
+                      {conversation.frozen ? " · frozen" : ""}
+                    </span>
+                  </button>
+                  <div className="history-actions">
+                    <button
+                      type="button"
+                      className="icon-mini"
+                      title={conversation.pinned ? "Unpin chat" : "Pin chat"}
+                      aria-label={conversation.pinned ? "Unpin chat" : "Pin chat"}
+                      onClick={() => void togglePinned(conversation)}
+                    >
+                      {conversation.pinned ? "★" : "☆"}
+                    </button>
+                    <button
+                      type="button"
+                      className="icon-mini"
+                      title="Rename chat"
+                      aria-label="Rename chat"
+                      onClick={() => {
+                        setRenamingId(conversation.id);
+                        setRenameDraft(conversation.title);
+                      }}
+                    >
+                      ✎
+                    </button>
+                  </div>
+                </>
+              )}
             </li>
           ))}
         </ul>
@@ -385,8 +495,30 @@ export function ChatPage() {
         ) : null}
 
         <div className="transcript" ref={transcriptRef}>
-          {detail === null ? (
-            <p className="muted">Pick a chat on the left, or start one from the catalogue.</p>
+          {creating && detail === null ? (
+            <div className="new-chat">
+              <h3>Start a new conversation</h3>
+              {sessions.length === 0 ? (
+                <>
+                  <p className="muted">
+                    No model is running. Start one from the catalogue — pick a model, review the
+                    price, and run it — then come back here.
+                  </p>
+                  <Link className="nav-link active" to="/catalogue">
+                    Open the catalogue
+                  </Link>
+                </>
+              ) : (
+                <p className="muted">
+                  Choose one of the running models in the selector above, then send the first
+                  message. The conversation appears in the list on the left.
+                </p>
+              )}
+            </div>
+          ) : null}
+
+          {detail === null && !creating ? (
+            <p className="muted">Pick a chat on the left, or start one with New.</p>
           ) : null}
           {detail?.messages.map((message) => (
             <article key={message.id} className={`bubble bubble-${message.role}`}>

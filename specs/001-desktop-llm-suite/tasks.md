@@ -387,7 +387,7 @@ to the other running model and confirm the switch notice appears in transcript a
 - [x] T169 Stream reasoning separately from content and render it in a collapsible block
 - [x] T170 Move conversation history into a chat sub-sidebar, mark conversations frozen when their model is gone, and drop the primary History entry
 - [x] T171 Restart-or-switch flow for frozen conversations, with a system notice inserted at the switch point and earlier replies left attributed to the previous model
-- [ ] T172 Add conversation rename, delete, and search to the chat sub-sidebar
+- [x] T172 Add conversation rename, delete, and search to the chat sub-sidebar
 - [ ] T173 Cover the frozen → restart and frozen → switch flows with Playwright E2E once the desktop harness runs in CI
 
 **Checkpoint**: Several models can run in parallel, every conversation is resumable, and no reply is

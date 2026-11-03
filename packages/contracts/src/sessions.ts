@@ -102,6 +102,8 @@ export const conversationSummarySchema = z.object({
   modelId: z.string().nullable(),
   updatedAt: z.string(),
   messageCount: z.number().int().nonnegative(),
+  /** Pinned conversations sort above the rest. */
+  pinned: z.boolean(),
   /** True when no session is running for this conversation's model. */
   frozen: z.boolean()
 });

@@ -103,4 +103,31 @@ describe("HistoryRepository", () => {
     expect(repository.getConversation(conversation.id)).toBeNull();
     expect(repository.searchConversations("temporary")).toHaveLength(0);
   });
+
+  it("keeps pinned conversations at the top of the list", () => {
+    const older = repository.createConversation({ title: "Older chat", origin: "app" });
+    const newer = repository.createConversation({ title: "Newer chat", origin: "app" });
+
+    expect(repository.listConversations().map((entry) => entry.id)).toEqual([newer.id, older.id]);
+
+    repository.setPinned(older.id, true);
+
+    const pinnedFirst = repository.listConversations();
+    expect(pinnedFirst.map((entry) => entry.id)).toEqual([older.id, newer.id]);
+    expect(pinnedFirst[0]?.pinned).toBe(true);
+    expect(pinnedFirst[1]?.pinned).toBe(false);
+
+    repository.setPinned(older.id, false);
+    expect(repository.listConversations().map((entry) => entry.id)).toEqual([newer.id, older.id]);
+  });
+
+  it("renames a conversation and rejects empty titles", () => {
+    const conversation = repository.createConversation({ title: "Draft", origin: "app" });
+
+    repository.renameConversation(conversation.id, "  Refactor notes  ");
+
+    expect(repository.listConversations()[0]).toMatchObject({ title: "Refactor notes" });
+    expect(() => repository.renameConversation(conversation.id, "   ")).toThrow(/between 1 and 200/);
+    expect(() => repository.renameConversation("missing", "Nope")).toThrow(/not found/);
+  });
 });

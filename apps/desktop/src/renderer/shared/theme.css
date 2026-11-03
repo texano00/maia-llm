@@ -701,6 +701,60 @@ nav {
   }
 }
 
+.history-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.15rem;
+}
+
+.history-actions {
+  display: flex;
+  gap: 0.1rem;
+}
+
+.icon-mini {
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 0.4rem;
+  background: transparent;
+  color: #8fa3c8;
+  font-size: 0.8rem;
+  line-height: 1;
+}
+
+.icon-mini:hover {
+  border-color: rgb(255 255 255 / 12%);
+  background: rgb(255 255 255 / 6%);
+  color: #e7ecf5;
+}
+
+.history-rename {
+  width: 100%;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid rgb(72 104 255 / 55%);
+  border-radius: 0.55rem;
+  background: rgb(8 11 18 / 90%);
+  color: #e7ecf5;
+  font-size: 0.8rem;
+}
+
+.new-chat {
+  display: grid;
+  gap: 0.6rem;
+  justify-items: start;
+  padding: 1rem 1.1rem;
+  border: 1px dashed rgb(255 255 255 / 16%);
+  border-radius: 0.8rem;
+}
+
+.new-chat h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
 .page,
 .fatal {
   display: grid;
