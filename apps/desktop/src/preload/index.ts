@@ -1,0 +1,57 @@
+import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
+import {
+  fail,
+  ipcChannels,
+  updateEventChannel,
+  updateStatusSchema,
+  type AppInfo,
+  type IpcChannel,
+  type Result,
+  type UpdateStatus
+} from "@maia/contracts";
+
+export interface MaiaBridge {
+  invoke<T = unknown>(channel: IpcChannel, payload?: unknown): Promise<Result<T>>;
+  getVersions(): Promise<AppInfo>;
+  /** Subscribes to update status pushes from the main process. */
+  onUpdateStatus(listener: (status: UpdateStatus) => void): () => void;
+}
+
+const allowedChannels = new Set<string>(ipcChannels);
+
+const bridge: MaiaBridge = {
+  async invoke<T = unknown>(channel: IpcChannel, payload?: unknown): Promise<Result<T>> {
+    if (!allowedChannels.has(channel)) {
+      return fail("VALIDATION_FAILED", `Unsupported IPC channel: ${channel}`, false) as Result<T>;
+    }
+
+    return (await ipcRenderer.invoke(channel, payload)) as Result<T>;
+  },
+
+  async getVersions(): Promise<AppInfo> {
+    const result = await bridge.invoke<AppInfo>("app.info");
+
+    if (!result.ok) {
+      throw new Error(result.error.message);
+    }
+
+    return result.data;
+  },
+
+  onUpdateStatus(listener: (status: UpdateStatus) => void): () => void {
+    const handler = (_event: IpcRendererEvent, payload: unknown): void => {
+      const parsed = updateStatusSchema.safeParse(payload);
+      if (parsed.success) {
+        listener(parsed.data);
+      }
+    };
+
+    ipcRenderer.on(updateEventChannel, handler);
+
+    return () => {
+      ipcRenderer.removeListener(updateEventChannel, handler);
+    };
+  }
+};
+
+contextBridge.exposeInMainWorld("maia", bridge);

@@ -7,9 +7,20 @@ on:
         description: "Version label for this development build"
         required: false
         default: "0.1.0-dev"
+      channel:
+        description: "Release channel used when publishing"
+        type: choice
+        options:
+          - stable
+          - beta
+        default: stable
+      publish_release:
+        description: "Publish a GitHub release so installed clients can update"
+        type: boolean
+        default: false
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -39,3 +50,30 @@ jobs:
             apps/desktop/release/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 14
+      - name: Publish GitHub release
+        if: ${{ inputs.publish_release }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CHANNEL: ${{ inputs.channel }}
+        run: |
+          $version = (Get-Content apps/desktop/package.json | ConvertFrom-Json).version
+          $tag = "v$version"
+          $assets = @(
+            "apps/desktop/release/MaiaLLM-Setup-$version-x64.exe",
+            "apps/desktop/release/MaiaLLM-Setup-$version-x64.exe.blockmap",
+            "apps/desktop/release/latest.yml",
+            "apps/desktop/release/SHA256SUMS.txt"
+          )
+          foreach ($asset in $assets) {
+            if (-not (Test-Path $asset)) { throw "Missing release asset: $asset" }
+          }
+
+          gh release view $tag 2>$null | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            $flags = @("--title", "Maia LLM $version", "--notes", "Automated build $env:GITHUB_RUN_NUMBER.")
+            if ($env:CHANNEL -eq "beta") { $flags += "--prerelease" } else { $flags += "--latest" }
+            gh release create $tag --target $env:GITHUB_SHA @flags
+          }
+
+          gh release upload $tag $assets --clobber

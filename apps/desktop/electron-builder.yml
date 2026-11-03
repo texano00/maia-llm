@@ -1,0 +1,45 @@
+appId: com.texano00.maiallm
+productName: Maia LLM
+copyright: Copyright © 2026 texano00
+
+directories:
+  output: release
+  buildResources: resources
+
+files:
+  - out/**/*
+
+asar: true
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  # Code signing is supplied by CSC_LINK and CSC_KEY_PASSWORD in the protected
+  # release environment. Local builds use CSC_IDENTITY_AUTO_DISCOVERY=false.
+
+nsis:
+  artifactName: MaiaLLM-Setup-${version}-${arch}.${ext}
+  include: resources/installer.nsh
+  oneClick: false
+  perMachine: false
+  packElevateHelper: false
+  # Upgrades reuse the detected install folder, so the assisted installer only
+  # needs a single confirmation step. See resources/installer.nsh.
+  allowToChangeInstallationDirectory: false
+  differentialPackage: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Maia LLM
+  runAfterFinish: true
+  deleteAppDataOnUninstall: false
+
+msi:
+  artifactName: MaiaLLM-${version}-${arch}.${ext}
+
+publish:
+  provider: github
+  owner: texano00
+  repo: maia-llm
+  releaseType: draft
