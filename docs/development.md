@@ -77,3 +77,25 @@ prerelease, which is only offered to installations running with
 
 To exercise the banner without publishing, run the desktop in development mode
 with `MAIA_UPDATE_SIMULATE_VERSION=9.9.9`.
+
+### Watching a packaged build from another machine
+
+The telemetry API doubles as a diagnostic sink during testing. Start it so it
+accepts connections from the Windows host, then launch the desktop app with
+`MAIA_DIAGNOSTIC_LOG_URL` pointing at it:
+
+```bash
+# terminal 1: keep it running while you test
+TELEMETRY_HOST=0.0.0.0 npm run -w @maia/telemetry-api dev
+```
+
+```powershell
+# PowerShell on Windows: every app log line is mirrored to terminal 1
+$env:MAIA_DIAGNOSTIC_LOG_URL = "http://localhost:8787/v1/diagnostics/logs"
+Start-Process "$env:LOCALAPPDATA\Programs\Maia LLM\Maia LLM.exe"
+```
+
+The endpoint echoes events as `[diag] <time> <level> <message>`, keeps the last
+1000 lines in memory, and returns them from
+`GET /v1/diagnostics/logs?limit=200`. Nothing is persisted. `MAIA_UPDATE_FEED_URL`
+likewise overrides the update feed when testing a mirror.

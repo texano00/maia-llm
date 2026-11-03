@@ -1,6 +1,6 @@
 {
   "name": "@maia/desktop",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "private": true,
   "productName": "Maia LLM",
   "description": "Maia LLM desktop client",

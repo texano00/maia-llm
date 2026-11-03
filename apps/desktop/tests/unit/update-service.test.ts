@@ -19,6 +19,7 @@ class FakeUpdater implements UpdaterLike {
   checkResult: UpdaterCheckResult | null = { updateInfo: { version: "0.2.0" } };
   checkError: Error | null = null;
   downloadError: Error | null = null;
+  holdCheck = false;
   checkCalls = 0;
   downloadCalls = 0;
   quitCalls: Array<{ isSilent?: boolean; isForceRunAfter?: boolean }> = [];
@@ -47,6 +48,10 @@ class FakeUpdater implements UpdaterLike {
     this.checkCalls += 1;
     if (this.checkError) {
       throw this.checkError;
+    }
+
+    if (this.holdCheck) {
+      return new Promise<UpdaterCheckResult | null>(() => undefined);
     }
 
     this.emit("checking-for-update");
@@ -175,6 +180,17 @@ describe("UpdateService", () => {
     expect(status.phase).toBe("error");
     expect(status.errorMessage).toContain("HTTP 404");
     expect(status.errorMessage).toContain("private repositories");
+  });
+
+  it("times out instead of staying on \"checking\" forever", async () => {
+    const updater = new FakeUpdater();
+    updater.holdCheck = true;
+
+    const { service } = createService(updater, { checkTimeoutMs: 25 });
+    const status = await service.check();
+
+    expect(status.phase).toBe("error");
+    expect(status.errorMessage).toContain("No response from the update feed");
   });
 
   it("downloads with progress, then installs on request", async () => {

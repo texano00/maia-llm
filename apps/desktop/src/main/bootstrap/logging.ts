@@ -1,11 +1,23 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import pino, { type Logger } from "pino";
+import { DiagnosticForwarder } from "../services/diagnostics/forwarder";
 import type { AppPaths } from "./paths";
 
 export type { Logger };
 
-export function createLogger(paths: AppPaths, level = process.env.LOG_LEVEL ?? "info"): Logger {
+export interface DiagnosticsOptions {
+  url: string;
+  appVersion: string;
+  platform: string;
+}
+
+export interface LoggerOptions {
+  level?: string;
+  diagnostics?: DiagnosticsOptions | undefined;
+}
+
+export function createLogger(paths: AppPaths, options: LoggerOptions = {}): Logger {
   mkdirSync(paths.logsDir, { recursive: true });
 
   const destination = pino.destination({
@@ -13,9 +25,18 @@ export function createLogger(paths: AppPaths, level = process.env.LOG_LEVEL ?? "
     sync: true
   });
 
+  const streams: pino.StreamEntry[] = [{ level: "trace", stream: destination }];
+
+  if (options.diagnostics) {
+    streams.push({
+      level: "trace",
+      stream: new DiagnosticForwarder(options.diagnostics)
+    });
+  }
+
   return pino(
     {
-      level,
+      level: options.level ?? process.env.LOG_LEVEL ?? "info",
       redact: {
         paths: [
           "*.apiKey",
@@ -28,6 +49,6 @@ export function createLogger(paths: AppPaths, level = process.env.LOG_LEVEL ?? "
         censor: "[REDACTED]"
       }
     },
-    destination
+    pino.multistream(streams)
   );
 }

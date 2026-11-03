@@ -1,10 +1,12 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import { pathToFileURL } from "node:url";
+import { registerDiagnosticsRoutes } from "./diagnostics.js";
 
 export function buildServer(): FastifyInstance {
   const app = Fastify({ logger: process.env.NODE_ENV !== "test" });
 
   app.get("/health", async () => ({ status: "ok" }));
+  registerDiagnosticsRoutes(app);
 
   return app;
 }

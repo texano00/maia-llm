@@ -64,7 +64,13 @@ export interface UpdateServiceOptions {
   /** False when the build cannot self-update; callers can pre-empt the failure. */
   supported?: boolean | undefined;
   now?: (() => Date) | undefined;
+  /** Guards against a feed request that never settles. */
+  checkTimeoutMs?: number | undefined;
+  downloadTimeoutMs?: number | undefined;
 }
+
+const DEFAULT_CHECK_TIMEOUT_MS = 20_000;
+const DEFAULT_DOWNLOAD_TIMEOUT_MS = 30 * 60_000;
 
 const MAX_RELEASE_NOTES_LENGTH = 1200;
 
@@ -76,6 +82,8 @@ export class UpdateService {
   private readonly logger: UpdateLogger | undefined;
   private readonly simulatedVersion: string | undefined;
   private readonly now: () => Date;
+  private readonly checkTimeoutMs: number;
+  private readonly downloadTimeoutMs: number;
   private readonly listeners: Array<{ event: UpdaterEvent; listener: (payload?: unknown) => void }> = [];
 
   private status: UpdateStatus;
@@ -89,6 +97,8 @@ export class UpdateService {
     this.logger = options.logger;
     this.simulatedVersion = options.simulatedVersion;
     this.now = options.now ?? (() => new Date());
+    this.checkTimeoutMs = options.checkTimeoutMs ?? DEFAULT_CHECK_TIMEOUT_MS;
+    this.downloadTimeoutMs = options.downloadTimeoutMs ?? DEFAULT_DOWNLOAD_TIMEOUT_MS;
 
     this.status = {
       phase: "idle",
@@ -131,7 +141,11 @@ export class UpdateService {
     this.update({ phase: "downloading", progressPercent: 0, bytesPerSecond: undefined });
 
     try {
-      await this.updater.downloadUpdate();
+      await withTimeout(
+        this.updater.downloadUpdate(),
+        this.downloadTimeoutMs,
+        "The update download stalled. Check the network connection and try again."
+      );
     } catch (error) {
       this.fail(error, "Update download failed");
     }
@@ -172,7 +186,11 @@ export class UpdateService {
     this.update({ phase: "checking", errorMessage: undefined });
 
     try {
-      const result = await this.updater.checkForUpdates();
+      const result = await withTimeout(
+        this.updater.checkForUpdates(),
+        this.checkTimeoutMs,
+        `No response from the update feed after ${Math.round(this.checkTimeoutMs / 1000)} s. Check the network connection or proxy settings.`
+      );
 
       if (result === null) {
         return this.update({ phase: "idle", supported: false });
@@ -337,6 +355,27 @@ function toMessage(error: unknown, fallback: string): string {
   }
 
   return fallback;
+}
+
+/**
+ * The update transports have no timeout of their own, so a stalled socket would
+ * leave the UI on "checking" forever. Race every network step against a timer.
+ */
+async function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), ms);
+    timer.unref?.();
+  });
+
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
 }
 
 /**
