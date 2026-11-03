@@ -95,8 +95,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     []
   );
 
+  // Sort and feature changes are instant; typing is debounced so the live
+  // Hugging Face search is not called on every keystroke.
   useEffect(() => {
-    void loadCatalogue(search, sort, capability);
+    const timer = setTimeout(() => {
+      void loadCatalogue(search, sort, capability);
+    }, search.length > 0 ? 400 : 0);
+
+    return () => clearTimeout(timer);
   }, [capability, loadCatalogue, search, sort]);
 
   useEffect(() => {

@@ -887,3 +887,155 @@ button {
 button:hover {
   background: rgb(72 104 255 / 34%);
 }
+
+/* ---------------------------------------------------------------------------
+   Spacing scale
+
+   One rhythm for every page: 0.5rem inside controls, 1rem between related
+   blocks, 1.5rem between sections. Later rules intentionally win over the
+   earlier component styles.
+--------------------------------------------------------------------------- */
+.page {
+  gap: 1.5rem;
+  padding: 2.5rem 2.75rem 3rem;
+  max-width: 1120px;
+}
+
+.page > section {
+  display: grid;
+  gap: 1.5rem;
+  align-content: start;
+}
+
+.page .eyebrow {
+  margin: 0 0 -1rem;
+}
+
+.page h1 {
+  margin: 0;
+}
+
+.page .lede {
+  margin: 0;
+  max-width: 72ch;
+}
+
+.settings-card {
+  gap: 1.5rem;
+  padding: 1.5rem 1.75rem;
+}
+
+.settings-card h2 {
+  margin: 0 0 0.5rem;
+}
+
+.settings-card .lede + .field {
+  margin-top: 1.25rem;
+}
+
+.field {
+  gap: 0.5rem;
+  margin-top: 1.25rem;
+}
+
+.field input {
+  padding: 0.7rem 0.85rem;
+}
+
+.field-hint,
+.field-error {
+  margin-top: 0.6rem;
+  line-height: 1.5;
+}
+
+.toolbar {
+  gap: 0.75rem;
+  padding: 0;
+}
+
+.catalogue-grid {
+  gap: 1.5rem;
+}
+
+.panel {
+  gap: 1.25rem;
+  padding: 1.5rem 1.75rem;
+}
+
+.panel h2 {
+  margin: 0;
+}
+
+.estimate-card {
+  gap: 1rem;
+  padding-top: 1.25rem;
+}
+
+.estimate-card ul {
+  margin: 0;
+  padding-left: 1.1rem;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.model-list {
+  gap: 0.6rem;
+}
+
+.model-row {
+  gap: 0.35rem;
+  padding: 0.85rem 1rem;
+}
+
+.chat-layout {
+  gap: 1.5rem;
+}
+
+.chat-main {
+  gap: 1rem;
+}
+
+.session-bar {
+  gap: 0.6rem;
+  padding: 0.25rem 0;
+}
+
+.session-log {
+  padding: 0.9rem 1.1rem;
+}
+
+.session-log ol {
+  gap: 0.4rem;
+  margin-top: 0.75rem;
+}
+
+.transcript {
+  gap: 1rem;
+  padding: 0.25rem 0.35rem 0.25rem 0;
+}
+
+.bubble {
+  padding: 0.9rem 1.1rem;
+}
+
+.composer {
+  gap: 0.75rem;
+}
+
+.update-actions {
+  gap: 0.75rem;
+}
+
+.chat-history {
+  gap: 0.75rem;
+  padding: 1rem;
+}
+
+.chat-history ul {
+  gap: 0.35rem;
+}
+
+.alert {
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+}

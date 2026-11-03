@@ -167,3 +167,83 @@ describe("CatalogueService cache", () => {
     expect(detail.stale).toBe(false);
   });
 });
+
+describe("CatalogueService remote search", () => {
+  let db: DatabaseConnection;
+  let repository: CatalogueRepository;
+
+  beforeEach(() => {
+    db = openDatabase(":memory:");
+    repository = new CatalogueRepository(db);
+  });
+
+  afterEach(() => {
+    closeDatabase(db);
+  });
+
+  it("asks the provider for the search term and caches the results", async () => {
+    const terms: Array<string | undefined> = [];
+    const source: CatalogueSource = {
+      async listModels(options) {
+        terms.push(options.search);
+        return [{ ...payload, id: `result/${options.search ?? "all"}` }];
+      },
+      async getModel(id) {
+        return { model: { ...payload, id }, files: [] };
+      }
+    };
+
+    const service = new CatalogueService({
+      repository,
+      source,
+      now: () => new Date("2026-11-04T10:00:00.000Z")
+    });
+
+    const result = await service.search({ search: "mistral" });
+
+    expect(terms.at(-1)).toBe("mistral");
+    expect(result.models.map((model) => model.id)).toContain("result/mistral");
+    expect(result.stale).toBe(false);
+
+    // The fetched model is now part of the offline snapshot.
+    expect(repository.get("result/mistral")).not.toBeNull();
+  });
+
+  it("falls back to the cached snapshot when the search request fails", async () => {
+    const cached: CatalogueSource = {
+      async listModels() {
+        return [payload];
+      },
+      async getModel() {
+        throw new Error("unused");
+      }
+    };
+
+    const service = new CatalogueService({
+      repository,
+      source: cached,
+      now: () => new Date("2026-11-04T10:00:00.000Z")
+    });
+    await service.search({});
+
+    const failing: CatalogueSource = {
+      async listModels() {
+        throw new Error("network down");
+      },
+      async getModel() {
+        throw new Error("network down");
+      }
+    };
+
+    const offline = new CatalogueService({
+      repository,
+      source: failing,
+      now: () => new Date("2026-11-04T11:00:00.000Z")
+    });
+
+    const result = await offline.search({ search: "qwen" });
+
+    expect(result.stale).toBe(true);
+    expect(result.models.map((model) => model.id)).toContain(payload.id);
+  });
+});

@@ -20,9 +20,9 @@ export interface CatalogueServiceOptions {
 const ACCEPTED_LICENSES = new Set<string>();
 
 /**
- * Search is served from the SQLite snapshot; the network is only consulted when
- * the snapshot is older than the TTL or when the user asks for a refresh. A
- * failed refresh never hides the cache — it is returned with `stale: true`.
+ * The SQLite snapshot serves instant results and offline browsing; a search term
+ * is also sent to the provider so models outside the cached page can be found.
+ * A failed request never hides the cache — it is returned with `stale: true`.
  */
 export class CatalogueService {
   private readonly now: () => Date;
@@ -33,28 +33,41 @@ export class CatalogueService {
 
   async search(query: CatalogueQuery = {}): Promise<CatalogueResult> {
     const ttlMs = this.options.ttlMs;
-    if (!this.options.repository.isFresh(ttlMs, this.now())) {
+    const term = query.search?.trim() ?? "";
+    const needsRefresh = term.length >= 2 || !this.options.repository.isFresh(ttlMs, this.now());
+    let stale = !this.options.repository.isFresh(ttlMs, this.now());
+
+    if (needsRefresh) {
       try {
-        await this.refresh();
+        await this.refreshInto(term);
+        stale = false;
       } catch (error) {
         this.options.logger?.warn("Catalogue refresh failed; serving the cached snapshot", {
+          search: term,
           message: errorMessage(error)
         });
+        stale = true;
       }
     }
 
     const { models, cachedAt } = this.options.repository.list();
-    const expected = this.options.repository.isFresh(ttlMs, this.now());
 
     return {
       models: filterAndSort(models, query),
-      stale: !expected,
+      stale,
       fetchedAt: cachedAt ?? this.now().toISOString()
     };
   }
 
   async refresh(): Promise<CatalogueResult> {
-    const payloads = await this.options.source.listModels({ limit: 100 });
+    return this.refreshInto("");
+  }
+
+  private async refreshInto(search: string): Promise<CatalogueResult> {
+    const payloads = await this.options.source.listModels({
+      limit: 100,
+      ...(search.length > 0 ? { search } : {})
+    });
     const cachedAt = this.now().toISOString();
     const models = payloads.map((payload) => mapHuggingFaceModel(payload, cachedAt));
 

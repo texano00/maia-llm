@@ -24,7 +24,10 @@ export function SettingsPage() {
   const [hfToken, setHfToken] = useState("");
   const [vastKey, setVastKey] = useState("");
   const [credentialStatus, setCredentialStatus] = useState<CredentialStatus | null>(null);
-  const [credentialMessage, setCredentialMessage] = useState<string | null>(null);
+  const [hfMessage, setHfMessage] = useState<string | null>(null);
+  const [vastMessage, setVastMessage] = useState<string | null>(null);
+  const [hfError, setHfError] = useState<string | null>(null);
+  const [vastError, setVastError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -73,9 +76,11 @@ export function SettingsPage() {
     if (result.ok) {
       setCredentialStatus(result.data);
       setHfToken("");
-      setCredentialMessage("Token saved in the OS credential vault.");
+      setHfError(null);
+      setHfMessage("Token saved in the OS credential vault.");
     } else {
-      setError(result.error.message);
+      setHfMessage(null);
+      setHfError(result.error.message);
     }
   }
 
@@ -93,11 +98,11 @@ export function SettingsPage() {
     if (result.ok) {
       setCredentialStatus(result.data);
       setVastKey("");
-      setCredentialMessage(
-        "vast.ai key saved. Restart Maia LLM to rent real GPUs with this key."
-      );
+      setVastError(null);
+      setVastMessage("vast.ai key saved. Restart Maia LLM to rent real GPUs with this key.");
     } else {
-      setError(result.error.message);
+      setVastMessage(null);
+      setVastError(result.error.message);
     }
   }
 
@@ -106,9 +111,12 @@ export function SettingsPage() {
       provider: "vastai"
     });
 
-    if (result) {
-      setCredentialMessage(result.ok ? result.data.message : result.error.message);
+    if (!result) {
+      return;
     }
+
+    setVastMessage(result.ok ? result.data.message : result.error.message);
+    setVastError(result.ok ? null : result.error.message);
   }
 
   async function testHuggingFaceToken(): Promise<void> {
@@ -120,7 +128,8 @@ export function SettingsPage() {
       return;
     }
 
-    setCredentialMessage(result.ok ? result.data.message : result.error.message);
+    setHfMessage(result.ok ? result.data.message : result.error.message);
+    setHfError(result.ok ? null : result.error.message);
   }
 
   function applyGpuFilters(filters: GpuFilters): void {
@@ -265,8 +274,8 @@ export function SettingsPage() {
           <p className="field-hint">
             Status: {credentialStatus?.vastai ? "key stored" : "no key stored — simulated GPU only"}
           </p>
-          {credentialMessage ? <p className="field-hint">{credentialMessage}</p> : null}
-          {error ? <p className="field-error">{error}</p> : null}
+          {vastMessage ? <p className="field-hint">{vastMessage}</p> : null}
+          {vastError ? <p className="field-error">{vastError}</p> : null}
         </div>
         <div className="update-actions">
           <button type="submit" disabled={!bridgeAvailable || vastKey.trim().length === 0}>
@@ -310,8 +319,8 @@ export function SettingsPage() {
           <p className="field-hint">
             Status: {credentialStatus?.huggingface ? "token stored" : "no token stored"}
           </p>
-          {credentialMessage ? <p className="field-hint">{credentialMessage}</p> : null}
-          {error ? <p className="field-error">{error}</p> : null}
+          {hfMessage ? <p className="field-hint">{hfMessage}</p> : null}
+          {hfError ? <p className="field-error">{hfError}</p> : null}
         </div>
         <div className="update-actions">
           <button type="submit" disabled={!bridgeAvailable || hfToken.trim().length === 0}>
