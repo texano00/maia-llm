@@ -35,6 +35,17 @@ let appLogger: ReturnType<typeof createLogger> | null = null;
 app.setName("Maia LLM");
 app.setAppUserModelId("com.texano00.maiallm");
 
+// A desktop app should not show Electron's default modal for a stray error in a
+// log sink or a teardown callback. Record it on stderr and keep the window alive;
+// the same message still reaches the diagnostic stream when logging is healthy.
+process.on("uncaughtException", (error) => {
+  console.error("[maia] uncaught exception", error);
+});
+
+process.on("unhandledRejection", (reason) => {
+  console.error("[maia] unhandled rejection", reason);
+});
+
 /**
  * The suite ships its own navigation, so the default Electron menu (File, Edit,
  * View, Window) is removed on Windows and Linux. macOS keeps the minimal app
@@ -210,7 +221,7 @@ async function bootstrap(): Promise<void> {
 
     updates?.dispose();
     updates = null;
-    diagnostics?.end();
+    diagnostics?.stop();
     diagnostics = null;
     registry?.dispose();
     if (database) {

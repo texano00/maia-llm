@@ -156,4 +156,19 @@ describe("DiagnosticForwarder", () => {
 
     expect(calls.at(-1)?.url).toBe("https://logs.example.dev/v1/diagnostics/logs");
   });
+
+  it("ignores writes after stop instead of ending the stream", async () => {
+    const { forwarder, calls } = createForwarder();
+
+    forwarder.stop();
+
+    // pino keeps logging while the app quits; a write after end() would throw
+    // ERR_STREAM_WRITE_AFTER_END inside the main process.
+    expect(() =>
+      forwarder.write(`${JSON.stringify({ level: 30, time: 10, msg: "after stop" })}\n`)
+    ).not.toThrow();
+
+    await expect(forwarder.flush()).resolves.toBeUndefined();
+    expect(calls).toHaveLength(0);
+  });
 });

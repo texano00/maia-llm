@@ -159,7 +159,9 @@ export class UpdateService {
     }
 
     this.logger?.info("Restarting to apply update", { version: this.status.latestVersion });
-    this.updater.quitAndInstall(false, true);
+    // Silent install: setup reuses the detected folder and shows no UI while the
+    // user is already in the app. The second flag relaunches Maia afterwards.
+    this.updater.quitAndInstall(true, true);
     return this.getStatus();
   }
 

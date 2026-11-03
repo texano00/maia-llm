@@ -47,6 +47,7 @@ export class DiagnosticForwarder extends Writable {
   private buffer: DiagnosticEvent[] = [];
   private timer: NodeJS.Timeout | null = null;
   private sending = false;
+  private stopped = false;
   private url: string;
 
   constructor(options: DiagnosticForwarderOptions) {
@@ -67,6 +68,24 @@ export class DiagnosticForwarder extends Writable {
       void this.flush();
     }, this.options.flushIntervalMs);
     this.timer.unref?.();
+
+    // A failure to mirror logs must never surface as an unhandled stream error.
+    this.on("error", () => undefined);
+  }
+
+  /**
+   * Shuts the mirror down without ending the stream. pino keeps writing while
+   * the app quits (electron-updater logs during install), and a `write` after
+   * `end()` throws ERR_STREAM_WRITE_AFTER_END inside the main process.
+   */
+  stop(): void {
+    this.stopped = true;
+    this.buffer = [];
+
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.timer = null;
+    }
   }
 
   getUrl(): string {
@@ -86,6 +105,11 @@ export class DiagnosticForwarder extends Writable {
     _encoding: BufferEncoding,
     callback: (error?: Error | null) => void
   ): void {
+    if (this.stopped) {
+      callback();
+      return;
+    }
+
     try {
       const line = typeof chunk === "string" ? chunk : chunk.toString("utf8");
       const event = toDiagnosticEvent(line);
@@ -107,16 +131,12 @@ export class DiagnosticForwarder extends Writable {
   }
 
   override _final(callback: (error?: Error | null) => void): void {
-    if (this.timer) {
-      clearInterval(this.timer);
-      this.timer = null;
-    }
-
+    this.stop();
     void this.flush().finally(() => callback());
   }
 
   async flush(): Promise<void> {
-    if (this.sending || this.buffer.length === 0) {
+    if (this.stopped || this.sending || this.buffer.length === 0) {
       return;
     }
 

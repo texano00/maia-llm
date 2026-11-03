@@ -212,7 +212,7 @@ describe("UpdateService", () => {
 
     service.install();
 
-    expect(updater.quitCalls).toEqual([{ isSilent: false, isForceRunAfter: true }]);
+    expect(updater.quitCalls).toEqual([{ isSilent: true, isForceRunAfter: true }]);
   });
 
   it("ignores downloads when no update is available", async () => {
