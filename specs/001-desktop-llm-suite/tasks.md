@@ -323,7 +323,7 @@ description: "Task list for Desktop LLM Suite implementation"
 - [ ] T147 [P] Add cross-platform packaging dry runs for macOS and Linux in `.github/workflows/desktop-ci.yml` and `apps/desktop/electron-builder.yml`
 - [ ] T148 Run `quickstart.md` scenarios V1–V9 and record results in `docs/validation-report.md`
 - [ ] T149 Remove mock-only branches from the production bundle and finalize tree-shaking in `apps/desktop/src/main/services/providers/mock.ts`
-- [ ] T150 Update `README.md` with download, install, update, and channel instructions
+- [x] T150 Update `README.md` with download, install, update, and channel instructions
 
 ---
 
