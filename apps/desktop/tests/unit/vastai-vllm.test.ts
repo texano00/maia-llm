@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   buildSearchQuery,
   estimateGpuRamGb,
+  readCountry,
   readMappedPort,
   readPublicHost,
   toComputeOffer
 } from "../../src/main/services/providers/vastai/client";
+import { modelPath } from "../../src/main/services/catalogue/huggingface-source";
 import { createVllmRuntime, parseChunk, parseSseStream } from "../../src/main/services/inference/vllm";
 
 const filters = {
@@ -20,15 +22,14 @@ describe("vast.ai offer search", () => {
     const query = buildSearchQuery({ gpu_ram_gb: 24, maxHourlyMicroUsd: 1_500_000, filters });
 
     expect(query).toMatchObject({
-      rentable: { eq: true },
-      verified: { eq: true },
       num_gpus: { eq: 1 },
       gpu_ram: { gte: 24 * 1024 },
       dph_total: { lte: 1.5 },
       reliability2: { gte: 0.95 },
-      geolocation: { in: ["IT", "DE"] },
-      datacenter: { in: ["trusted-it"] }
+      geolocation: { in: ["IT", "DE"] }
     });
+    // Non-numeric trusted "datacenter" entries cannot be matched to a machine id.
+    expect(query.machine_id).toEqual({ in: [] });
   });
 
   it("sends no constraints when the user has no filters", () => {
@@ -37,7 +38,7 @@ describe("vast.ai offer search", () => {
     expect(query.dph_total).toBeUndefined();
     expect(query.reliability2).toBeUndefined();
     expect(query.geolocation).toBeUndefined();
-    expect(query.datacenter).toBeUndefined();
+    expect(query.machine_id).toBeUndefined();
   });
 
   it("maps an offer payload and ignores incomplete ones", () => {
@@ -52,6 +53,18 @@ describe("vast.ai offer search", () => {
     });
 
     expect(toComputeOffer({ id: 1 })).toBeNull();
+  });
+
+  it("reads the country out of the geolocation label", () => {
+    expect(readCountry("Italy, IT")).toBe("IT");
+    expect(readCountry(", CN")).toBe("CN");
+    expect(readCountry("")).toBeNull();
+    expect(readCountry(undefined)).toBeNull();
+  });
+
+  it("keeps the Hugging Face namespace slash literal", () => {
+    expect(modelPath("Qwen/Qwen2.5-7B-Instruct")).toBe("Qwen/Qwen2.5-7B-Instruct");
+    expect(modelPath("a b/c d")).toBe("a%20b/c%20d");
   });
 
   it("sizes VRAM from the parameter count", () => {

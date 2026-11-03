@@ -161,6 +161,13 @@ export function CataloguePage() {
                 </div>
               </dl>
 
+              {selected.artifacts.some((artifact) => artifact.format === "gguf") &&
+              !selected.artifacts.some((artifact) => artifact.format === "safetensors") ? (
+                <p className="pill pill-warning">
+                  GGUF-only repository — the current vLLM runtime may not load it
+                </p>
+              ) : null}
+
               {selected.artifacts.length > 0 ? (
                 <ul className="artifact-list">
                   {selected.artifacts.slice(0, 4).map((artifact) => (

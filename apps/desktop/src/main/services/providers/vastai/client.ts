@@ -43,11 +43,8 @@ export interface VastAiSearchQuery {
 
 export function buildSearchQuery(input: VastAiSearchQuery): Record<string, unknown> {
   const q: Record<string, unknown> = {
-    rentable: { eq: true },
-    verified: { eq: true },
     num_gpus: { eq: 1 },
-    gpu_ram: { gte: input.gpu_ram_gb * 1024 },
-    order: [["dph_total", "asc"]]
+    gpu_ram: { gte: input.gpu_ram_gb * 1024 }
   };
 
   if (input.maxHourlyMicroUsd !== null) {
@@ -60,12 +57,26 @@ export function buildSearchQuery(input: VastAiSearchQuery): Record<string, unkno
     q.geolocation = { in: input.filters.countries.map((country) => country.toUpperCase()) };
   }
   if (input.filters && input.filters.datacenters.length > 0) {
-    // Datacenter names are free-form on vast.ai; match them with `in` on the
-    // machine ids the user saved as trusted names via the offers listing.
-    q.datacenter = { in: input.filters.datacenters };
+    // Offers do not expose datacenter names, so trusted entries are matched
+    // against the machine id of each offer by the caller.
+    q.machine_id = {
+      in: input.filters.datacenters
+        .map((entry) => Number(entry))
+        .filter((value) => Number.isFinite(value))
+    };
   }
 
   return q;
+}
+
+/** `geolocation` arrives as "Italy, IT"; the ISO code is the last segment. */
+export function readCountry(geolocation: string | undefined): string | null {
+  if (!geolocation) {
+    return null;
+  }
+
+  const code = geolocation.split(",").pop()?.trim().toUpperCase();
+  return code && code.length >= 2 ? code : null;
 }
 
 export function toComputeOffer(payload: VastAiOfferPayload): ComputeOffer | null {
@@ -103,12 +114,15 @@ export class VastAiClient {
     return response.ok;
   }
 
+  /**
+   * Offers live at `GET /api/v0/bundles/?q=<json>`; the older
+   * `PUT /api/v0/search/offers/` route now returns 404.
+   */
   async searchOffers(query: Record<string, unknown>): Promise<VastAiOfferPayload[]> {
-    const response = await this.http.request("/api/v0/search/offers/", {
-      method: "PUT",
-      headers: { ...this.authHeaders(), "content-type": "application/json" },
-      body: JSON.stringify({ q: query })
-    });
+    const response = await this.http.request(
+      `/api/v0/bundles/?q=${encodeURIComponent(JSON.stringify(query))}`,
+      { headers: this.authHeaders() }
+    );
 
     const payload = (await response.json()) as { offers?: VastAiOfferPayload[] };
     if (!Array.isArray(payload.offers)) {
@@ -149,31 +163,51 @@ export class VastAiClient {
     return payload.new_contract;
   }
 
+  /**
+   * `GET /api/v0/instances/` is deprecated in favour of `/api/v1/instances/`,
+   * so listing and filtering by id is the shape that stays valid.
+   */
   async getInstance(instanceId: number): Promise<VastAiInstancePayload> {
-    const response = await this.http.request(`/api/v0/instances/${instanceId}/`, {
+    const response = await this.http.request("/api/v1/instances/", {
       headers: this.authHeaders()
     });
 
-    const payload = (await response.json()) as
-      | VastAiInstancePayload
-      | { instances?: VastAiInstancePayload[] };
+    const payload = (await response.json()) as {
+      instances?: VastAiInstancePayload[] | Record<string, VastAiInstancePayload> | null;
+    };
 
-    if (payload !== null && typeof payload === "object" && "instances" in payload) {
-      const [found] = payload.instances ?? [];
-      if (!found) {
-        throw new Error(`vast.ai instance ${instanceId} is not visible any more.`);
-      }
-      return found;
+    const instances = payload.instances;
+    const list: VastAiInstancePayload[] = Array.isArray(instances)
+      ? instances
+      : instances
+        ? Object.values(instances)
+        : [];
+
+    const found = list.find((instance) => instance.id === instanceId);
+    if (!found) {
+      throw new Error(`vast.ai instance ${instanceId} is not visible any more.`);
     }
 
-    return payload as VastAiInstancePayload;
+    return found;
   }
 
   async destroyInstance(instanceId: number): Promise<void> {
-    await this.http.request(`/api/v0/instances/${instanceId}/`, {
-      method: "DELETE",
-      headers: this.authHeaders()
-    });
+    try {
+      await this.http.request(`/api/v0/instances/${instanceId}/`, {
+        method: "DELETE",
+        headers: this.authHeaders()
+      });
+    } catch (error) {
+      const status = (error as { status?: number }).status;
+      if (status !== 404 && status !== 410) {
+        throw error;
+      }
+
+      await this.http.request(`/api/v1/instances/${instanceId}/`, {
+        method: "DELETE",
+        headers: this.authHeaders()
+      });
+    }
   }
 
   private authHeaders(): Record<string, string> {

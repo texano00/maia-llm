@@ -12,6 +12,18 @@ interface HuggingFaceDetailPayload extends HuggingFaceModelPayload {
   siblings?: HuggingFaceSibling[];
 }
 
+/**
+ * Hugging Face routes keep the namespace slash literal; encoding it as %2F makes
+ * the API answer 400/404, which surfaced as "Provider request failed" whenever a
+ * model was selected.
+ */
+export function modelPath(id: string): string {
+  return id
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+}
+
 export interface HuggingFaceSourceOptions {
   /** Resolved lazily so a token saved in Settings applies without a restart. */
   getToken?: () => Promise<string | undefined>;
@@ -52,7 +64,7 @@ export function createHuggingFaceSource(options: HuggingFaceSourceOptions = {}):
     },
 
     async getModel(id) {
-      const response = await client.request(`/api/models/${encodeURIComponent(id)}?blobs=true`, {
+      const response = await client.request(`/api/models/${modelPath(id)}?blobs=true`, {
         headers: await headers()
       });
 
