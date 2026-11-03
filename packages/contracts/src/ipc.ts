@@ -48,6 +48,7 @@ export const updatePhaseSchema = z.enum([
   "available",
   "downloading",
   "ready",
+  "installing",
   "error"
 ]);
 

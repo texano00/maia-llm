@@ -37,7 +37,10 @@ export function InfoButton() {
     };
   }, [open]);
 
-  const busy = status?.phase === "checking" || status?.phase === "downloading";
+  const busy =
+    status?.phase === "checking" ||
+    status?.phase === "downloading" ||
+    status?.phase === "installing";
 
   return (
     <div className="info" ref={containerRef}>
@@ -91,6 +94,10 @@ export function InfoButton() {
             ) : status?.phase === "ready" ? (
               <button type="button" className="ghost-button" onClick={() => void install()}>
                 Restart and install
+              </button>
+            ) : status?.phase === "installing" ? (
+              <button type="button" className="ghost-button" disabled>
+                Installing…
               </button>
             ) : (
               <button

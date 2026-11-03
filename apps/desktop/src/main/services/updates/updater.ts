@@ -67,10 +67,13 @@ export interface UpdateServiceOptions {
   /** Guards against a feed request that never settles. */
   checkTimeoutMs?: number | undefined;
   downloadTimeoutMs?: number | undefined;
+  /** How long to wait for the installer to take over before reporting a failure. */
+  installWatchdogMs?: number | undefined;
 }
 
 const DEFAULT_CHECK_TIMEOUT_MS = 20_000;
 const DEFAULT_DOWNLOAD_TIMEOUT_MS = 30 * 60_000;
+const DEFAULT_INSTALL_WATCHDOG_MS = 15_000;
 
 const MAX_RELEASE_NOTES_LENGTH = 1200;
 
@@ -84,10 +87,12 @@ export class UpdateService {
   private readonly now: () => Date;
   private readonly checkTimeoutMs: number;
   private readonly downloadTimeoutMs: number;
+  private readonly installWatchdogMs: number;
   private readonly listeners: Array<{ event: UpdaterEvent; listener: (payload?: unknown) => void }> = [];
 
   private status: UpdateStatus;
   private inFlightCheck: Promise<UpdateStatus> | null = null;
+  private installWatchdog: NodeJS.Timeout | null = null;
 
   constructor(options: UpdateServiceOptions) {
     this.currentVersion = options.currentVersion;
@@ -99,6 +104,7 @@ export class UpdateService {
     this.now = options.now ?? (() => new Date());
     this.checkTimeoutMs = options.checkTimeoutMs ?? DEFAULT_CHECK_TIMEOUT_MS;
     this.downloadTimeoutMs = options.downloadTimeoutMs ?? DEFAULT_DOWNLOAD_TIMEOUT_MS;
+    this.installWatchdogMs = options.installWatchdogMs ?? DEFAULT_INSTALL_WATCHDOG_MS;
 
     this.status = {
       phase: "idle",
@@ -159,13 +165,39 @@ export class UpdateService {
     }
 
     this.logger?.info("Restarting to apply update", { version: this.status.latestVersion });
-    // Silent install: setup reuses the detected folder and shows no UI while the
-    // user is already in the app. The second flag relaunches Maia afterwards.
-    this.updater.quitAndInstall(true, true);
+    this.update({ phase: "installing", errorMessage: undefined });
+
+    try {
+      // Silent install: setup reuses the detected folder and shows no UI while the
+      // user is already in the app. The second flag relaunches Maia afterwards.
+      this.updater.quitAndInstall(true, true);
+    } catch (error) {
+      this.fail(error, "Could not start the installer");
+      return this.getStatus();
+    }
+
+    // If the process is still alive after this, the installer never started
+    // (smart-screen, antivirus, blocked spawn). Say so instead of freezing.
+    this.installWatchdog = setTimeout(() => {
+      if (this.status.phase === "installing") {
+        this.fail(
+          new Error(
+            "The installer did not start. Close Maia LLM and run MaiaLLM-Setup from the releases page."
+          ),
+          "Installer did not start"
+        );
+      }
+    }, this.installWatchdogMs);
+    this.installWatchdog.unref?.();
     return this.getStatus();
   }
 
   dispose(): void {
+    if (this.installWatchdog) {
+      clearTimeout(this.installWatchdog);
+      this.installWatchdog = null;
+    }
+
     for (const { event, listener } of this.listeners) {
       this.updater.removeListener?.(event, listener);
     }

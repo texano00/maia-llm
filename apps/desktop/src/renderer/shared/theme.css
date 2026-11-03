@@ -253,6 +253,21 @@ nav {
   transition: width 200ms ease;
 }
 
+.update-progress-indeterminate span {
+  width: 40%;
+  animation: update-progress-slide 1.2s ease-in-out infinite;
+}
+
+@keyframes update-progress-slide {
+  0% {
+    transform: translateX(-100%);
+  }
+
+  100% {
+    transform: translateX(250%);
+  }
+}
+
 .update-actions {
   display: flex;
   gap: 0.5rem;

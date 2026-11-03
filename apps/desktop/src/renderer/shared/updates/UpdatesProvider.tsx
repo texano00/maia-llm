@@ -101,6 +101,15 @@ export function UpdatesProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // The main process may exit before it can answer this call, so reflect the
+  // state immediately instead of leaving the button looking unresponsive.
+  const install = useCallback(async () => {
+    setStatus((current) =>
+      current ? { ...current, phase: "installing", errorMessage: undefined } : current
+    );
+    await run("update.install");
+  }, [run]);
+
   const value = useMemo<UpdatesValue>(
     () => ({
       status,
@@ -109,9 +118,9 @@ export function UpdatesProvider({ children }: { children: ReactNode }) {
       lastError,
       check: () => run("update.check"),
       download: () => run("update.download"),
-      install: () => run("update.install")
+      install
     }),
-    [appInfo, bridgeAvailable, lastError, run, status]
+    [appInfo, bridgeAvailable, install, lastError, run, status]
   );
 
   return <UpdatesContext.Provider value={value}>{children}</UpdatesContext.Provider>;

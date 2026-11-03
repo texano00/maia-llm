@@ -28,6 +28,8 @@ export function createElectronUpdater(
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = true;
   autoUpdater.allowPrerelease = options.allowPrerelease ?? false;
+  // We ship a full NSIS installer, never a web installer.
+  autoUpdater.disableWebInstaller = true;
   autoUpdater.logger = {
     info: (message?: unknown) => logger?.info(stringify(message)),
     warn: (message?: unknown) => logger?.warn(stringify(message)),
@@ -36,6 +38,9 @@ export function createElectronUpdater(
   } as unknown as typeof autoUpdater.logger;
 
   if (options.feedUrl) {
+    // GitHub release assets answer a multi-range request with HTTP 501, so the
+    // updater always falls back to a full download for this feed. That is fine
+    // for dev builds; the release phase will move to a range-capable mirror.
     autoUpdater.setFeedURL({ provider: "generic", url: options.feedUrl });
     logger?.info("Using a generic update feed", { feedUrl: options.feedUrl });
   }

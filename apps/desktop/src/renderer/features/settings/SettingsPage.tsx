@@ -92,6 +92,10 @@ export function SettingsPage() {
             <button type="button" onClick={() => void install()}>
               Restart and install
             </button>
+          ) : status?.phase === "installing" ? (
+            <button type="button" disabled>
+              Installing…
+            </button>
           ) : (
             <button
               type="button"

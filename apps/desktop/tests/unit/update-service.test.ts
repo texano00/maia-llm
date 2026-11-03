@@ -215,6 +215,31 @@ describe("UpdateService", () => {
     expect(updater.quitCalls).toEqual([{ isSilent: true, isForceRunAfter: true }]);
   });
 
+  it("reports an installing state and warns when the installer never starts", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const updater = new FakeUpdater();
+      const { service } = createService(updater, { installWatchdogMs: 100 });
+
+      await service.check();
+      await service.download();
+
+      expect(service.install().phase).toBe("installing");
+      expect(updater.quitCalls).toHaveLength(1);
+
+      vi.advanceTimersByTime(150);
+
+      const status = service.getStatus();
+      expect(status.phase).toBe("error");
+      expect(status.errorMessage).toContain("installer did not start");
+
+      service.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("ignores downloads when no update is available", async () => {
     const updater = new FakeUpdater();
     updater.checkResult = { updateInfo: null };

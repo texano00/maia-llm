@@ -85,6 +85,23 @@ export function UpdateToast() {
     );
   }
 
+  if (status.phase === "installing") {
+    return (
+      <aside className="update-toast" role="status" aria-live="polite">
+        <div className="update-toast-head">
+          <span className="update-badge">Update</span>
+          <strong>Installing {status.latestVersion}…</strong>
+        </div>
+        <div className="update-progress update-progress-indeterminate" aria-hidden="true">
+          <span />
+        </div>
+        <p className="update-notes">
+          Maia LLM closes to apply the update and reopens automatically. This can take a minute.
+        </p>
+      </aside>
+    );
+  }
+
   return null;
 }
 
@@ -119,6 +136,8 @@ export function describeUpdateStatus(status: UpdateStatus | null): string {
       return `Downloading ${status.latestVersion} (${Math.round(status.progressPercent ?? 0)}%)…`;
     case "ready":
       return `Version ${status.latestVersion} is ready to install.`;
+    case "installing":
+      return `Installing ${status.latestVersion}; the app will restart.`;
     case "error":
       return status.errorMessage ?? "Update check failed.";
     default:
