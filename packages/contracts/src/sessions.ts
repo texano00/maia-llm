@@ -28,6 +28,12 @@ export const estimateSchema = z.object({
   simulated: z.boolean()
 });
 
+export const sessionEventSchema = z.object({
+  at: z.string(),
+  level: z.enum(["info", "warn", "error"]),
+  message: z.string()
+});
+
 export const sessionSchema = z.object({
   id: z.string().min(1),
   modelId: z.string().min(1),
@@ -45,7 +51,9 @@ export const sessionSchema = z.object({
     .enum(["user", "idle", "cap", "app_exit", "failure", "reconciled"])
     .nullable(),
   instanceId: z.number().int().positive().nullable(),
-  simulated: z.boolean()
+  simulated: z.boolean(),
+  /** Provisioning / lifecycle log shown in the app, oldest first. */
+  events: z.array(sessionEventSchema)
 });
 
 export const sessionStartSchema = z.object({
@@ -134,6 +142,7 @@ export const chatEventChannel = "chat.event" as const;
 
 export type Estimate = z.infer<typeof estimateSchema>;
 export type Session = z.infer<typeof sessionSchema>;
+export type SessionEvent = z.infer<typeof sessionEventSchema>;
 export type SessionStart = z.infer<typeof sessionStartSchema>;
 export type SessionEnd = z.infer<typeof sessionEndSchema>;
 export type ChatSend = z.infer<typeof chatSendSchema>;

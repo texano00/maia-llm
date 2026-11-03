@@ -265,6 +265,8 @@ export function SettingsPage() {
           <p className="field-hint">
             Status: {credentialStatus?.vastai ? "key stored" : "no key stored — simulated GPU only"}
           </p>
+          {credentialMessage ? <p className="field-hint">{credentialMessage}</p> : null}
+          {error ? <p className="field-error">{error}</p> : null}
         </div>
         <div className="update-actions">
           <button type="submit" disabled={!bridgeAvailable || vastKey.trim().length === 0}>
@@ -273,7 +275,7 @@ export function SettingsPage() {
           <button
             type="button"
             className="ghost-button"
-            disabled={!credentialStatus?.vastai}
+            disabled={!bridgeAvailable}
             onClick={() => void testVastKey()}
           >
             Test connection
@@ -309,6 +311,7 @@ export function SettingsPage() {
             Status: {credentialStatus?.huggingface ? "token stored" : "no token stored"}
           </p>
           {credentialMessage ? <p className="field-hint">{credentialMessage}</p> : null}
+          {error ? <p className="field-error">{error}</p> : null}
         </div>
         <div className="update-actions">
           <button type="submit" disabled={!bridgeAvailable || hfToken.trim().length === 0}>
@@ -317,7 +320,7 @@ export function SettingsPage() {
           <button
             type="button"
             className="ghost-button"
-            disabled={!credentialStatus?.huggingface}
+            disabled={!bridgeAvailable}
             onClick={() => void testHuggingFaceToken()}
           >
             Test connection

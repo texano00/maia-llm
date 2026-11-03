@@ -1,4 +1,5 @@
-import type { Session, SessionState } from "@maia/contracts";
+import type { Session, SessionEvent, SessionState } from "@maia/contracts";
+import { randomUUID } from "node:crypto";
 import type { DatabaseConnection } from "../../storage/db";
 
 interface SessionRow {
@@ -99,7 +100,7 @@ export class SessionStore {
       )
       .all() as SessionRow[];
 
-    return rows.map(toSession);
+    return rows.map((row) => toSession(row, this.eventsFor(row.id)));
   }
 
   get(sessionId: string): Session | null {
@@ -107,11 +108,41 @@ export class SessionStore {
       | SessionRow
       | undefined;
 
-    return row ? toSession(row) : null;
+    return row ? toSession(row, this.eventsFor(sessionId)) : null;
+  }
+
+  /** Provisioning log entries, oldest first (bounded to the last 60). */
+  eventsFor(sessionId: string): SessionEvent[] {
+    const rows = this.database
+      .prepare(
+        "SELECT payload_json, created_at FROM session_events WHERE session_id = ? ORDER BY created_at ASC LIMIT 60"
+      )
+      .all(sessionId) as Array<{ payload_json: string; created_at: string }>;
+
+    return rows.map((row) => {
+      try {
+        const parsed = JSON.parse(row.payload_json) as { level?: SessionEvent["level"]; message?: string };
+        return {
+          at: row.created_at,
+          level: parsed.level ?? "info",
+          message: parsed.message ?? ""
+        };
+      } catch {
+        return { at: row.created_at, level: "info" as const, message: row.payload_json };
+      }
+    });
+  }
+
+  appendEvent(sessionId: string, level: SessionEvent["level"], message: string, at = new Date()): void {
+    this.database
+      .prepare(
+        "INSERT INTO session_events (id, session_id, type, payload_json, created_at) VALUES (?, ?, ?, ?, ?)"
+      )
+      .run(randomUUID(), sessionId, "lifecycle", JSON.stringify({ level, message }), at.toISOString());
   }
 }
 
-function toSession(row: SessionRow): Session {
+function toSession(row: SessionRow, events: SessionEvent[] = []): Session {
   return {
     id: row.id,
     modelId: row.model_id,
@@ -127,6 +158,7 @@ function toSession(row: SessionRow): Session {
     endedAt: row.ended_at,
     endReason: row.end_reason,
     instanceId: row.instance_id,
-    simulated: row.label.startsWith("maia:mock:")
+    simulated: row.label.startsWith("maia:mock:"),
+    events
   };
 }

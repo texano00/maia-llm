@@ -1,7 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { useWorkspace } from "../../shared/session/WorkspaceProvider";
 import { formatParameters, formatContext, formatBytes, formatUsd } from "../../shared/format";
-
 export function CataloguePage() {
   const {
     models,
@@ -105,12 +104,22 @@ export function CataloguePage() {
                 className={selected?.model.id === model.id ? "model-row selected" : "model-row"}
                 onClick={() => void selectModel(model.id)}
               >
-                <span className="model-name">{model.name}</span>
+                <span className="model-name-row">
+                  <span className="model-name">{model.id}</span>
+                  {model.gated !== "none" ? <span className="pill pill-warning">gated</span> : null}
+                </span>
                 <span className="model-meta">
-                  {model.author}
+                  {model.pipelineTag ?? "unknown task"}
                   {model.parameterCount ? ` · ${formatParameters(model.parameterCount)}` : ""}
                   {model.contextWindow ? ` · ${formatContext(model.contextWindow)} ctx` : ""}
-                  {model.gated !== "none" ? " · gated" : ""}
+                </span>
+                <span className="model-stats">
+                  {model.lastModifiedAt
+                    ? `Updated ${formatRelative(model.lastModifiedAt)}`
+                    : "Update date unknown"}
+                  <span className="stat">⤓ {formatCount(model.downloads)}</span>
+                  <span className="stat">♥ {formatCount(model.likes)}</span>
+                  {model.license ? <span className="stat">{model.license}</span> : null}
                 </span>
               </button>
             </li>
@@ -219,11 +228,8 @@ export function CataloguePage() {
                     type="button"
                     disabled={starting}
                     onClick={() => {
-                      void startSession().then((started) => {
-                        if (started) {
-                          navigate("/chat");
-                        }
-                      });
+                      navigate("/chat");
+                      void startSession();
                     }}
                   >
                     {starting ? "Provisioning…" : "Confirm and start session"}
@@ -237,4 +243,36 @@ export function CataloguePage() {
       </div>
     </section>
   );
+}
+
+function formatCount(value: number): string {
+  if (value >= 1_000_000) {
+    return `${(value / 1_000_000).toFixed(1)}M`;
+  }
+  if (value >= 1_000) {
+    return `${(value / 1_000).toFixed(1)}k`;
+  }
+  return String(value);
+}
+
+function formatRelative(iso: string): string {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) {
+    return "unknown";
+  }
+
+  const days = Math.floor((Date.now() - then) / 86_400_000);
+  if (days <= 0) {
+    return "today";
+  }
+  if (days === 1) {
+    return "yesterday";
+  }
+  if (days < 30) {
+    return `${days} days ago`;
+  }
+  if (days < 365) {
+    return `${Math.floor(days / 30)} months ago`;
+  }
+  return `${Math.floor(days / 365)} years ago`;
 }

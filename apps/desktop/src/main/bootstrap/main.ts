@@ -243,7 +243,18 @@ async function bootstrap(): Promise<void> {
     }
   });
 
-  registry = new IpcRegistry();
+  registry = new IpcRegistry({
+    onError: (channel, error) => {
+      logger.error(
+        {
+          channel,
+          reason: error instanceof Error ? error.message : String(error),
+          code: error !== null && typeof error === "object" && "code" in error ? error.code : undefined
+        },
+        "IPC handler failed"
+      );
+    }
+  });
   registry.register("app.info", z.unknown(), () => ({
     app: app.getVersion(),
     electron: process.versions.electron,

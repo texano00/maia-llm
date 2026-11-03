@@ -19,14 +19,17 @@ interface Registration {
 
 export interface IpcRegistryOptions {
   isSenderAllowed?: (event: IpcMainInvokeEvent) => boolean;
+  onError?: ((channel: IpcChannel, error: unknown) => void) | undefined;
 }
 
 export class IpcRegistry {
   private readonly registrations = new Map<IpcChannel, Registration>();
   private readonly isSenderAllowed: (event: IpcMainInvokeEvent) => boolean;
+  private readonly onError: ((channel: IpcChannel, error: unknown) => void) | undefined;
 
   constructor(options: IpcRegistryOptions = {}) {
     this.isSenderAllowed = options.isSenderAllowed ?? defaultSenderAllowed;
+    this.onError = options.onError;
   }
 
   register<T>(channel: IpcChannel, schema: ZodType<T>, handler: IpcHandler<T>): void {
@@ -56,6 +59,7 @@ export class IpcRegistry {
           const data = await registration.handler(parsed.data);
           return ok(data);
         } catch (error) {
+          this.onError?.(channel, error);
           return fail(errorToCode(error), toSafeMessage(error), false);
         }
       });

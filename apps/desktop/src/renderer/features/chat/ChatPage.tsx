@@ -415,7 +415,7 @@ export function ChatPage() {
 
           {activeSession ? (
             <>
-              <span className="pill pill-ok">{activeSession.state}</span>
+              <span className={stateClass(activeSession.state)}>{stateLabel(activeSession.state)}</span>
               <span className="pill">{formatUsd(activeSession.hourlyRateMicroUsd)}/h</span>
               <span className="pill">elapsed {formatElapsed(activeSession.startedAt, now)}</span>
               <span className="pill">
@@ -437,11 +437,32 @@ export function ChatPage() {
                   await reloadSessions();
                 }}
               >
-                Stop this model
+                Pause and release GPU
               </button>
             </>
           ) : null}
         </div>
+
+        {activeSession ? (
+          <details className="session-log" open={activeSession.state === "provisioning"}>
+            <summary>
+              Provisioning log · {activeSession.events.length} events
+              {activeSession.instanceId ? ` · instance ${activeSession.instanceId}` : ""}
+            </summary>
+            <ol>
+              {activeSession.events.length === 0 ? (
+                <li className="muted small">No events yet.</li>
+              ) : null}
+              {activeSession.events.map((event, index) => (
+                <li key={`${event.at}-${index}`} className={`log-${event.level}`}>
+                  <time dateTime={event.at}>{formatClock(event.at)}</time>
+                  <span className="log-level">{event.level}</span>
+                  <span>{event.message}</span>
+                </li>
+              ))}
+            </ol>
+          </details>
+        ) : null}
 
         {showError ? (
           <div className="alert" role="alert">
@@ -554,12 +575,14 @@ export function ChatPage() {
             value={draft}
             placeholder={
               activeSession
-                ? "Ask the model something…"
+                ? activeSession.state === "active"
+                  ? "Ask the model something…"
+                  : `Model is ${stateLabel(activeSession.state).toLowerCase()} — the composer unlocks when it is running.`
                 : frozen
                   ? "Restart the model or switch models to continue this chat."
                   : "Start a model from the catalogue to chat."
             }
-            disabled={!activeSession || busy}
+            disabled={!activeSession || activeSession.state !== "active" || busy}
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey) {
@@ -569,7 +592,7 @@ export function ChatPage() {
             }}
           />
           <div className="update-actions">
-            <button type="submit" disabled={!activeSession || busy || draft.trim().length === 0}>
+            <button type="submit" disabled={!activeSession || activeSession.state !== "active" || busy || draft.trim().length === 0}>
               {busy ? "Generating…" : "Send"}
             </button>
             {busy && activeSession ? (
@@ -597,6 +620,42 @@ export function ChatPage() {
 
 function shortModel(modelId: string): string {
   return modelId.split("/").at(-1) ?? modelId;
+}
+
+const STATE_LABELS: Record<string, string> = {
+  estimated: "Estimated",
+  provisioning: "Provisioning",
+  ready: "Starting",
+  active: "Running",
+  ending: "Shutting down",
+  ended: "Paused",
+  cancelled: "Cancelled",
+  failed: "Error"
+};
+
+function stateLabel(state: string): string {
+  return STATE_LABELS[state] ?? state;
+}
+
+function stateClass(state: string): string {
+  if (state === "active") {
+    return "pill pill-ok";
+  }
+  if (state === "failed") {
+    return "pill pill-danger";
+  }
+  if (state === "provisioning" || state === "ready" || state === "ending") {
+    return "pill pill-warning";
+  }
+  return "pill";
+}
+
+function formatClock(iso: string): string {
+  return new Date(iso).toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit"
+  });
 }
 
 function roleLabel(role: string): string {

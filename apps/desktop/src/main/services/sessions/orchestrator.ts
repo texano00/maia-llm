@@ -137,17 +137,38 @@ export class SessionOrchestrator {
     }
 
     const sessionId = randomUUID();
-    const label = `${this.options.installId ?? "maia"}:${sessionId}`;
+    const label = offer.simulated
+      ? `maia:mock:${sessionId}`
+      : `${this.options.installId ?? "maia"}:${sessionId}`;
     const startedAt = new Date(this.now()).toISOString();
 
     let instanceId: number | null = null;
+    let inserted = false;
+    const pendingLogs: Array<{ level: "info" | "warn" | "error"; message: string; at: Date }> = [];
+
+    const log = (level: "info" | "warn" | "error", message: string): void => {
+      const at = new Date(this.now());
+
+      if (inserted) {
+        this.options.store.appendEvent(sessionId, level, message, at);
+        return;
+      }
+
+      // `session_events` has a foreign key to the session row, so early events
+      // are buffered and written right after the insert.
+      pendingLogs.push({ level, message, at });
+    };
 
     try {
+      log("info", `Estimate confirmed: ${offer.gpuName} (${offer.gpuRamGb} GB) at $${(offer.hourlyRateMicroUsd / 1_000_000).toFixed(2)}/h`);
+      log("info", "Creating the GPU instance…");
+
       const created = await this.options.compute.createInstance(offer, {
         label,
         modelId: estimate.modelId
       });
       instanceId = created.instanceId;
+      log("info", `Instance ${instanceId} requested. Waiting for vast.ai to assign it…`);
 
       this.options.store.insert({
         id: sessionId,
@@ -163,11 +184,29 @@ export class SessionOrchestrator {
         containerImage: "vllm/vllm-openai:latest"
       });
       this.options.store.setInstance(sessionId, instanceId, offer.offerId);
+      inserted = true;
+      for (const entry of pendingLogs) {
+        this.options.store.appendEvent(sessionId, entry.level, entry.message, entry.at);
+      }
+      pendingLogs.length = 0;
 
+      // Expose the session immediately so the UI can show "Provisioning" and the
+      // lifecycle log while the instance boots.
+      const provisioning = this.options.store.get(sessionId);
+      if (provisioning) {
+        this.runtimes.set(sessionId, {
+          session: provisioning,
+          lastActivityAt: this.now(),
+          abort: null
+        });
+      }
+
+      log("info", "Booting the instance and downloading the model…");
       await this.options.compute.waitUntilReady(
         instanceId,
         this.options.readinessTimeoutMs ?? DEFAULT_READINESS_TIMEOUT_MS
       );
+      log("info", "Model server is healthy; warming up.");
 
       this.options.store.transition(sessionId, "ready", {
         readyAt: new Date(this.now()).toISOString()
@@ -179,8 +218,9 @@ export class SessionOrchestrator {
 
       this.options.store.transition(sessionId, "active");
       const activeSession: Session = { ...session, state: "active" };
+      log("info", "Session active. You can chat now.");
       this.runtimes.set(sessionId, {
-        session: activeSession,
+        session: { ...activeSession, events: this.options.store.eventsFor(sessionId) },
         lastActivityAt: this.now(),
         abort: null
       });
@@ -200,6 +240,20 @@ export class SessionOrchestrator {
         endReason: "failure",
         failureCode: error instanceof SessionError ? error.code : "INTERNAL"
       });
+
+      if (inserted) {
+        this.options.store.appendEvent(
+          sessionId,
+          "error",
+          error instanceof Error ? error.message : String(error),
+          new Date(this.now())
+        );
+      } else {
+        this.options.logger?.warn("Session provisioning failed before the row existed", {
+          sessionId,
+          message: error instanceof Error ? error.message : String(error)
+        });
+      }
 
       if (instanceId !== null) {
         await this.options.compute.destroyInstance(instanceId).catch(() => undefined);
@@ -244,6 +298,15 @@ export class SessionOrchestrator {
       throw new SessionError("NOT_FOUND", "That model is not running any more.");
     }
 
+    if (runtime.session.state !== "active") {
+      throw new SessionError(
+        "MODEL_NOT_READY",
+        runtime.session.state === "provisioning"
+          ? "The model is still starting. Wait for the session to become active."
+          : "That model is not accepting messages in its current state."
+      );
+    }
+
     this.touchActivity(sessionId);
     const abort = new AbortController();
     runtime.abort = abort;
@@ -278,7 +341,8 @@ export class SessionOrchestrator {
   async reapIdle(): Promise<Session[]> {
     const idleMs = this.options.idleTimeoutMinutes * 60_000;
     const expired = [...this.runtimes.entries()].filter(
-      ([, runtime]) => this.now() - runtime.lastActivityAt >= idleMs
+      ([, runtime]) =>
+        runtime.session.state === "active" && this.now() - runtime.lastActivityAt >= idleMs
     );
 
     const released: Session[] = [];
@@ -300,6 +364,12 @@ export class SessionOrchestrator {
 
     this.options.store.transition(sessionId, "ending");
     runtime.abort?.abort();
+    this.options.store.appendEvent(
+      sessionId,
+      "info",
+      reason === "idle" ? "Releasing the GPU after the idle timeout" : "Releasing the GPU",
+      new Date(this.now())
+    );
 
     if (runtime.session.instanceId !== null) {
       await this.options.compute.destroyInstance(runtime.session.instanceId).catch((error: unknown) => {
@@ -317,8 +387,7 @@ export class SessionOrchestrator {
 
     const ended = this.options.store.get(sessionId);
     this.runtimes.delete(sessionId);
-    return ended;
-  }
+    return ended;  }
 
   /** Releases every running GPU, used when the app exits (FR-012, FR-073). */
   async endAll(reason: NonNullable<Session["endReason"]>): Promise<void> {

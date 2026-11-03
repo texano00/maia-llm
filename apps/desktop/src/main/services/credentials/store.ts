@@ -23,7 +23,7 @@ export class CredentialStore {
   ) {}
 
   async set(provider: CredentialProvider, secret: string): Promise<void> {
-    const handle = await this.vault.store(provider, provider, secret);
+    const { handle } = await this.vault.store(provider, provider, secret);
     const existing = this.getRow(provider);
 
     if (existing) {
