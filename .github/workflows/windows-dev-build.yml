@@ -101,7 +101,15 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             $flags = @("--title", "Maia LLM $version", "--notes", "Automated build $env:GITHUB_RUN_NUMBER.")
             if ($env:CHANNEL -eq "beta") { $flags += "--prerelease" } else { $flags += "--latest" }
-            gh release create $tag --target $env:GITHUB_SHA @flags
+
+            $created = $false
+            for ($attempt = 1; $attempt -le 3; $attempt++) {
+              gh release create $tag --target $env:GITHUB_SHA @flags
+              if ($LASTEXITCODE -eq 0) { $created = $true; break }
+              Write-Host "gh release create failed (attempt $attempt); retrying in 10s"
+              Start-Sleep -Seconds 10
+            }
+            if (-not $created) { throw "Could not create the release $tag" }
           }
 
           gh release upload $tag $assets --clobber
