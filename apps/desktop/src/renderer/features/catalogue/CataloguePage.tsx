@@ -1,11 +1,209 @@
+import { useNavigate } from "react-router-dom";
+import { useWorkspace } from "../../shared/session/WorkspaceProvider";
+import { formatParameters, formatContext, formatBytes, formatUsd } from "../../shared/format";
+
 export function CataloguePage() {
+  const {
+    models,
+    stale,
+    loadingCatalogue,
+    search,
+    setSearch,
+    refreshCatalogue,
+    selectModel,
+    selected,
+    estimate,
+    preparing,
+    prepareEstimate,
+    startSession,
+    starting,
+    session,
+    error,
+    clearError
+  } = useWorkspace();
+  const navigate = useNavigate();
+
   return (
     <section>
       <p className="eyebrow">Catalogue</p>
-      <h1>Open-weight models</h1>
+      <h1>Pick a model to run</h1>
       <p className="lede">
-        Model search, filters, license details, and GPU fit arrive in the first feature slice.
+        Models come from the local snapshot of the Hugging Face catalogue. Nothing is provisioned
+        until you review and confirm the cost estimate.
       </p>
+
+      {error ? (
+        <div className="alert" role="alert">
+          <span>{error}</span>
+          <button type="button" className="ghost-button" onClick={clearError}>
+            Dismiss
+          </button>
+        </div>
+      ) : null}
+
+      <div className="toolbar">
+        <input
+          className="search-input"
+          type="search"
+          placeholder="Search by name or author"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+        />
+        <button
+          type="button"
+          className="ghost-button"
+          onClick={() => void refreshCatalogue()}
+          disabled={loadingCatalogue}
+        >
+          {loadingCatalogue ? "Refreshing…" : "Refresh"}
+        </button>
+        {stale ? <span className="pill pill-warning">Offline snapshot</span> : null}
+        {session ? <span className="pill pill-ok">Session active</span> : null}
+      </div>
+
+      <div className="catalogue-grid">
+        <ul className="model-list">
+          {models.length === 0 && !loadingCatalogue ? (
+            <li className="muted">No models match this search.</li>
+          ) : null}
+          {models.map((model) => (
+            <li key={model.id}>
+              <button
+                type="button"
+                className={selected?.model.id === model.id ? "model-row selected" : "model-row"}
+                onClick={() => void selectModel(model.id)}
+              >
+                <span className="model-name">{model.name}</span>
+                <span className="model-meta">
+                  {model.author}
+                  {model.parameterCount ? ` · ${formatParameters(model.parameterCount)}` : ""}
+                  {model.contextWindow ? ` · ${formatContext(model.contextWindow)} ctx` : ""}
+                  {model.gated !== "none" ? " · gated" : ""}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+
+        <div className="panel">
+          {selected ? (
+            <>
+              <h2>{selected.model.name}</h2>
+              <dl className="info-list">
+                <div className="info-row">
+                  <dt>License</dt>
+                  <dd>{selected.model.license ?? "unknown"}</dd>
+                </div>
+                <div className="info-row">
+                  <dt>Parameters</dt>
+                  <dd>
+                    {selected.model.parameterCount
+                      ? formatParameters(selected.model.parameterCount)
+                      : "unknown"}
+                  </dd>
+                </div>
+                <div className="info-row">
+                  <dt>Context</dt>
+                  <dd>
+                    {selected.model.contextWindow
+                      ? formatContext(selected.model.contextWindow)
+                      : "unknown"}
+                  </dd>
+                </div>
+                <div className="info-row">
+                  <dt>Downloads</dt>
+                  <dd>{selected.model.downloads.toLocaleString()}</dd>
+                </div>
+                <div className="info-row">
+                  <dt>Artifacts</dt>
+                  <dd>{selected.artifacts.length}</dd>
+                </div>
+              </dl>
+
+              {selected.artifacts.length > 0 ? (
+                <ul className="artifact-list">
+                  {selected.artifacts.slice(0, 4).map((artifact) => (
+                    <li key={artifact.id}>
+                      <code>{artifact.path}</code>
+                      <span className="muted">{formatBytes(artifact.sizeBytes)}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+
+              {!estimate ? (
+                <button
+                  type="button"
+                  disabled={preparing}
+                  onClick={() => void prepareEstimate(selected.model.id)}
+                >
+                  {preparing ? "Estimating…" : "Estimate a session"}
+                </button>
+              ) : (
+                <div className="estimate-card">
+                  <h3>Before we rent anything</h3>
+                  <dl className="info-list">
+                    <div className="info-row">
+                      <dt>GPU</dt>
+                      <dd>
+                        {estimate.gpuName} · {estimate.gpuRamGb} GB
+                      </dd>
+                    </div>
+                    <div className="info-row">
+                      <dt>Hourly rate</dt>
+                      <dd>{formatUsd(estimate.hourlyRateMicroUsd)}/h</dd>
+                    </div>
+                    <div className="info-row">
+                      <dt>Minimum charge</dt>
+                      <dd>
+                        {estimate.minimumMinutes} min · {formatUsd(estimate.rangeMicroUsd.low)}
+                      </dd>
+                    </div>
+                    <div className="info-row">
+                      <dt>Expected {estimate.expectedMinutes} min</dt>
+                      <dd>{formatUsd(estimate.projectedTotalMicroUsd)}</dd>
+                    </div>
+                    <div className="info-row">
+                      <dt>Range</dt>
+                      <dd>
+                        {formatUsd(estimate.rangeMicroUsd.low)} –{" "}
+                        {formatUsd(estimate.rangeMicroUsd.high)}
+                      </dd>
+                    </div>
+                    <div className="info-row">
+                      <dt>Wait</dt>
+                      <dd>
+                        {estimate.waitMinutes.low}–{estimate.waitMinutes.high} min
+                      </dd>
+                    </div>
+                  </dl>
+                  {estimate.simulated ? <p className="pill pill-warning">Simulated GPU</p> : null}
+                  <ul className="muted small">
+                    {estimate.assumptions.map((assumption) => (
+                      <li key={assumption}>{assumption}</li>
+                    ))}
+                  </ul>
+                  <button
+                    type="button"
+                    disabled={starting}
+                    onClick={() => {
+                      void startSession().then((started) => {
+                        if (started) {
+                          navigate("/chat");
+                        }
+                      });
+                    }}
+                  >
+                    {starting ? "Provisioning…" : "Confirm and start session"}
+                  </button>
+                </div>
+              )}
+            </>
+          ) : (
+            <p className="muted">Select a model to see its license, artifacts, and requirements.</p>
+          )}
+        </div>
+      </div>
     </section>
   );
 }

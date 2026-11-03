@@ -1,10 +1,13 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 import {
+  chatChunkSchema,
+  chatEventChannel,
   fail,
   ipcChannels,
   updateEventChannel,
   updateStatusSchema,
   type AppInfo,
+  type ChatChunk,
   type IpcChannel,
   type Result,
   type UpdateStatus
@@ -15,6 +18,8 @@ export interface MaiaBridge {
   getVersions(): Promise<AppInfo>;
   /** Subscribes to update status pushes from the main process. */
   onUpdateStatus(listener: (status: UpdateStatus) => void): () => void;
+  /** Subscribes to streaming chat deltas. */
+  onChatEvent(listener: (chunk: ChatChunk) => void): () => void;
 }
 
 const allowedChannels = new Set<string>(ipcChannels);
@@ -50,6 +55,21 @@ const bridge: MaiaBridge = {
 
     return () => {
       ipcRenderer.removeListener(updateEventChannel, handler);
+    };
+  },
+
+  onChatEvent(listener: (chunk: ChatChunk) => void): () => void {
+    const handler = (_event: IpcRendererEvent, payload: unknown): void => {
+      const parsed = chatChunkSchema.safeParse(payload);
+      if (parsed.success) {
+        listener(parsed.data);
+      }
+    };
+
+    ipcRenderer.on(chatEventChannel, handler);
+
+    return () => {
+      ipcRenderer.removeListener(chatEventChannel, handler);
     };
   }
 };

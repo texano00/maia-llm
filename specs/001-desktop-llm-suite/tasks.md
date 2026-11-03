@@ -80,40 +80,40 @@ description: "Task list for Desktop LLM Suite implementation"
 
 ### Tests for User Story 1
 
-- [ ] T029 [P] [US1] Contract test Hugging Face search/detail/tree mapping and cache fallback in `apps/desktop/tests/contract/huggingface.test.ts`
+- [x] T029 [P] [US1] Contract test Hugging Face search/detail/tree mapping and cache fallback in `apps/desktop/tests/contract/huggingface.test.ts`
 - [ ] T030 [P] [US1] Contract test vast.ai offer/create/status/destroy mapping in `apps/desktop/tests/contract/vastai.test.ts`
 - [ ] T031 [P] [US1] Contract test vLLM and llama.cpp stream normalization in `apps/desktop/tests/contract/inference-stream.test.ts`
-- [ ] T032 [P] [US1] Unit test session state machine, single-active invariant, transitions, and the estimate-confirmation guard that blocks provisioning without confirmation in `apps/desktop/tests/unit/session-orchestrator.test.ts`
-- [ ] T033 [P] [US1] Unit test idle-timeout release and 60-second teardown window in `apps/desktop/tests/unit/session-idle-timeout.test.ts`
+- [x] T032 [P] [US1] Unit test session state machine, single-active invariant, transitions, and the estimate-confirmation guard that blocks provisioning without confirmation in `apps/desktop/tests/unit/session-orchestrator.test.ts`
+- [x] T033 [P] [US1] Unit test idle-timeout release and 60-second teardown window in `apps/desktop/tests/unit/session-idle-timeout.test.ts`
 - [ ] T034 [P] [US1] Unit test 100-session reconciliation soak with zero orphaned instances in `apps/desktop/tests/unit/reconciliation-soak.test.ts`
-- [ ] T035 [P] [US1] Unit test pre-session estimator range/assumptions and basic receipt data in `apps/desktop/tests/unit/estimate-receipt.test.ts`
+- [x] T035 [P] [US1] Unit test pre-session estimator range/assumptions and basic receipt data in `apps/desktop/tests/unit/estimate-receipt.test.ts`
 - [ ] T036 [P] [US1] E2E startup → estimate → provisioning (expected wait time within ±50% under fixtures) → first token → chat → end flow in `apps/desktop/tests/e2e/session-chat.spec.ts`
 
 ### Implementation for User Story 1
 
-- [ ] T037 [P] [US1] Implement the catalogue repository with 15-minute TTL, ETag validation, and stale snapshot in `apps/desktop/src/main/services/catalogue/repository.ts`
+- [x] T037 [P] [US1] Implement the catalogue repository with 15-minute TTL, ETag validation, and stale snapshot in `apps/desktop/src/main/services/catalogue/repository.ts`
 - [ ] T038 [P] [US1] Implement the Hugging Face adapter for search, detail, tree, resolve, gating, and `429` handling in `apps/desktop/src/main/services/providers/huggingface/client.ts` and `apps/desktop/src/main/services/providers/huggingface/mapper.ts`
-- [ ] T039 [P] [US1] Implement catalogue service search/filter/sort/detail/refresh/license acceptance in `apps/desktop/src/main/services/catalogue/service.ts`
-- [ ] T040 [P] [US1] Implement the pre-session estimator with hourly rate, minimum billing assumption, range, and currency notice in `apps/desktop/src/main/services/cost/estimator.ts`
+- [x] T039 [P] [US1] Implement catalogue service search/filter/sort/detail/refresh/license acceptance in `apps/desktop/src/main/services/catalogue/service.ts`
+- [x] T040 [P] [US1] Implement the pre-session estimator with hourly rate, minimum billing assumption, range, and currency notice in `apps/desktop/src/main/services/cost/estimator.ts`
 - [ ] T041 [P] [US1] Implement vast.ai offer search and ranking by GPU RAM, `dph_total`, reliability, disk, and CUDA capability in `apps/desktop/src/main/services/providers/vastai/offers.ts`
 - [ ] T042 [US1] Implement instance creation with the `maia:<install_id>:<session_id>` label and `new_contract` response, status polling, and timeouts in `apps/desktop/src/main/services/providers/vastai/instances.ts`
 - [ ] T043 [P] [US1] Implement runtime bootstrap and health checks for vLLM and llama.cpp in `apps/desktop/src/main/services/inference/runtime.ts` and `apps/desktop/src/main/services/inference/health.ts`
-- [ ] T044 [US1] Implement the session orchestrator with `estimated → provisioning → ready → active → ending → ended | cancelled | failed` transitions, the single-active invariant, and a guard that refuses provisioning until the estimate is confirmed in `apps/desktop/src/main/services/sessions/orchestrator.ts`
+- [x] T044 [US1] Implement the session orchestrator with `estimated → provisioning → ready → active → ending → ended | cancelled | failed` transitions, the single-active invariant, and a guard that refuses provisioning until the estimate is confirmed in `apps/desktop/src/main/services/sessions/orchestrator.ts`
 - [ ] T045 [US1] Implement the idle-timeout monitor and teardown trigger in `apps/desktop/src/main/services/sessions/idle-timeout.ts`
 - [ ] T046 [P] [US1] Implement teardown retries and startup reconciliation of `maia:<install_id>:` instances in `apps/desktop/src/main/services/sessions/reconciliation.ts`
 - [ ] T047 [P] [US1] Implement the streaming inference adapter with cancellation and normalized chunks in `apps/desktop/src/main/services/inference/stream.ts`
-- [ ] T048 [US1] Implement catalogue IPC handlers in `apps/desktop/src/main/ipc/catalogue.ts`
-- [ ] T049 [US1] Implement session IPC handlers in `apps/desktop/src/main/ipc/sessions.ts`
-- [ ] T050 [US1] Implement chat send/abort IPC handlers and `chat.delta`/`chat.done`/`chat.error` events in `apps/desktop/src/main/ipc/chat.ts`
+- [x] T048 [US1] Implement catalogue IPC handlers in `apps/desktop/src/main/ipc/catalogue.ts`
+- [x] T049 [US1] Implement session IPC handlers in `apps/desktop/src/main/ipc/sessions.ts`
+- [x] T050 [US1] Implement chat send/abort IPC handlers and `chat.delta`/`chat.done`/`chat.error` events in `apps/desktop/src/main/ipc/chat.ts`
 - [ ] T051 [US1] Implement settings/credentials IPC handlers with per-provider connection tests for Hugging Face, vast.ai, and S3 in `apps/desktop/src/main/ipc/settings.ts`
 - [ ] T052 [US1] Persist sessions, session events, chat messages, and basic receipt data through the foundational history repository in `apps/desktop/src/main/services/history/repository.ts` and `apps/desktop/src/main/services/cost/receipts.ts`
-- [ ] T053 [P] [US1] Build catalogue UI with search, filters, sort, and stale-cache notice in `apps/desktop/src/renderer/features/catalogue/CataloguePage.tsx`
+- [x] T053 [P] [US1] Build catalogue UI with search, filters, sort, and stale-cache notice in `apps/desktop/src/renderer/features/catalogue/CataloguePage.tsx`
 - [ ] T054 [P] [US1] Build model detail UI with license, artifacts, hardware requirements, and gating in `apps/desktop/src/renderer/features/model-detail/ModelDetailPage.tsx`
 - [ ] T055 [P] [US1] Build session setup UI with estimate, confirmation, stages, cancel, and the fee/tax notice in `apps/desktop/src/renderer/features/session/SessionSetupPage.tsx`
-- [ ] T056 [P] [US1] Build chat UI with streaming messages, token usage, generation settings, and interruption states in `apps/desktop/src/renderer/features/chat/ChatPage.tsx`
+- [x] T056 [P] [US1] Build chat UI with streaming messages, token usage, generation settings, and interruption states in `apps/desktop/src/renderer/features/chat/ChatPage.tsx`
 - [ ] T057 [US1] Build the settings UI for provider credentials, idle timeout, default caps, default filters, and GPU price ceiling in `apps/desktop/src/renderer/features/settings/SettingsPage.tsx`
 - [ ] T058 [US1] Wire provider error mapping, cancel, close-app teardown, and orphan warnings in `apps/desktop/src/main/services/sessions/errors.ts` and `apps/desktop/src/main/bootstrap/lifecycle.ts`
-- [ ] T059 [US1] Add the single-currency formatter and provider fee/tax disclaimer to estimate, receipt, and chat metadata views in `apps/desktop/src/renderer/shared/currency.ts`
+- [x] T059 [US1] Add the single-currency formatter and provider fee/tax disclaimer to estimate, receipt, and chat metadata views in `apps/desktop/src/renderer/shared/currency.ts`
 
 **Checkpoint**: User Story 1 is fully functional and independently testable (MVP), including the pre-session estimate required by Constitution Principle II.
 

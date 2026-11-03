@@ -3,15 +3,18 @@ import { ErrorBoundary } from "./ErrorBoundary";
 import { Layout } from "./Layout";
 import { AppRoutes } from "./routes";
 import { UpdatesProvider } from "../shared/updates/UpdatesProvider";
+import { WorkspaceProvider } from "../shared/session/WorkspaceProvider";
 
 export function App() {
   return (
     <ErrorBoundary>
       <HashRouter>
         <UpdatesProvider>
-          <Layout>
-            <AppRoutes />
-          </Layout>
+          <WorkspaceProvider>
+            <Layout>
+              <AppRoutes />
+            </Layout>
+          </WorkspaceProvider>
         </UpdatesProvider>
       </HashRouter>
     </ErrorBoundary>

@@ -1,7 +1,7 @@
 import { app, BrowserWindow, Menu } from "electron";
 import { join } from "node:path";
 import { z } from "zod";
-import { updateEventChannel } from "@maia/contracts";
+import { updateEventChannel, chatEventChannel } from "@maia/contracts";
 import { closeDatabase, openDatabase, type DatabaseConnection } from "../storage/db";
 import { HistoryRepository } from "../services/history/repository";
 import { CredentialVault } from "../services/credentials/vault";
@@ -15,9 +15,16 @@ import {
   resolveDiagnosticsEndpoint
 } from "../services/diagnostics/forwarder";
 import { SettingsStore } from "../services/settings/store";
+import { CatalogueRepository } from "../services/catalogue/repository";
+import { CatalogueService } from "../services/catalogue/service";
+import { createFixtureCatalogueSource } from "../services/catalogue/fixture-source";
+import { SessionOrchestrator } from "../services/sessions/orchestrator";
+import { SessionStore } from "../services/sessions/store";
+import { createMockComputeProvider, createMockInference } from "../services/providers/mock-runtime";
 import { IpcRegistry } from "../ipc/registry";
 import { registerUpdateHandlers } from "../ipc/updates";
 import { registerSettingsHandlers } from "../ipc/settings";
+import { registerWorkspaceHandlers } from "../ipc/workspace";
 import { loadConfig } from "./config";
 import { ensureAppDirectories, resolveAppPaths } from "./paths";
 import { enforceSingleInstance, registerLifecycleHooks } from "./lifecycle";
@@ -160,6 +167,21 @@ async function bootstrap(): Promise<void> {
   const repository = new HistoryRepository(database);
   const vault = new CredentialVault(paths.vaultDir);
 
+  const catalogue = new CatalogueService({
+    repository: new CatalogueRepository(database),
+    source: createFixtureCatalogueSource(),
+    logger,
+    ...(config.providerMode === "mock" ? { ttlMs: 0 } : {})
+  });
+
+  const sessions = new SessionOrchestrator({
+    store: new SessionStore(database),
+    compute: createMockComputeProvider({ provisionDelayMs: 400 }),
+    inference: createMockInference({ chunkDelayMs: 12 }),
+    idleTimeoutMinutes: config.idleTimeoutMinutes,
+    logger
+  });
+
   configureApplicationMenu();
 
   const updateLogger = toUpdateLogger(logger);
@@ -194,6 +216,14 @@ async function bootstrap(): Promise<void> {
     const endpoint = resolveDiagnosticsEndpoint(next.diagnosticsUrl);
     if (endpoint && diagnostics) {
       diagnostics.setUrl(endpoint);
+    }
+  });
+  registerWorkspaceHandlers({
+    registry,
+    catalogue,
+    sessions,
+    broadcastChat: (payload) => {
+      mainWindow?.webContents.send(chatEventChannel, payload);
     }
   });
   registry.install();

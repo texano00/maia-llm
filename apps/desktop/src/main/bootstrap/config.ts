@@ -15,7 +15,7 @@ export type AppConfig = z.infer<typeof appConfigSchema>;
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   return appConfigSchema.parse({
-    providerMode: env.MAIA_PROVIDER_MODE === "mock" ? "mock" : "live",
+    providerMode: env.MAIA_PROVIDER_MODE === "live" ? "live" : "mock",
     releaseChannel: env.MAIA_RELEASE_CHANNEL === "beta" ? "beta" : "stable",
     idleTimeoutMinutes: parseInteger(env.MAIA_IDLE_TIMEOUT_MINUTES, 10),
     updateCheckIntervalHours: parseInteger(env.MAIA_UPDATE_CHECK_INTERVAL_HOURS, 24),

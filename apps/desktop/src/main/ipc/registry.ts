@@ -1,6 +1,14 @@
 import { ipcMain, type IpcMainInvokeEvent } from "electron";
 import type { ZodType } from "zod";
-import { fail, ok, type ApiError, type IpcChannel, type Result } from "@maia/contracts";
+import {
+  errorCodeSchema,
+  fail,
+  ok,
+  type ApiError,
+  type ErrorCode,
+  type IpcChannel,
+  type Result
+} from "@maia/contracts";
 
 type IpcHandler<T> = (payload: T) => Promise<unknown> | unknown;
 
@@ -48,7 +56,7 @@ export class IpcRegistry {
           const data = await registration.handler(parsed.data);
           return ok(data);
         } catch (error) {
-          return fail("INTERNAL", toSafeMessage(error), false);
+          return fail(errorToCode(error), toSafeMessage(error), false);
         }
       });
     }
@@ -87,6 +95,18 @@ function toSafeMessage(error: unknown): string {
   }
 
   return "Unexpected application error";
+}
+
+/** Services throw errors carrying an `ApiError` code so the renderer can react. */
+function errorToCode(error: unknown): ErrorCode {
+  if (error !== null && typeof error === "object" && "code" in error) {
+    const parsed = errorCodeSchema.safeParse((error as { code: unknown }).code);
+    if (parsed.success) {
+      return parsed.data;
+    }
+  }
+
+  return "INTERNAL";
 }
 
 export type { ApiError };

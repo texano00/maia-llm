@@ -15,6 +15,7 @@ export const errorCodeSchema = z.enum([
   "BACKUP_VERIFY_FAILED",
   "TELEMETRY_DISABLED",
   "NOT_FOUND",
+  "ESTIMATE_REQUIRED",
   "INTERNAL"
 ]);
 
@@ -71,6 +72,15 @@ export const ipcChannels = [
   "app.info",
   "settings.get",
   "settings.update",
+  "catalogue.search",
+  "catalogue.detail",
+  "catalogue.refresh",
+  "estimate.create",
+  "session.status",
+  "session.start",
+  "session.end",
+  "chat.send",
+  "chat.abort",
   "update.status",
   "update.check",
   "update.download",
