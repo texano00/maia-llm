@@ -1,9 +1,63 @@
+import { useEffect, useState } from "react";
+import { DEFAULT_DIAGNOSTICS_URL, type AppSettings } from "@maia/contracts";
 import { useUpdates } from "../../shared/updates/UpdatesProvider";
 import { describeUpdateStatus } from "../../shared/updates/UpdateToast";
 
 export function SettingsPage() {
   const { appInfo, status, check, download, install } = useUpdates();
   const busy = status?.phase === "checking" || status?.phase === "downloading";
+
+  const [settings, setSettings] = useState<AppSettings | null>(null);
+  const [diagnosticsUrl, setDiagnosticsUrl] = useState(DEFAULT_DIAGNOSTICS_URL);
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const bridge = window.maia;
+    if (!bridge) {
+      return;
+    }
+
+    let mounted = true;
+    void bridge.invoke<AppSettings>("settings.get").then((result) => {
+      if (!mounted) {
+        return;
+      }
+
+      if (result.ok) {
+        setSettings(result.data);
+        setDiagnosticsUrl(result.data.diagnosticsUrl);
+      }
+    });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  async function saveDiagnostics(next: string): Promise<void> {
+    const bridge = window.maia;
+    if (!bridge) {
+      return;
+    }
+
+    setSaveState("saving");
+    setError(null);
+
+    const result = await bridge.invoke<AppSettings>("settings.update", {
+      diagnosticsUrl: next
+    });
+
+    if (result.ok) {
+      setSettings(result.data);
+      setDiagnosticsUrl(result.data.diagnosticsUrl);
+      setSaveState("saved");
+      return;
+    }
+
+    setSaveState("error");
+    setError(result.error.message);
+  }
 
   return (
     <section>
@@ -42,6 +96,56 @@ export function SettingsPage() {
           )}
         </div>
       </div>
+
+      <form
+        className="settings-card settings-card-stacked"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void saveDiagnostics(diagnosticsUrl);
+        }}
+      >
+        <div>
+          <h2>Telemetry and diagnostics host</h2>
+          <p className="lede">
+            While testing, Maia mirrors its log to this host so the app can be observed live. Logs
+            never include prompts, responses, or credentials.
+          </p>
+          <label className="field">
+            <span>Host</span>
+            <input
+              type="url"
+              inputMode="url"
+              spellCheck={false}
+              placeholder={DEFAULT_DIAGNOSTICS_URL}
+              value={diagnosticsUrl}
+              onChange={(event) => {
+                setDiagnosticsUrl(event.target.value);
+                setSaveState("idle");
+              }}
+            />
+          </label>
+          <p className="field-hint">
+            Default {DEFAULT_DIAGNOSTICS_URL}. The app posts to <code>/v1/diagnostics/logs</code> on
+            that host.{settings ? "" : " Loading saved settings…"}
+          </p>
+          {error ? <p className="field-error">{error}</p> : null}
+          {saveState === "saved" ? (
+            <p className="field-hint">Saved. Logs now go to the new host.</p>
+          ) : null}
+        </div>
+        <div className="update-actions">
+          <button type="submit" disabled={saveState === "saving"}>
+            {saveState === "saving" ? "Saving…" : "Save"}
+          </button>
+          <button
+            type="button"
+            className="ghost-button"
+            onClick={() => void saveDiagnostics(DEFAULT_DIAGNOSTICS_URL)}
+          >
+            Reset to default
+          </button>
+        </div>
+      </form>
     </section>
   );
 }

@@ -68,6 +68,8 @@ export const updateStatusSchema = z.object({
 
 export const ipcChannels = [
   "app.info",
+  "settings.get",
+  "settings.update",
   "update.status",
   "update.check",
   "update.download",
@@ -77,11 +79,34 @@ export const ipcChannels = [
 /** Main -> renderer push channel used for update status changes. */
 export const updateEventChannel = "update.event" as const;
 
+export const DEFAULT_DIAGNOSTICS_URL = "http://localhost:8787";
+
+const httpUrlSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(300)
+  .refine((value) => /^https?:\/\/[^\s]+$/i.test(value), {
+    message: "Enter an http:// or https:// URL"
+  });
+
+/**
+ * User-editable application settings. Diagnostics mirror the local log file to
+ * the telemetry host so a packaged build can be observed while it runs.
+ */
+export const appSettingsSchema = z.object({
+  diagnosticsUrl: httpUrlSchema
+});
+
+export const settingsUpdateSchema = appSettingsSchema.partial();
+
 export const ipcChannelSchema = z.enum(ipcChannels);
 
 export type ErrorCode = z.infer<typeof errorCodeSchema>;
 export type ApiError = z.infer<typeof apiErrorSchema>;
 export type AppInfo = z.infer<typeof appInfoSchema>;
+export type AppSettings = z.infer<typeof appSettingsSchema>;
+export type SettingsUpdate = z.infer<typeof settingsUpdateSchema>;
 export type IpcChannel = z.infer<typeof ipcChannelSchema>;
 export type UpdatePhase = z.infer<typeof updatePhaseSchema>;
 export type UpdateStatus = z.infer<typeof updateStatusSchema>;

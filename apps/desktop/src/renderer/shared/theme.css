@@ -285,6 +285,56 @@ nav {
   font-size: 1rem;
 }
 
+.settings-card-stacked {
+  align-items: flex-start;
+  flex-direction: column;
+}
+
+.settings-card-stacked > div:first-child {
+  width: 100%;
+}
+
+.field {
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 0.75rem;
+  font-size: 0.8rem;
+  color: #8fa3c8;
+}
+
+.field input {
+  width: min(26rem, 100%);
+  padding: 0.55rem 0.7rem;
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: 0.6rem;
+  background: rgb(8 11 18 / 80%);
+  color: #e7ecf5;
+}
+
+.field input:focus {
+  border-color: rgb(72 104 255 / 65%);
+  outline: none;
+}
+
+.field-hint {
+  margin: 0.5rem 0 0;
+  color: #8fa3c8;
+  font-size: 0.78rem;
+}
+
+.field-hint code {
+  padding: 0.05rem 0.3rem;
+  border-radius: 0.3rem;
+  background: rgb(255 255 255 / 8%);
+  color: #c8d4e6;
+}
+
+.field-error {
+  margin: 0.5rem 0 0;
+  color: #ff9b9b;
+  font-size: 0.8rem;
+}
+
 .page,
 .fatal {
   display: grid;

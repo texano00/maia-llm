@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   DiagnosticForwarder,
+  resolveDiagnosticsEndpoint,
   toDiagnosticEvent
 } from "../../src/main/services/diagnostics/forwarder";
 
@@ -34,6 +35,28 @@ function createForwarder(overrides: {
 
   return { forwarder, calls };
 }
+
+describe("resolveDiagnosticsEndpoint", () => {
+  it("expands a bare host to the ingestion route", () => {
+    expect(resolveDiagnosticsEndpoint("http://localhost:8787")).toBe(
+      "http://localhost:8787/v1/diagnostics/logs"
+    );
+    expect(resolveDiagnosticsEndpoint(" http://localhost:8787/ ")).toBe(
+      "http://localhost:8787/v1/diagnostics/logs"
+    );
+  });
+
+  it("keeps a full endpoint unchanged", () => {
+    expect(resolveDiagnosticsEndpoint("https://logs.example.dev/v1/diagnostics/logs")).toBe(
+      "https://logs.example.dev/v1/diagnostics/logs"
+    );
+  });
+
+  it("ignores empty input", () => {
+    expect(resolveDiagnosticsEndpoint("  ")).toBeUndefined();
+    expect(resolveDiagnosticsEndpoint(undefined)).toBeUndefined();
+  });
+});
 
 describe("toDiagnosticEvent", () => {
   it("maps pino levels and keeps structured context", () => {
@@ -118,5 +141,19 @@ describe("DiagnosticForwarder", () => {
     await new Promise<void>((resolve) => forwarder.end(() => resolve()));
 
     expect(onFailure).toHaveBeenCalledOnce();
+  });
+
+  it("re-targets the mirror when the user changes the host", async () => {
+    const { forwarder, calls } = createForwarder();
+
+    expect(forwarder.getUrl()).toBe("http://127.0.0.1:8787/v1/diagnostics/logs");
+
+    forwarder.setUrl("https://logs.example.dev/v1/diagnostics/logs");
+    forwarder.write(`${JSON.stringify({ level: 30, time: 10, msg: "moved" })}\n`);
+
+    await forwarder.flush();
+    await new Promise<void>((resolve) => forwarder.end(() => resolve()));
+
+    expect(calls.at(-1)?.url).toBe("https://logs.example.dev/v1/diagnostics/logs");
   });
 });

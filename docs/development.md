@@ -81,19 +81,17 @@ with `MAIA_UPDATE_SIMULATE_VERSION=9.9.9`.
 ### Watching a packaged build from another machine
 
 The telemetry API doubles as a diagnostic sink during testing. Start it so it
-accepts connections from the Windows host, then launch the desktop app with
-`MAIA_DIAGNOSTIC_LOG_URL` pointing at it:
+accepts connections from the Windows host:
 
 ```bash
 # terminal 1: keep it running while you test
 TELEMETRY_HOST=0.0.0.0 npm run -w @maia/telemetry-api dev
 ```
 
-```powershell
-# PowerShell on Windows: every app log line is mirrored to terminal 1
-$env:MAIA_DIAGNOSTIC_LOG_URL = "http://localhost:8787/v1/diagnostics/logs"
-Start-Process "$env:LOCALAPPDATA\Programs\Maia LLM\Maia LLM.exe"
-```
+Then open **Settings → Telemetry and diagnostics host** in the app and confirm the
+host (default `http://localhost:8787`). Every app log line is mirrored there, so
+any Windows install can be observed live without editing environment variables.
+`MAIA_DIAGNOSTIC_LOG_URL` still overrides the stored value at startup.
 
 The endpoint echoes events as `[diag] <time> <level> <message>`, keeps the last
 1000 lines in memory, and returns them from

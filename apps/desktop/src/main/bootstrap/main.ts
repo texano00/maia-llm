@@ -10,8 +10,14 @@ import {
   createElectronUpdater,
   DEFAULT_STABLE_FEED_URL
 } from "../services/updates/electron-updater";
+import {
+  DiagnosticForwarder,
+  resolveDiagnosticsEndpoint
+} from "../services/diagnostics/forwarder";
+import { SettingsStore } from "../services/settings/store";
 import { IpcRegistry } from "../ipc/registry";
 import { registerUpdateHandlers } from "../ipc/updates";
+import { registerSettingsHandlers } from "../ipc/settings";
 import { loadConfig } from "./config";
 import { ensureAppDirectories, resolveAppPaths } from "./paths";
 import { enforceSingleInstance, registerLifecycleHooks } from "./lifecycle";
@@ -23,6 +29,7 @@ let database: DatabaseConnection | null = null;
 let registry: IpcRegistry | null = null;
 let updates: UpdateService | null = null;
 let updateTimer: NodeJS.Timeout | null = null;
+let diagnostics: DiagnosticForwarder | null = null;
 
 app.setName("Maia LLM");
 app.setAppUserModelId("com.texano00.maiallm");
@@ -101,16 +108,21 @@ async function bootstrap(): Promise<void> {
   await ensureAppDirectories(paths);
   startCrashReporter(paths);
 
-  const logger = createLogger(paths, {
-    diagnostics: config.diagnosticLogUrl
-      ? {
-          url: config.diagnosticLogUrl,
-          appVersion: app.getVersion(),
-          platform: process.platform
-        }
-      : undefined
-  });
   database = openDatabase(paths.database);
+  const settings = new SettingsStore(database);
+
+  const diagnosticsEndpoint = resolveDiagnosticsEndpoint(
+    config.diagnosticLogUrl ?? settings.get().diagnosticsUrl
+  );
+  diagnostics = diagnosticsEndpoint
+    ? new DiagnosticForwarder({
+        url: diagnosticsEndpoint,
+        appVersion: app.getVersion(),
+        platform: process.platform
+      })
+    : null;
+
+  const logger = createLogger(paths, { diagnostics: diagnostics ?? undefined });
 
   const repository = new HistoryRepository(database);
   const vault = new CredentialVault(paths.vaultDir);
@@ -145,6 +157,12 @@ async function bootstrap(): Promise<void> {
     packaged: app.isPackaged
   }));
   registerUpdateHandlers(registry, updates);
+  registerSettingsHandlers(registry, settings, (next) => {
+    const endpoint = resolveDiagnosticsEndpoint(next.diagnosticsUrl);
+    if (endpoint && diagnostics) {
+      diagnostics.setUrl(endpoint);
+    }
+  });
   registry.install();
 
   logger.info(
@@ -154,7 +172,8 @@ async function bootstrap(): Promise<void> {
       database: paths.database,
       conversations: repository.listConversations(1).length,
       vaultDirectory: paths.vaultDir,
-      updateCheckIntervalHours: config.updateCheckIntervalHours
+      updateCheckIntervalHours: config.updateCheckIntervalHours,
+      diagnosticsEndpoint: diagnostics?.getUrl() ?? null
     },
     "Application services initialized"
   );
@@ -169,6 +188,8 @@ async function bootstrap(): Promise<void> {
 
     updates?.dispose();
     updates = null;
+    diagnostics?.end();
+    diagnostics = null;
     registry?.dispose();
     if (database) {
       closeDatabase(database);

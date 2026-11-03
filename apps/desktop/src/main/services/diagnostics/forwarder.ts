@@ -37,25 +37,29 @@ const MAX_BUFFERED_EVENTS = 500;
  */
 export class DiagnosticForwarder extends Writable {
   private readonly options: Required<
-    Pick<DiagnosticForwarderOptions, "url" | "appVersion" | "platform" | "batchSize" | "flushIntervalMs" | "timeoutMs">
+    Pick<
+      DiagnosticForwarderOptions,
+      "appVersion" | "platform" | "batchSize" | "flushIntervalMs" | "timeoutMs"
+    >
   >;
   private readonly fetchImpl: typeof fetch;
   private readonly onFailure: ((error: unknown) => void) | undefined;
   private buffer: DiagnosticEvent[] = [];
   private timer: NodeJS.Timeout | null = null;
   private sending = false;
+  private url: string;
 
   constructor(options: DiagnosticForwarderOptions) {
     super({ decodeStrings: false });
 
     this.options = {
-      url: options.url,
       appVersion: options.appVersion,
       platform: options.platform,
       batchSize: options.batchSize ?? 25,
       flushIntervalMs: options.flushIntervalMs ?? 2_000,
       timeoutMs: options.timeoutMs ?? 5_000
     };
+    this.url = options.url;
     this.fetchImpl = options.fetchImpl ?? ((...args) => fetch(...args));
     this.onFailure = options.onFailure;
 
@@ -63,6 +67,18 @@ export class DiagnosticForwarder extends Writable {
       void this.flush();
     }, this.options.flushIntervalMs);
     this.timer.unref?.();
+  }
+
+  getUrl(): string {
+    return this.url;
+  }
+
+  /** Re-targets the mirror without restarting the app. */
+  setUrl(url: string): void {
+    if (url !== this.url) {
+      this.url = url;
+      this.buffer = [];
+    }
   }
 
   override _write(
@@ -108,7 +124,7 @@ export class DiagnosticForwarder extends Writable {
     this.sending = true;
 
     try {
-      const response = await this.fetchImpl(this.options.url, {
+      const response = await this.fetchImpl(this.url, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -131,8 +147,25 @@ export class DiagnosticForwarder extends Writable {
   }
 }
 
+/**
+ * Accepts either a host (`http://localhost:8787`) or a full endpoint and always
+ * returns a URL that can be POSTed to.
+ */
+export function resolveDiagnosticsEndpoint(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  const withoutTrailingSlashes = trimmed.replace(/\/+$/, "");
+  return withoutTrailingSlashes.endsWith("/v1/diagnostics/logs")
+    ? withoutTrailingSlashes
+    : `${withoutTrailingSlashes}/v1/diagnostics/logs`;
+}
+
 export function toDiagnosticEvent(line: string): DiagnosticEvent | null {
   const trimmed = line.trim();
+
   if (trimmed.length === 0) {
     return null;
   }
