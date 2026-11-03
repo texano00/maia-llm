@@ -22,3 +22,5 @@ jobs:
       - run: npm run typecheck
       - run: npm run test:contract
       - run: npm test
+      - run: npm run -w @maia/desktop build
+      - run: npm run verify:preload

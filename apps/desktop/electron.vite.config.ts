@@ -20,7 +20,10 @@ export default defineConfig({
     }
   },
   preload: {
-    plugins: [externalizeDepsPlugin()],
+    // A sandboxed preload may only require("electron"); everything else has to be
+    // bundled or the bridge silently never gets exposed. `npm run verify:preload`
+    // enforces that.
+    plugins: [externalizeDepsPlugin({ exclude: ["zod"] })],
     resolve: { alias },
     build: {
       rollupOptions: {

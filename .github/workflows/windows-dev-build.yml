@@ -33,6 +33,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run -w @maia/desktop dist:win
+      - run: npm run verify:preload
       - name: Generate checksums
         shell: pwsh
         run: |

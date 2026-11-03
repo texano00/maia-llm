@@ -7,7 +7,7 @@ import { useUpdates } from "./updates/UpdatesProvider";
  * installed version and runtime details.
  */
 export function InfoButton() {
-  const { appInfo, status, check, download, install } = useUpdates();
+  const { appInfo, status, bridgeAvailable, lastError, check, download, install } = useUpdates();
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -43,11 +43,11 @@ export function InfoButton() {
     <div className="info" ref={containerRef}>
       <button
         type="button"
-        className="icon-button"
+        className={bridgeAvailable ? "icon-button" : "icon-button icon-button-warning"}
         aria-label="Application information"
         aria-haspopup="dialog"
         aria-expanded={open}
-        title="Application information"
+        title={bridgeAvailable ? "Application information" : "Application bridge unavailable"}
         onClick={() => setOpen((value) => !value)}
       >
         <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
@@ -96,12 +96,13 @@ export function InfoButton() {
               <button
                 type="button"
                 className="ghost-button"
-                disabled={busy || (status !== null && !status.supported)}
+                disabled={!bridgeAvailable || busy || (status !== null && !status.supported)}
                 onClick={() => void check()}
               >
                 {status?.phase === "checking" ? "Checking…" : "Check for updates"}
               </button>
             )}
+            {lastError ? <span className="info-error">{lastError}</span> : null}
           </div>
         </div>
       ) : null}

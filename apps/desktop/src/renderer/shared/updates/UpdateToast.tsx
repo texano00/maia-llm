@@ -99,7 +99,7 @@ function formatRate(bytesPerSecond: number | undefined): string {
 
 export function describeUpdateStatus(status: UpdateStatus | null): string {
   if (!status) {
-    return "Checking for updates…";
+    return "Not checked yet.";
   }
 
   if (!status.supported) {

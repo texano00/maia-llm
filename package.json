@@ -1,6 +1,6 @@
 {
   "name": "maia-llm",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "private": true,
   "type": "module",
   "description": "Desktop LLM suite with on-demand remote GPU and model archival",
@@ -17,6 +17,7 @@
     "lint": "eslint .",
     "typecheck": "tsc -p apps/desktop/tsconfig.json --noEmit && tsc -p apps/telemetry-api/tsconfig.json --noEmit",
     "test": "vitest run",
+    "verify:preload": "node scripts/check-preload.mjs",
     "test:contract": "vitest run --passWithNoTests apps/desktop/tests/contract apps/telemetry-api/tests/contract",
     "test:integration": "vitest run --passWithNoTests apps/desktop/tests/integration apps/telemetry-api/tests/integration",
     "test:telemetry-allowlist": "vitest run apps/telemetry-api/tests/contract/telemetry-allowlist.test.ts",
@@ -28,6 +29,7 @@
     "@eslint/js": "9.39.5",
     "@types/node": "26.6.6",
     "eslint": "9.39.5",
+    "globals": "16.4.0",
     "prettier": "3.9.10",
     "tsx": "4.23.15",
     "typescript": "5.9.3",

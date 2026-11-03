@@ -4,7 +4,7 @@ import { useUpdates } from "../../shared/updates/UpdatesProvider";
 import { describeUpdateStatus } from "../../shared/updates/UpdateToast";
 
 export function SettingsPage() {
-  const { appInfo, status, check, download, install } = useUpdates();
+  const { appInfo, status, bridgeAvailable, check, download, install } = useUpdates();
   const busy = status?.phase === "checking" || status?.phase === "downloading";
 
   const [settings, setSettings] = useState<AppSettings | null>(null);
@@ -67,6 +67,13 @@ export function SettingsPage() {
         Hugging Face, vast.ai, and S3 credentials will be stored in the operating-system credential
         vault here.
       </p>
+
+      {bridgeAvailable ? null : (
+        <p className="field-error">
+          The application bridge is unavailable. Settings cannot be read or saved — reinstall Maia
+          LLM.
+        </p>
+      )}
 
       <div className="settings-card">
         <div>
@@ -134,12 +141,13 @@ export function SettingsPage() {
           ) : null}
         </div>
         <div className="update-actions">
-          <button type="submit" disabled={saveState === "saving"}>
+          <button type="submit" disabled={!bridgeAvailable || saveState === "saving"}>
             {saveState === "saving" ? "Saving…" : "Save"}
           </button>
           <button
             type="button"
             className="ghost-button"
+            disabled={!bridgeAvailable}
             onClick={() => void saveDiagnostics(DEFAULT_DIAGNOSTICS_URL)}
           >
             Reset to default

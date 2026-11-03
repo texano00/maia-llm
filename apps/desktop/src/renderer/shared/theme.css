@@ -132,6 +132,17 @@ nav {
   color: #ffffff;
 }
 
+.icon-button-warning {
+  border-color: rgb(255 155 155 / 60%);
+  color: #ff9b9b;
+}
+
+.info-error {
+  color: #ff9b9b;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
 .info-popover {
   position: absolute;
   top: calc(100% + 0.5rem);

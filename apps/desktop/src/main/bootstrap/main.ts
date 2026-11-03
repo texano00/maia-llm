@@ -30,6 +30,7 @@ let registry: IpcRegistry | null = null;
 let updates: UpdateService | null = null;
 let updateTimer: NodeJS.Timeout | null = null;
 let diagnostics: DiagnosticForwarder | null = null;
+let appLogger: ReturnType<typeof createLogger> | null = null;
 
 app.setName("Maia LLM");
 app.setAppUserModelId("com.texano00.maiallm");
@@ -72,6 +73,19 @@ function createWindow(): void {
     mainWindow = null;
   });
 
+  // A sandboxed preload that fails to load leaves the renderer without IPC and
+  // every action silently doing nothing. Say so loudly in the logs.
+  mainWindow.webContents.once("did-finish-load", () => {
+    void mainWindow?.webContents
+      .executeJavaScript("typeof window.maia")
+      .then((bridgeType: unknown) => {
+        if (bridgeType !== "object") {
+          logBridgeMissing(bridgeType);
+        }
+      })
+      .catch(() => logBridgeMissing("unavailable"));
+  });
+
   const rendererUrl = process.env.ELECTRON_RENDERER_URL;
   if (rendererUrl) {
     void mainWindow.loadURL(rendererUrl);
@@ -86,6 +100,13 @@ function toUpdateLogger(logger: ReturnType<typeof createLogger>): UpdateLogger {
     warn: (message, context) => logger.warn(context ?? {}, message),
     error: (message, context) => logger.error(context ?? {}, message)
   };
+}
+
+function logBridgeMissing(bridgeType: unknown): void {
+  appLogger?.error(
+    { bridgeType },
+    "Preload bridge missing: IPC is unavailable in this renderer"
+  );
 }
 
 function scheduleUpdateChecks(service: UpdateService, intervalHours: number): void {
@@ -123,6 +144,7 @@ async function bootstrap(): Promise<void> {
     : null;
 
   const logger = createLogger(paths, { diagnostics: diagnostics ?? undefined });
+  appLogger = logger;
 
   const repository = new HistoryRepository(database);
   const vault = new CredentialVault(paths.vaultDir);
