@@ -32,8 +32,35 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Prepare code-signing certificate
+        shell: pwsh
+        env:
+          CSC_LINK_BASE64: ${{ secrets.CSC_LINK_BASE64 }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:CSC_LINK_BASE64)) {
+            Write-Host "No CSC_LINK_BASE64 secret: building an unsigned installer."
+            "SIGNING_EXPECTED=false" >> $env:GITHUB_ENV
+            exit 0
+          }
+
+          $path = Join-Path $env:RUNNER_TEMP "maia-signing.pfx"
+          [IO.File]::WriteAllBytes($path, [Convert]::FromBase64String($env:CSC_LINK_BASE64))
+          "CSC_LINK=$path" >> $env:GITHUB_ENV
+          "SIGNING_EXPECTED=true" >> $env:GITHUB_ENV
       - run: npm run -w @maia/desktop dist:win
+        env:
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
       - run: npm run verify:preload
+      - name: Verify Authenticode signature
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem apps/desktop/release -Filter 'MaiaLLM-Setup-*.exe' | Select-Object -First 1
+          if (-not $installer) { throw "Installer not found" }
+          $signature = Get-AuthenticodeSignature $installer.FullName
+          Write-Host "Signature status: $($signature.Status) ($($signature.SignerCertificate.Subject))"
+          if ($env:SIGNING_EXPECTED -eq 'true' -and $signature.Status -ne 'Valid') {
+            throw "Signing was configured but the installer signature is $($signature.Status)"
+          }
       - name: Generate checksums
         shell: pwsh
         run: |

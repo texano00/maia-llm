@@ -97,3 +97,17 @@ The endpoint echoes events as `[diag] <time> <level> <message>`, keeps the last
 1000 lines in memory, and returns them from
 `GET /v1/diagnostics/logs?limit=200`. Nothing is persisted. `MAIA_UPDATE_FEED_URL`
 likewise overrides the update feed when testing a mirror.
+
+## Brand assets
+
+`assets/logo.jpg` is the source artwork. Derived files (regenerate if the logo
+changes):
+
+| File | Size | Used by |
+| --- | --- | --- |
+| `apps/desktop/resources/icon.png` | 512×512 (emblem crop) | Windows executable and NSIS installer icon |
+| `apps/desktop/src/renderer/assets/logo-mark.png` | 128×128 | Sidebar brand in the app |
+| `docs/logo.png` | 560 px wide | README header |
+
+The emblem crop is `extract({ left: 500, top: 78, width: 398, height: 398 })`
+followed by a resize, produced with `sharp`.

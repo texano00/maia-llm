@@ -65,6 +65,14 @@ textarea {
   font-weight: 800;
 }
 
+.brand-logo {
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 0.7rem;
+  object-fit: cover;
+  background: #ffffff;
+}
+
 .brand strong,
 .brand span {
   display: block;

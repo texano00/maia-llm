@@ -1,147 +1,108 @@
+<p align="center">
+  <img src="docs/logo.png" alt="Maia LLM" width="320" />
+</p>
+
 # Maia LLM
 
-A desktop suite for running open-weight language models on rented GPUs — without
-the usual cost anxiety. Maia LLM browses the Hugging Face catalogue, rents a
-suitable GPU on vast.ai on demand, streams the chat locally, keeps your history
-on your own disk, and shows exactly what every session costs.
+Run open-weight language models on a GPU you rent only for as long as you use it.
 
-> **Status: early access.** The foundation (app shell, contracts, local database,
-> secure credential vault, IPC boundary, update pipeline) is complete. The
-> catalogue, provisioning, chat, history, backup, and IDE-endpoint features are
-> being implemented story by story — see [`specs/001-desktop-llm-suite/tasks.md`](specs/001-desktop-llm-suite/tasks.md).
+Maia LLM is a Windows desktop app that turns "I want to try this model" into a
+few clicks: browse the Hugging Face catalogue, see what the run will cost before
+anything is created, let Maia rent a matching GPU on vast.ai, chat in a normal
+LLM interface, and release the GPU the moment you stop. No terminal, no YAML, no
+runaway instances.
 
----
+## What you get
 
-## What it is meant to do
+- **A real catalogue** of open-weight models with license, size, context window,
+  gated status, and feature filters (tool use, reasoning, vision, code, long
+  context). Order by downloads, newest, likes, or size.
+- **No surprise bills.** Every run starts with an estimate: GPU, hourly rate,
+  minimum charge, expected total, and a range. Nothing is provisioned until you
+  confirm it.
+- **Automatic GPU rental** through vast.ai, chosen to fit the model and your
+  optional GPU preferences (country, trusted datacenters, reliability, price cap).
+- **Chat like a modern LLM app**: streaming answers, live "thinking" output,
+  multiple models running in parallel, a model selector per conversation, chat
+  history in a sidebar that you can rename and pin.
+- **Conversations that survive.** Stop a model and reopen the chat later — restart
+  the same model or continue with another one, with a clear notice where the model
+  changed.
+- **Your data stays yours.** Chats are stored locally in SQLite, tokens live in
+  the Windows credential vault, and no conversation content leaves the machine.
 
-- **Browse and pick a model** from a searchable catalogue of open-weight models
-  sourced from Hugging Face, with license, size, context window, and access
-  status visible before you commit.
-- **Rent only what you need.** Maia provisions a matching GPU on vast.ai
-  automatically, tells you the wait time, and shows the hourly rate and minimum
-  billable duration *before* anything is created.
-- **Never be surprised by a bill.** A live meter shows elapsed time and accrued
-  cost, per-session caps and a monthly budget are enforced, and every session
-  ends with a receipt.
-- **Choose how spend behaves** (planned): *Intelligent tier* pauses the GPU after
-  N idle minutes, checkpoints the model to vast.ai storage, and resumes on demand;
-  *Always on* keeps it running until you stop it.
-- **Keep your data yours.** Conversations live in a local SQLite database, model
-  backups go to your own S3-compatible bucket, credentials sit in the operating
-  system vault, and the only server-side component is a telemetry-only backend
-  that is off until you opt in.
-- **Use it from your IDE** (planned): an optional loopback-only,
-  Ollama-compatible endpoint lets VS Code and other assistants talk to the active
-  session.
+## Install
 
-## Download and install
+1. Open the [releases page](https://github.com/texano00/maia-llm/releases) and
+   download `MaiaLLM-Setup-<version>-x64.exe`.
+2. Run it. The installer is per-user (no administrator rights) and detects an
+   existing installation: it asks once, then updates in place and keeps your
+   chats and settings.
+3. Optional: verify the download against `SHA256SUMS.txt` in the same release.
 
-Installers are published on the
-[releases page](https://github.com/texano00/maia-llm/releases). Each release
-contains:
+**About the Windows warning.** Builds are currently unsigned, so Windows may show
+*"Windows protected your PC"* or, with Smart App Control enabled, *"part of this
+app has been blocked"*. Use *More info → Run anyway*; the signature setup that
+removes the warning entirely is described in
+[docs/release-process.md](docs/release-process.md).
 
-| Asset | Purpose |
-| --- | --- |
-| `MaiaLLM-Setup-<version>-x64.exe` | Windows 10/11 x64 installer |
-| `MaiaLLM-Setup-<version>-x64.exe.blockmap` | Differential-update metadata |
-| `latest.yml` | Update feed read by the app |
-| `SHA256SUMS.txt` | Checksums for the published artifacts |
+## First run
 
-The installer is per-user (no administrator rights), creates Start Menu and
-desktop shortcuts, and **detects an existing installation**: setup asks once,
-then updates the app in place so shortcuts, the uninstall entry, and your local
-data are preserved.
+1. **Settings → vast.ai API key** — paste your key and press *Test connection*.
+   Restart Maia LLM so it picks up the key. Without a key the app stays in
+   simulation mode: the whole flow works, but no real GPU is rented.
+2. **Settings → Hugging Face token** (optional) — needed only for gated models.
+3. **Catalogue** — search a model, open it, press *Estimate a session*, review the
+   price, then *Confirm and start session*.
+4. The first run downloads and loads the model on the GPU, which can take 5–20
+   minutes. Progress is shown while it happens; the estimate stays visible.
+5. **Chat** — send messages, watch the live cost meter, rename or pin the
+   conversation in the sidebar, and press *Stop this model* when you are done.
+
+Closing the app releases every running GPU.
 
 ## Updates
 
-The installed app checks the update feed at startup and every 24 hours. When a
-newer version exists, a banner appears in the top-right corner with the version
-and release notes; *Update now* downloads the delta, and *Restart and install*
-applies it. Nothing is downloaded without that click. The ⓘ button in the top bar
-shows the installed version, runtime versions, and the current update status, and
-offers a manual *Check for updates*.
+Maia LLM checks for a new version at startup and every 24 hours. When one exists,
+a banner appears in the top-right corner: *Update now* downloads it, *Restart and
+install* applies it and reopens the app. Nothing is downloaded without that click.
 
-Two channels exist:
+Beta builds are opt-in by launching the app with `MAIA_RELEASE_CHANNEL=beta`.
 
-- **stable** — every published release; the default.
-- **beta** — prereleases, opt-in by launching the app with
-  `MAIA_RELEASE_CHANNEL=beta`.
+## Requirements
 
-## Development
+- Windows 10 or 11, x64
+- A vast.ai account with an API key (and credit) for real GPU runs
+- Internet access to huggingface.co and vast.ai
 
-Requirements: Node.js 22+, npm 10+, and (for the telemetry backend) Docker.
+## Where things are stored
+
+| Data | Location |
+| --- | --- |
+| Chats, settings, catalogue cache | `%APPDATA%\Maia LLM\maia.db` |
+| Logs | `%APPDATA%\Maia LLM\logs\maia.log` |
+| Provider credentials | Windows credential vault (`safeStorage`) |
+| Model backups (optional) | Your own S3-compatible bucket |
+
+## Build from source
 
 ```bash
 npm install
-npm run -w @maia/desktop dev          # desktop app against mock providers
-npm run -w @maia/telemetry-api dev    # telemetry/diagnostics API on :8787
+npm run -w @maia/desktop dev          # desktop app, simulated GPU by default
+MAIA_PROVIDER_MODE=live npm run -w @maia/desktop dev
 ```
 
-Full setup, environment variables, packaging, and the live-logging workflow are
-documented in [`docs/development.md`](docs/development.md).
-
-Verify a change before pushing:
+Installers are built by GitHub Actions on a Windows runner:
 
 ```bash
-npm run lint
-npm run typecheck
-npm test
-npm run build
+gh workflow run windows-dev-build.yml --ref <branch> -f publish_release=true
 ```
 
-Windows installers cannot be built on Linux/macOS without extra tooling; use the
-manual `windows-dev-build` GitHub Actions workflow, which also publishes the
-release (and therefore the update feed) when asked:
-
-```bash
-gh workflow run windows-dev-build.yml --ref <branch> \
-  -f channel=stable -f publish_release=true
-```
-
-## Project layout
-
-```
-apps/desktop            Electron app (main, preload, renderer)
-apps/telemetry-api      Fastify telemetry/diagnostics backend (the only server)
-packages/contracts      Shared Zod schemas: IPC, domain enums, update status
-packages/shared         Cross-cutting helpers
-infra                   Local PostgreSQL + MinIO compose services
-specs/001-desktop-llm-suite  Specification, plan, research, data model, tasks
-docs                    Development guide
-```
-
-Architecture, decisions, and the constitution the project is held to live in
-[`specs/001-desktop-llm-suite/plan.md`](specs/001-desktop-llm-suite/plan.md) and
-[`.specify/memory/constitution.md`](.specify/memory/constitution.md).
-
-## Privacy and security stance
-
-- Provider credentials (Hugging Face, vast.ai, S3) are stored with the OS
-  credential vault and are never written to logs or history.
-- Conversations, prompts, and responses never leave your machine; the backend is
-  telemetry only.
-- Telemetry is disabled until you consent, is limited to a documented allowlist
-  (crash reports, diagnostics, OS and environment details), and can be deleted on
-  request.
-- The IDE endpoint binds to loopback only and stops when the session ends or the
-  app exits.
-- IPC calls are validated with Zod, restricted to trusted renderer origins, and
-  exposed through a minimal preload allowlist.
-
-## Roadmap
-
-1. **US1 (MVP)** — catalogue → estimate → provision → stream → teardown.
-2. **US2** — durable local history: search, rename, export, crash recovery.
-3. **US3** — loopback Ollama-compatible endpoint for IDE assistants.
-4. **US4** — live meter, caps, budgets, receipts, usage reporting.
-5. **US5** — model backup and restore to personal S3-compatible storage.
-6. **Economy strategy** — intelligent pause/resume vs always-on, with guaranteed
-   teardown on exit and startup reconciliation of instances and paused volumes.
-7. **Telemetry backend** — consented ingestion, retention, deletion.
-8. **Release hardening** — signing, SBOM, provenance attestation, beta channel
-   automation, macOS and Linux packaging.
+More detail: [docs/development.md](docs/development.md) (setup, environment
+variables, live log mirroring), [docs/troubleshooting.md](docs/troubleshooting.md)
+(reading logs, diagnosing a stuck UI), [docs/release-process.md](docs/release-process.md)
+(signing and release checklist).
 
 ## License
 
 Proprietary. All rights reserved until a license is chosen.
-
