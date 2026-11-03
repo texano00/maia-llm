@@ -23,6 +23,9 @@ import { CredentialStore } from "../services/credentials/store";
 import { SessionOrchestrator } from "../services/sessions/orchestrator";
 import { SessionStore } from "../services/sessions/store";
 import { createMockComputeProvider, createMockInference } from "../services/providers/mock-runtime";
+import { createVastComputeProvider } from "../services/providers/vastai/compute-provider";
+import { VastAiClient } from "../services/providers/vastai/client";
+import { createVllmRuntime } from "../services/inference/vllm";
 import { IpcRegistry } from "../ipc/registry";
 import { registerUpdateHandlers } from "../ipc/updates";
 import { registerSettingsHandlers } from "../ipc/settings";
@@ -170,8 +173,9 @@ async function bootstrap(): Promise<void> {
   const vault = new CredentialVault(paths.vaultDir);
   const credentials = new CredentialStore(database, vault);
 
+  const catalogueRepository = new CatalogueRepository(database);
   const catalogue = new CatalogueService({
-    repository: new CatalogueRepository(database),
+    repository: catalogueRepository,
     source:
       config.providerMode === "live"
         ? createHuggingFaceSource({ getToken: () => credentials.get("huggingface") })
@@ -180,11 +184,33 @@ async function bootstrap(): Promise<void> {
     ...(config.providerMode === "mock" ? { ttlMs: 0 } : {})
   });
 
+  const hasVastKey = Boolean(await credentials.get("vastai"));
+  const useLiveGpu = config.providerMode === "live" && hasVastKey;
+
+  const compute = useLiveGpu
+    ? createVastComputeProvider({
+        getApiKey: () => credentials.get("vastai"),
+        getHfToken: () => credentials.get("huggingface"),
+        getParameterCount: async (modelId) => catalogueRepository.get(modelId)?.parameterCount ?? null,
+        getFilters: () => settings.get().gpuFilters,
+        readyTimeoutMs: config.readinessTimeoutMinutes * 60_000,
+        logger
+      })
+    : createMockComputeProvider({ provisionDelayMs: 400 });
+
+  const inference = useLiveGpu
+    ? createVllmRuntime({
+        resolveEndpoint: (instanceId) =>
+          "resolveEndpoint" in compute ? compute.resolveEndpoint(instanceId) : null
+      })
+    : createMockInference({ chunkDelayMs: 12 });
+
   const sessions = new SessionOrchestrator({
     store: new SessionStore(database),
-    compute: createMockComputeProvider({ provisionDelayMs: 400 }),
-    inference: createMockInference({ chunkDelayMs: 12 }),
+    compute,
+    inference,
     idleTimeoutMinutes: config.idleTimeoutMinutes,
+    readinessTimeoutMs: config.readinessTimeoutMinutes * 60_000,
     filters: () => settings.get().gpuFilters,
     logger
   });
@@ -240,19 +266,26 @@ async function bootstrap(): Promise<void> {
       }
     },
     testCredential: async (provider, secret) => {
-      if (provider !== "huggingface") {
-        return { ok: false, message: `${provider} connection tests are not wired yet.` };
-      }
-
       try {
-        const ok = await testHuggingFaceToken(secret);
-        return ok
-          ? { ok: true, message: "Hugging Face accepted the token." }
-          : { ok: false, message: "Hugging Face rejected the token." };
+        if (provider === "huggingface") {
+          const ok = await testHuggingFaceToken(secret);
+          return ok
+            ? { ok: true, message: "Hugging Face accepted the token." }
+            : { ok: false, message: "Hugging Face rejected the token." };
+        }
+
+        if (provider === "vastai") {
+          const ok = await new VastAiClient(secret).testConnection();
+          return ok
+            ? { ok: true, message: "vast.ai accepted the API key." }
+            : { ok: false, message: "vast.ai rejected the API key." };
+        }
+
+        return { ok: false, message: `${provider} connection tests are not wired yet.` };
       } catch (error) {
         return {
           ok: false,
-          message: error instanceof Error ? error.message : "Hugging Face request failed"
+          message: error instanceof Error ? error.message : `${provider} request failed`
         };
       }
     }

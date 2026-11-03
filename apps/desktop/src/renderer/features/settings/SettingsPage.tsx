@@ -22,6 +22,7 @@ export function SettingsPage() {
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [gpuState, setGpuState] = useState<"idle" | "saving" | "saved">("idle");
   const [hfToken, setHfToken] = useState("");
+  const [vastKey, setVastKey] = useState("");
   const [credentialStatus, setCredentialStatus] = useState<CredentialStatus | null>(null);
   const [credentialMessage, setCredentialMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -75,6 +76,38 @@ export function SettingsPage() {
       setCredentialMessage("Token saved in the OS credential vault.");
     } else {
       setError(result.error.message);
+    }
+  }
+
+  async function saveVastKey(): Promise<void> {
+    const bridge = window.maia;
+    if (!bridge || vastKey.trim().length === 0) {
+      return;
+    }
+
+    const result = await bridge.invoke<CredentialStatus>("settings.credentials.set", {
+      provider: "vastai",
+      secret: vastKey.trim()
+    });
+
+    if (result.ok) {
+      setCredentialStatus(result.data);
+      setVastKey("");
+      setCredentialMessage(
+        "vast.ai key saved. Restart Maia LLM to rent real GPUs with this key."
+      );
+    } else {
+      setError(result.error.message);
+    }
+  }
+
+  async function testVastKey(): Promise<void> {
+    const result = await window.maia?.invoke<CredentialTestResult>("settings.credentials.test", {
+      provider: "vastai"
+    });
+
+    if (result) {
+      setCredentialMessage(result.ok ? result.data.message : result.error.message);
     }
   }
 
@@ -204,6 +237,49 @@ export function SettingsPage() {
           )}
         </div>
       </div>
+
+      <form
+        className="settings-card settings-card-stacked"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void saveVastKey();
+        }}
+      >
+        <div>
+          <h2>vast.ai API key</h2>
+          <p className="lede">
+            Required to rent real GPUs. Stored in the operating-system credential vault; until a key
+            is saved, sessions run against a simulated GPU so you can still exercise the flow.
+          </p>
+          <label className="field">
+            <span>API key</span>
+            <input
+              type="password"
+              autoComplete="off"
+              spellCheck={false}
+              placeholder={credentialStatus?.vastai ? "saved — enter a new key to replace" : "paste your vast.ai key"}
+              value={vastKey}
+              onChange={(event) => setVastKey(event.target.value)}
+            />
+          </label>
+          <p className="field-hint">
+            Status: {credentialStatus?.vastai ? "key stored" : "no key stored — simulated GPU only"}
+          </p>
+        </div>
+        <div className="update-actions">
+          <button type="submit" disabled={!bridgeAvailable || vastKey.trim().length === 0}>
+            Save key
+          </button>
+          <button
+            type="button"
+            className="ghost-button"
+            disabled={!credentialStatus?.vastai}
+            onClick={() => void testVastKey()}
+          >
+            Test connection
+          </button>
+        </div>
+      </form>
 
       <form
         className="settings-card settings-card-stacked"

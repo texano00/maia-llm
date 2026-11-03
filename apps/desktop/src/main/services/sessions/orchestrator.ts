@@ -16,7 +16,7 @@ export interface ComputeOffer {
 
 export interface ComputeProvider {
   findOffer(requirements: { modelId: string; filters?: GpuFilters | undefined }): Promise<ComputeOffer | null>;
-  createInstance(offer: ComputeOffer, label: string): Promise<{ instanceId: number }>;
+  createInstance(offer: ComputeOffer, context: { label: string; modelId: string }): Promise<{ instanceId: number }>;
   waitUntilReady(instanceId: number, timeoutMs: number): Promise<void>;
   destroyInstance(instanceId: number): Promise<void>;
 }
@@ -25,6 +25,7 @@ export interface InferenceRuntime {
   stream(input: {
     sessionId: string;
     modelId: string;
+    instanceId: number | null;
     prompt: string;
     signal: AbortSignal;
     onDelta: (kind: StreamKind, text: string) => void;
@@ -142,7 +143,10 @@ export class SessionOrchestrator {
     let instanceId: number | null = null;
 
     try {
-      const created = await this.options.compute.createInstance(offer, label);
+      const created = await this.options.compute.createInstance(offer, {
+        label,
+        modelId: estimate.modelId
+      });
       instanceId = created.instanceId;
 
       this.options.store.insert({
@@ -248,6 +252,7 @@ export class SessionOrchestrator {
       return await this.options.inference.stream({
         sessionId,
         modelId: runtime.session.modelId,
+        instanceId: runtime.session.instanceId,
         prompt: content,
         signal: abort.signal,
         onDelta

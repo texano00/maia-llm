@@ -78,7 +78,6 @@ export function createMockComputeProvider(options: MockComputeOptions = {}): Com
       nextInstanceId += 1;
       return { instanceId: nextInstanceId };
     },
-
     async waitUntilReady() {
       if (options.provisionDelayMs) {
         await new Promise((resolve) => setTimeout(resolve, options.provisionDelayMs));

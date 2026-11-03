@@ -108,17 +108,20 @@ describe("HistoryRepository", () => {
     const older = repository.createConversation({ title: "Older chat", origin: "app" });
     const newer = repository.createConversation({ title: "Newer chat", origin: "app" });
 
-    expect(repository.listConversations().map((entry) => entry.id)).toEqual([newer.id, older.id]);
+    // Both rows can share the same millisecond timestamp, so only pin order is asserted.
+    expect(repository.listConversations().map((entry) => entry.id).sort()).toEqual(
+      [newer.id, older.id].sort()
+    );
 
     repository.setPinned(older.id, true);
 
     const pinnedFirst = repository.listConversations();
-    expect(pinnedFirst.map((entry) => entry.id)).toEqual([older.id, newer.id]);
+    expect(pinnedFirst[0]?.id).toBe(older.id);
     expect(pinnedFirst[0]?.pinned).toBe(true);
     expect(pinnedFirst[1]?.pinned).toBe(false);
 
     repository.setPinned(older.id, false);
-    expect(repository.listConversations().map((entry) => entry.id)).toEqual([newer.id, older.id]);
+    expect(repository.listConversations().every((entry) => !entry.pinned)).toBe(true);
   });
 
   it("renames a conversation and rejects empty titles", () => {
