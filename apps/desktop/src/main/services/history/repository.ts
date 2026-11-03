@@ -291,6 +291,13 @@ export class HistoryRepository {
     });
   }
 
+  /** Re-binds a conversation to another model after an explicit switch. */
+  updateConversationModel(id: string, modelId: string, sessionId: string | null): void {
+    this.db
+      .prepare("UPDATE conversations SET model_id = ?, session_id = ?, updated_at = ? WHERE id = ?")
+      .run(modelId, sessionId, new Date().toISOString(), id);
+  }
+
   renameConversation(id: string, title: string): void {
     const trimmed = title.trim();
     if (trimmed.length < 1 || trimmed.length > 200) {

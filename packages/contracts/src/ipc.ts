@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { releaseChannelSchema } from "./domain";
+import { gpuFiltersSchema } from "./sessions";
 
 export const errorCodeSchema = z.enum([
   "VALIDATION_FAILED",
@@ -76,9 +77,13 @@ export const ipcChannels = [
   "catalogue.detail",
   "catalogue.refresh",
   "estimate.create",
+  "session.list",
   "session.status",
   "session.start",
   "session.end",
+  "conversation.list",
+  "conversation.get",
+  "conversation.switchModel",
   "chat.send",
   "chat.abort",
   "update.status",
@@ -106,7 +111,9 @@ const httpUrlSchema = z
  * the telemetry host so a packaged build can be observed while it runs.
  */
 export const appSettingsSchema = z.object({
-  diagnosticsUrl: httpUrlSchema
+  diagnosticsUrl: httpUrlSchema,
+  /** Optional GPU preferences used when ranking offers; empty means no filter. */
+  gpuFilters: gpuFiltersSchema
 });
 
 export const settingsUpdateSchema = appSettingsSchema.partial();

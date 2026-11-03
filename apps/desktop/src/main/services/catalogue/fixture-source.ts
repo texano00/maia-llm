@@ -13,7 +13,7 @@ const MODELS: HuggingFaceModelPayload[] = [
     gated: false,
     pipeline_tag: "text-generation",
     lastModified: "2026-10-18T09:12:00.000Z",
-    tags: ["license:apache-2.0", "text-generation", "qwen2"],
+    tags: ["license:apache-2.0", "text-generation", "qwen2", "tool-use", "code"],
     cardData: { license: "apache-2.0", context_length: 32768 },
     safetensors: { parameters: { BF16: 7_615_616_512 } }
   },
@@ -24,7 +24,7 @@ const MODELS: HuggingFaceModelPayload[] = [
     gated: "manual",
     pipeline_tag: "text-generation",
     lastModified: "2026-09-30T16:40:00.000Z",
-    tags: ["license:llama3.1", "text-generation", "llama"],
+    tags: ["license:llama3.1", "text-generation", "llama", "reasoning", "multilingual"],
     cardData: { license: "llama3.1", context_length: 131072 },
     safetensors: { parameters: { BF16: 8_030_261_248 } }
   },
@@ -35,7 +35,7 @@ const MODELS: HuggingFaceModelPayload[] = [
     gated: false,
     pipeline_tag: "text-generation",
     lastModified: "2026-08-11T11:05:00.000Z",
-    tags: ["license:apache-2.0", "text-generation", "mistral"],
+    tags: ["license:apache-2.0", "text-generation", "mistral", "code"],
     cardData: { license: "apache-2.0", context_length: 32768 },
     safetensors: { parameters: { BF16: 7_248_023_552 } }
   }

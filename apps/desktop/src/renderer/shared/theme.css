@@ -571,6 +571,136 @@ nav {
   }
 }
 
+.chat-layout {
+  display: grid;
+  grid-template-columns: 15rem minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.chat-history {
+  display: grid;
+  gap: 0.5rem;
+  align-content: start;
+  padding: 0.75rem;
+  border: 1px solid rgb(255 255 255 / 8%);
+  border-radius: 0.9rem;
+  background: rgb(255 255 255 / 2%);
+  max-height: 34rem;
+  overflow-y: auto;
+}
+
+.chat-history-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.85rem;
+}
+
+.chat-history ul {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.history-item {
+  display: grid;
+  gap: 0.1rem;
+  width: 100%;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid transparent;
+  border-radius: 0.6rem;
+  background: transparent;
+  color: #c8d4e6;
+  text-align: left;
+}
+
+.history-item:hover {
+  background: rgb(255 255 255 / 6%);
+}
+
+.history-item.selected {
+  border-color: rgb(72 104 255 / 45%);
+  background: rgb(72 104 255 / 16%);
+}
+
+.history-title {
+  font-size: 0.83rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-meta {
+  color: #8fa3c8;
+  font-size: 0.7rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-main {
+  display: grid;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.inline-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.78rem;
+  color: #8fa3c8;
+}
+
+.inline-field select,
+.session-bar select,
+.alert select {
+  padding: 0.45rem 0.6rem;
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: 0.55rem;
+  background: rgb(8 11 18 / 85%);
+  color: #e7ecf5;
+  font-size: 0.8rem;
+}
+
+.alert-frozen {
+  border-color: rgb(255 196 120 / 45%);
+  background: rgb(255 196 120 / 10%);
+  color: #ffd8a1;
+}
+
+.bubble-reasoning {
+  border-style: dashed;
+  border-color: rgb(255 255 255 / 16%);
+  background: rgb(255 255 255 / 2%);
+  color: #a9b7ce;
+  font-size: 0.85rem;
+}
+
+.bubble-reasoning summary {
+  cursor: pointer;
+  color: #8fa3c8;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.bubble-system {
+  border-color: rgb(255 196 120 / 40%);
+  background: rgb(255 196 120 / 8%);
+  color: #ffd8a1;
+  font-size: 0.83rem;
+}
+
+@media (max-width: 1100px) {
+  .chat-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .page,
 .fatal {
   display: grid;

@@ -1,5 +1,6 @@
 import type { CatalogueModel, ModelArtifact } from "@maia/contracts";
 import type { DatabaseConnection } from "../../storage/db";
+import { deriveCapabilities } from "./mapper";
 
 interface CatalogueRow {
   id: string;
@@ -181,6 +182,8 @@ export class CatalogueRepository {
 }
 
 function toModel(row: CatalogueRow): CatalogueModel {
+  const tags = safeParseTags(row.tags_json);
+
   return {
     id: row.id,
     author: row.author,
@@ -193,7 +196,8 @@ function toModel(row: CatalogueRow): CatalogueModel {
     likes: row.likes,
     gated: row.gated,
     lastModifiedAt: row.last_modified_at,
-    tags: safeParseTags(row.tags_json),
+    tags,
+    capabilities: deriveCapabilities(tags, row.context_window),
     cachedAt: row.cached_at
   };
 }

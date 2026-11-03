@@ -68,6 +68,7 @@ export const sessionEndSchema = z.object({
 
 export const chatSendSchema = z.object({
   sessionId: z.string().min(1),
+  /** Omit to start a new conversation; include to continue an existing one. */
   conversationId: z.string().min(1).optional(),
   content: z.string().min(1).max(32_000)
 });
@@ -75,13 +76,55 @@ export const chatSendSchema = z.object({
 export const chatAbortSchema = z.object({
   sessionId: z.string().min(1)
 });
-
 export const chatChunkSchema = z.object({
   sessionId: z.string().min(1),
+  conversationId: z.string().min(1),
+  /** Reasoning tokens stream before the answer in models that expose them. */
+  kind: z.enum(["content", "reasoning"]),
   delta: z.string(),
   done: z.boolean(),
   tokens: z.number().int().nonnegative().optional(),
   errorMessage: z.string().optional()
+});
+
+export const gpuFiltersSchema = z.object({
+  /** Empty means "any country" — filters are opt-in. */
+  countries: z.array(z.string().trim().min(2).max(3)).max(50),
+  /** Empty means "any datacenter". */
+  datacenters: z.array(z.string().trim().min(1).max(80)).max(50),
+  minReliability: z.number().min(0).max(1).nullable(),
+  maxHourlyMicroUsd: microUsdSchema.nullable()
+});
+
+export const conversationSummarySchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1),
+  modelId: z.string().nullable(),
+  updatedAt: z.string(),
+  messageCount: z.number().int().nonnegative(),
+  /** True when no session is running for this conversation's model. */
+  frozen: z.boolean()
+});
+
+export const conversationMessageSchema = z.object({
+  id: z.string().min(1),
+  role: z.enum(["system", "user", "assistant", "tool"]),
+  content: z.string(),
+  createdAt: z.string()
+});
+
+export const conversationSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1),
+  modelId: z.string().nullable(),
+  sessionId: z.string().nullable(),
+  updatedAt: z.string()
+});
+
+export const conversationDetailSchema = z.object({
+  conversation: conversationSchema,
+  messages: z.array(conversationMessageSchema),
+  frozen: z.boolean()
 });
 
 export const sessionEventChannel = "session.event" as const;
@@ -94,3 +137,15 @@ export type SessionEnd = z.infer<typeof sessionEndSchema>;
 export type ChatSend = z.infer<typeof chatSendSchema>;
 export type ChatAbort = z.infer<typeof chatAbortSchema>;
 export type ChatChunk = z.infer<typeof chatChunkSchema>;
+export type GpuFilters = z.infer<typeof gpuFiltersSchema>;
+export type ConversationSummary = z.infer<typeof conversationSummarySchema>;
+export type ConversationMessage = z.infer<typeof conversationMessageSchema>;
+export type ConversationRecord = z.infer<typeof conversationSchema>;
+export type ConversationDetail = z.infer<typeof conversationDetailSchema>;
+
+export const DEFAULT_GPU_FILTERS: GpuFilters = {
+  countries: [],
+  datacenters: [],
+  minReliability: null,
+  maxHourlyMicroUsd: null
+};

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { DEFAULT_DIAGNOSTICS_URL } from "@maia/contracts";
+import { DEFAULT_DIAGNOSTICS_URL, DEFAULT_GPU_FILTERS } from "@maia/contracts";
 import { closeDatabase, openDatabase, type DatabaseConnection } from "../../src/main/storage/db";
 import { SettingsStore } from "../../src/main/services/settings/store";
 
@@ -17,8 +17,17 @@ describe("SettingsStore", () => {
   });
 
   it("returns the documented defaults before anything is saved", () => {
-    expect(store.get()).toEqual({ diagnosticsUrl: DEFAULT_DIAGNOSTICS_URL });
+    expect(store.get()).toEqual({
+      diagnosticsUrl: DEFAULT_DIAGNOSTICS_URL,
+      gpuFilters: DEFAULT_GPU_FILTERS
+    });
     expect(DEFAULT_DIAGNOSTICS_URL).toBe("http://localhost:8787");
+    expect(DEFAULT_GPU_FILTERS).toEqual({
+      countries: [],
+      datacenters: [],
+      minReliability: null,
+      maxHourlyMicroUsd: null
+    });
   });
 
   it("persists a new diagnostics host", () => {
@@ -44,7 +53,10 @@ describe("SettingsStore", () => {
       "INSERT INTO preferences (key, value_json, updated_at) VALUES (?, ?, ?)"
     ).run("app_settings", JSON.stringify({ diagnosticsUrl: "not a url" }), "2026-11-03T00:00:00.000Z");
 
-    expect(store.get()).toEqual({ diagnosticsUrl: DEFAULT_DIAGNOSTICS_URL });
+    expect(store.get()).toEqual({
+      diagnosticsUrl: DEFAULT_DIAGNOSTICS_URL,
+      gpuFilters: DEFAULT_GPU_FILTERS
+    });
   });
 
   it("survives a corrupted row", () => {
@@ -52,6 +64,9 @@ describe("SettingsStore", () => {
       "INSERT INTO preferences (key, value_json, updated_at) VALUES (?, ?, ?)"
     ).run("app_settings", "{not json", "2026-11-03T00:00:00.000Z");
 
-    expect(store.get()).toEqual({ diagnosticsUrl: DEFAULT_DIAGNOSTICS_URL });
+    expect(store.get()).toEqual({
+      diagnosticsUrl: DEFAULT_DIAGNOSTICS_URL,
+      gpuFilters: DEFAULT_GPU_FILTERS
+    });
   });
 });

@@ -179,8 +179,19 @@ async function bootstrap(): Promise<void> {
     compute: createMockComputeProvider({ provisionDelayMs: 400 }),
     inference: createMockInference({ chunkDelayMs: 12 }),
     idleTimeoutMinutes: config.idleTimeoutMinutes,
+    filters: () => settings.get().gpuFilters,
     logger
   });
+
+  const reconciled = await sessions.reconcile();
+  if (reconciled > 0) {
+    logger.warn({ reconciled }, "Released sessions left behind by a previous run");
+  }
+
+  const idleTimer = setInterval(() => {
+    void sessions.reapIdle();
+  }, 30_000);
+  idleTimer.unref?.();
 
   configureApplicationMenu();
 
@@ -222,6 +233,7 @@ async function bootstrap(): Promise<void> {
     registry,
     catalogue,
     sessions,
+    history: repository,
     broadcastChat: (payload) => {
       mainWindow?.webContents.send(chatEventChannel, payload);
     }
@@ -248,6 +260,11 @@ async function bootstrap(): Promise<void> {
       clearInterval(updateTimer);
       updateTimer = null;
     }
+
+    clearInterval(idleTimer);
+
+    // Never leave a chargeable GPU running after the app exits (FR-073).
+    void sessions.endAll("app_exit");
 
     updates?.dispose();
     updates = null;

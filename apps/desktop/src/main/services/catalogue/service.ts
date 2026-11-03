@@ -146,6 +146,9 @@ export function filterAndSort(
     if (query.minContextWindow && (model.contextWindow ?? 0) < query.minContextWindow) {
       return false;
     }
+    if (query.capability && !model.capabilities.includes(query.capability)) {
+      return false;
+    }
     return true;
   });
 

@@ -1,6 +1,7 @@
 import {
   appSettingsSchema,
   DEFAULT_DIAGNOSTICS_URL,
+  DEFAULT_GPU_FILTERS,
   type AppSettings,
   type SettingsUpdate
 } from "@maia/contracts";
@@ -9,7 +10,8 @@ import type { DatabaseConnection } from "../../storage/db";
 const SETTINGS_KEY = "app_settings";
 
 export const defaultAppSettings: AppSettings = {
-  diagnosticsUrl: DEFAULT_DIAGNOSTICS_URL
+  diagnosticsUrl: DEFAULT_DIAGNOSTICS_URL,
+  gpuFilters: DEFAULT_GPU_FILTERS
 };
 
 /**

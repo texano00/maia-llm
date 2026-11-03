@@ -23,6 +23,8 @@ export const catalogueModelSchema = z.object({
   gated: gatedStatusSchema,
   lastModifiedAt: z.string().nullable(),
   tags: z.array(z.string()),
+  /** Derived feature flags: chat, tools, vision, code, reasoning, long-context. */
+  capabilities: z.array(z.string()),
   cachedAt: z.string()
 });
 
@@ -43,6 +45,8 @@ export const catalogueQuerySchema = z.object({
   search: z.string().trim().max(120).optional(),
   sort: catalogueSortSchema.optional(),
   license: z.string().trim().max(80).optional(),
+  /** Feature filter, for example `tools` or `vision`. */
+  capability: z.string().trim().max(40).optional(),
   gated: z.enum(["any", "open", "gated"]).optional(),
   maxParameters: z.number().int().positive().optional(),
   minContextWindow: z.number().int().positive().optional(),

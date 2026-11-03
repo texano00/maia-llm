@@ -50,8 +50,47 @@ export function mapHuggingFaceModel(
     gated: normalizeGated(payload.gated),
     lastModifiedAt: payload.lastModified ?? null,
     tags: payload.tags ?? [],
+    capabilities: deriveCapabilities(payload.tags ?? [], contextWindow),
     cachedAt
   };
+}
+
+const CAPABILITY_TAGS: Record<string, string> = {
+  tools: "tools",
+  "tool-use": "tools",
+  "function-calling": "tools",
+  vision: "vision",
+  multimodal: "vision",
+  image: "vision",
+  code: "code",
+  coding: "code",
+  reasoning: "reasoning",
+  thinking: "reasoning",
+  "chain-of-thought": "reasoning",
+  multilingual: "multilingual"
+};
+
+/**
+ * Turns free-form Hub tags into the small set of features the catalogue can sort
+ * and filter on ("order by features enabled").
+ */
+export function deriveCapabilities(tags: string[], contextWindow: number | null): string[] {
+  const capabilities = new Set<string>(["chat"]);
+
+  for (const tag of tags) {
+    const normalized = tag.toLowerCase();
+    for (const [needle, capability] of Object.entries(CAPABILITY_TAGS)) {
+      if (normalized.includes(needle)) {
+        capabilities.add(capability);
+      }
+    }
+  }
+
+  if (contextWindow !== null && contextWindow >= 32_768) {
+    capabilities.add("long-context");
+  }
+
+  return [...capabilities].sort();
 }
 
 export function mapArtifacts(

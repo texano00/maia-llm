@@ -369,6 +369,32 @@ session costs storage only until the user needs it again.
 
 ---
 
+## Phase 12: Parallel sessions and conversation continuity
+
+**Goal**: Let users run several models at once, chat like a modern web LLM (model selector, live
+reasoning, history sidebar), and resume or re-target conversations whose model stopped.
+
+**Independent Test**: Start two models, chat in both, stop one, reopen its conversation (shown
+frozen), restart that model and continue — then repeat the flow switching the frozen conversation
+to the other running model and confirm the switch notice appears in transcript and history.
+
+**Covers**: FR-014, FR-076–FR-081.
+
+- [x] T165 Allow concurrent sessions: drop the single-active index, keep one runtime per session, expose `session.list`
+- [x] T166 Add GPU preference filters (countries, datacenters, minimum reliability, maximum hourly price) with no filters by default, applied when ranking offers and surfaced in Settings
+- [x] T167 Catalogue ordering by downloads, freshness, likes, size, and context plus feature filters derived from Hub tags
+- [x] T168 Chat model selector for running sessions and per-conversation model switching with an explicit confirmation
+- [x] T169 Stream reasoning separately from content and render it in a collapsible block
+- [x] T170 Move conversation history into a chat sub-sidebar, mark conversations frozen when their model is gone, and drop the primary History entry
+- [x] T171 Restart-or-switch flow for frozen conversations, with a system notice inserted at the switch point and earlier replies left attributed to the previous model
+- [ ] T172 Add conversation rename, delete, and search to the chat sub-sidebar
+- [ ] T173 Cover the frozen → restart and frozen → switch flows with Playwright E2E once the desktop harness runs in CI
+
+**Checkpoint**: Several models can run in parallel, every conversation is resumable, and no reply is
+silently re-attributed after a model switch.
+
+---
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies

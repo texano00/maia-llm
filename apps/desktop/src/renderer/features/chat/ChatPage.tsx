@@ -1,122 +1,481 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import type {
+  ConversationDetail,
+  ConversationSummary,
+  Estimate,
+  Session
+} from "@maia/contracts";
 import { useWorkspace } from "../../shared/session/WorkspaceProvider";
 import { accruedMicroUsd, formatElapsed, formatUsd } from "../../shared/format";
 
+interface StreamingBubble {
+  reasoning: string;
+  content: string;
+}
+
 export function ChatPage() {
-  const { session, messages, streaming, sendMessage, abort, endSession, error, clearError } =
-    useWorkspace();
+  const { sessions, reloadSessions, error: workspaceError, clearError } = useWorkspace();
+  const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const [detail, setDetail] = useState<ConversationDetail | null>(null);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [streaming, setStreaming] = useState<StreamingBubble | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [now, setNow] = useState(() => Date.now());
-  const endRef = useRef<HTMLDivElement>(null);
+  const transcriptRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (!session) {
+  const activeSession = sessions.find((session) => session.id === activeSessionId) ?? null;
+  const frozen =
+    detail !== null && detail.conversation.modelId !== null && !sessions.some((session) => session.modelId === detail.conversation.modelId);
+
+  const loadConversations = useCallback(async () => {
+    const bridge = window.maia;
+    if (!bridge) {
       return;
     }
 
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [session]);
+    const result = await bridge.invoke<ConversationSummary[]>("conversation.list", { limit: 100 });
+    if (result.ok) {
+      setConversations(result.data);
+    }
+  }, []);
+
+  const openConversation = useCallback(
+    async (id: string) => {
+      const bridge = window.maia;
+      if (!bridge) {
+        return;
+      }
+
+      setActiveConversationId(id);
+      setStreaming(null);
+      const result = await bridge.invoke<ConversationDetail>("conversation.get", { id });
+
+      if (result.ok) {
+        setDetail(result.data);
+        const match = sessions.find((session) => session.modelId === result.data.conversation.modelId);
+        setActiveSessionId(match?.id ?? null);
+      } else {
+        setError(result.error.message);
+      }
+    },
+    [sessions]
+  );
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    void loadConversations();
+  }, [loadConversations]);
 
-  if (!session) {
-    return (
-      <section>
-        <p className="eyebrow">Chat</p>
-        <h1>No active session</h1>
-        <p className="lede">
-          Pick a model in the catalogue, review the estimate, and confirm it to start a session.
-        </p>
-        <Link className="nav-link active" to="/catalogue">
-          Go to the catalogue
-        </Link>
-      </section>
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const bridge = window.maia;
+    if (!bridge) {
+      return;
+    }
+
+    return bridge.onChatEvent((chunk) => {
+      if (chunk.conversationId !== activeConversationId) {
+        return;
+      }
+
+      if (chunk.done) {
+        setStreaming((current) => {
+          if (current) {
+            setDetail((existing) =>
+              existing
+                ? {
+                    ...existing,
+                    messages: [
+                      ...existing.messages,
+                      {
+                        id: `assistant-${Date.now()}`,
+                        role: "assistant",
+                        content: current.content,
+                        createdAt: new Date().toISOString()
+                      }
+                    ]
+                  }
+                : existing
+            );
+          }
+          return null;
+        });
+        setBusy(false);
+        void loadConversations();
+        return;
+      }
+
+      setStreaming((current) => {
+        const next = current ?? { reasoning: "", content: "" };
+        return chunk.kind === "reasoning"
+          ? { ...next, reasoning: next.reasoning + chunk.delta }
+          : { ...next, content: next.content + chunk.delta };
+      });
+    });
+  }, [activeConversationId, loadConversations]);
+
+  useEffect(() => {
+    transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight, behavior: "smooth" });
+  }, [detail?.messages.length, streaming?.content]);
+
+  async function send(): Promise<void> {
+    const bridge = window.maia;
+    const content = draft.trim();
+    if (!bridge || !content || !activeSession) {
+      return;
+    }
+
+    setDraft("");
+    setBusy(true);
+    setError(null);
+    setDetail((existing) =>
+      existing
+        ? {
+            ...existing,
+            messages: [
+              ...existing.messages,
+              {
+                id: `user-${Date.now()}`,
+                role: "user",
+                content,
+                createdAt: new Date().toISOString()
+              }
+            ]
+          }
+        : existing
     );
+    setStreaming({ reasoning: "", content: "" });
+
+    const result = await bridge.invoke<{ conversationId: string }>("chat.send", {
+      sessionId: activeSession.id,
+      conversationId: activeConversationId ?? undefined,
+      content
+    });
+
+    if (!result.ok) {
+      setBusy(false);
+      setStreaming(null);
+      setError(result.error.message);
+      return;
+    }
+
+    if (!activeConversationId) {
+      setActiveConversationId(result.data.conversationId);
+      await loadConversations();
+    }
   }
 
+  async function switchModel(session: Session): Promise<void> {
+    const bridge = window.maia;
+    if (!bridge || !activeConversationId) {
+      setActiveSessionId(session.id);
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Continue this conversation with ${session.modelId}?\n\nThe chat will show a switch note, and earlier replies stay attributed to the previous model.`
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    const result = await bridge.invoke<ConversationDetail>("conversation.switchModel", {
+      conversationId: activeConversationId,
+      sessionId: session.id,
+      confirm: true
+    });
+
+    if (result.ok) {
+      setDetail(result.data);
+      setActiveSessionId(session.id);
+      await loadConversations();
+    } else {
+      setError(result.error.message);
+    }
+  }
+
+  async function reviveModel(modelId: string): Promise<void> {
+    const bridge = window.maia;
+    if (!bridge) {
+      return;
+    }
+
+    setBusy(true);
+    const estimate = await bridge.invoke<Estimate>("estimate.create", {
+      modelId,
+      expectedMinutes: 30
+    });
+
+    if (!estimate.ok) {
+      setBusy(false);
+      setError(estimate.error.message);
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Start ${estimate.data.gpuName} at ${formatUsd(estimate.data.hourlyRateMicroUsd)}/h?\n\nExpected 30 min cost: ${formatUsd(estimate.data.projectedTotalMicroUsd)} (range ${formatUsd(estimate.data.rangeMicroUsd.low)}–${formatUsd(estimate.data.rangeMicroUsd.high)}).`
+    );
+
+    if (!confirmed) {
+      setBusy(false);
+      return;
+    }
+
+    const started = await bridge.invoke<Session>("session.start", {
+      estimateId: estimate.data.id,
+      confirmEstimate: true
+    });
+    setBusy(false);
+
+    if (started.ok) {
+      await reloadSessions();
+      setActiveSessionId(started.data.id);
+      setError(null);
+    } else {
+      setError(started.error.message);
+    }
+  }
+
+  const showError = error ?? workspaceError;
+
   return (
-    <section>
-      <p className="eyebrow">Chat</p>
-      <h1>{session.modelId}</h1>
-
-      <div className="session-bar">
-        <span className="pill pill-ok">{session.state}</span>
-        <span className="pill">{session.gpuName ?? "GPU"}</span>
-        <span className="pill">{formatUsd(session.hourlyRateMicroUsd)}/h</span>
-        <span className="pill">elapsed {formatElapsed(session.startedAt, now)}</span>
-        <span className="pill">
-          accrued {formatUsd(accruedMicroUsd(session.hourlyRateMicroUsd, session.startedAt, now))}
-        </span>
-        {session.simulated ? <span className="pill pill-warning">simulated</span> : null}
-        <button type="button" className="ghost-button" onClick={() => void endSession()}>
-          End session and release GPU
-        </button>
-      </div>
-
-      {error ? (
-        <div className="alert" role="alert">
-          <span>{error}</span>
-          <button type="button" className="ghost-button" onClick={clearError}>
-            Dismiss
-          </button>
+    <section className="chat-layout">
+      <aside className="chat-history" aria-label="Chat history">
+        <div className="chat-history-head">
+          <strong>Chats</strong>
+          <Link className="ghost-button" to="/catalogue">
+            New
+          </Link>
         </div>
-      ) : null}
+        <ul>
+          {conversations.length === 0 ? <li className="muted small">No conversations yet.</li> : null}
+          {conversations.map((conversation) => (
+            <li key={conversation.id}>
+              <button
+                type="button"
+                className={
+                  conversation.id === activeConversationId ? "history-item selected" : "history-item"
+                }
+                onClick={() => void openConversation(conversation.id)}
+              >
+                <span className="history-title">{conversation.title}</span>
+                <span className="history-meta">
+                  {conversation.modelId ?? "unknown model"}
+                  {conversation.frozen ? " · frozen" : ""}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      </aside>
 
-      <div className="transcript">
-        {messages.length === 0 ? (
-          <p className="muted">Send the first message to start generating.</p>
-        ) : null}
-        {messages.map((message) => (
-          <article key={message.id} className={`bubble bubble-${message.role}`}>
-            <header>
-              {message.role === "user" ? "You" : "Model"}
-              {message.tokens ? <span className="muted small"> · {message.tokens} tokens</span> : null}
-            </header>
-            <p>{message.content || (message.streaming ? "…" : "")}</p>
-          </article>
-        ))}
-        <div ref={endRef} />
-      </div>
+      <div className="chat-main">
+        <div className="session-bar">
+          <label className="inline-field">
+            <span>Model</span>
+            <select
+              value={activeSessionId ?? ""}
+              onChange={(event) => {
+                const session = sessions.find((entry) => entry.id === event.target.value);
+                if (session) {
+                  void switchModel(session);
+                }
+                if (!event.target.value) {
+                  setActiveSessionId(null);
+                }
+              }}
+            >
+              <option value="">
+                {sessions.length === 0 ? "No model running" : "Select a running model"}
+              </option>
+              {sessions.map((session) => (
+                <option key={session.id} value={session.id}>
+                  {session.modelId} · {session.gpuName}
+                </option>
+              ))}
+            </select>
+          </label>
 
-      <form
-        className="composer"
-        onSubmit={(event) => {
-          event.preventDefault();
-          const content = draft.trim();
-          if (!content || streaming) {
-            return;
-          }
-          setDraft("");
-          void sendMessage(content);
-        }}
-      >
-        <textarea
-          value={draft}
-          rows={3}
-          placeholder="Ask the model something…"
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey) {
-              event.preventDefault();
-              event.currentTarget.form?.requestSubmit();
-            }
-          }}
-        />
-        <div className="update-actions">
-          <button type="submit" disabled={streaming || draft.trim().length === 0}>
-            {streaming ? "Generating…" : "Send"}
-          </button>
-          {streaming ? (
-            <button type="button" className="ghost-button" onClick={() => void abort()}>
-              Stop
-            </button>
+          {activeSession ? (
+            <>
+              <span className="pill pill-ok">{activeSession.state}</span>
+              <span className="pill">{formatUsd(activeSession.hourlyRateMicroUsd)}/h</span>
+              <span className="pill">elapsed {formatElapsed(activeSession.startedAt, now)}</span>
+              <span className="pill">
+                accrued {formatUsd(accruedMicroUsd(activeSession.hourlyRateMicroUsd, activeSession.startedAt, now))}
+              </span>
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={async () => {
+                  const bridge = window.maia;
+                  if (!bridge) {
+                    return;
+                  }
+                  await bridge.invoke("session.end", {
+                    sessionId: activeSession.id,
+                    reason: "user"
+                  });
+                  setActiveSessionId(null);
+                  await reloadSessions();
+                }}
+              >
+                Stop this model
+              </button>
+            </>
           ) : null}
         </div>
-      </form>
+
+        {showError ? (
+          <div className="alert" role="alert">
+            <span>{showError}</span>
+            <button
+              type="button"
+              className="ghost-button"
+              onClick={() => {
+                setError(null);
+                clearError();
+              }}
+            >
+              Dismiss
+            </button>
+          </div>
+        ) : null}
+
+        {frozen && detail?.conversation.modelId ? (
+          <div className="alert alert-frozen" role="status">
+            <div>
+              <strong>This chat is frozen.</strong>{" "}
+              {detail.conversation.modelId} is not running any more. Restart it to continue where you
+              left off, or switch this conversation to another running model.
+            </div>
+            <div className="update-actions">
+              <button type="button" disabled={busy} onClick={() => void reviveModel(detail.conversation.modelId!)}>
+                {busy ? "Starting…" : `Restart ${shortModel(detail.conversation.modelId)}`}
+              </button>
+              {sessions.length > 0 ? (
+                <select
+                  defaultValue=""
+                  onChange={(event) => {
+                    const session = sessions.find((entry) => entry.id === event.target.value);
+                    if (session) {
+                      void switchModel(session);
+                    }
+                  }}
+                >
+                  <option value="" disabled>
+                    Continue with another model…
+                  </option>
+                  {sessions.map((session) => (
+                    <option key={session.id} value={session.id}>
+                      {session.modelId}
+                    </option>
+                  ))}
+                </select>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+
+        <div className="transcript" ref={transcriptRef}>
+          {detail === null ? (
+            <p className="muted">Pick a chat on the left, or start one from the catalogue.</p>
+          ) : null}
+          {detail?.messages.map((message) => (
+            <article key={message.id} className={`bubble bubble-${message.role}`}>
+              <header>{roleLabel(message.role)}</header>
+              <p>{message.content}</p>
+            </article>
+          ))}
+          {streaming ? (
+            <>
+              {streaming.reasoning ? (
+                <details className="bubble bubble-reasoning" open>
+                  <summary>Thinking…</summary>
+                  <p>{streaming.reasoning}</p>
+                </details>
+              ) : null}
+              <article className="bubble bubble-assistant">
+                <header>Model</header>
+                <p>{streaming.content || "…"}</p>
+              </article>
+            </>
+          ) : null}
+        </div>
+
+        <form
+          className="composer"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void send();
+          }}
+        >
+          <textarea
+            rows={3}
+            value={draft}
+            placeholder={
+              activeSession
+                ? "Ask the model something…"
+                : frozen
+                  ? "Restart the model or switch models to continue this chat."
+                  : "Start a model from the catalogue to chat."
+            }
+            disabled={!activeSession || busy}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                event.currentTarget.form?.requestSubmit();
+              }
+            }}
+          />
+          <div className="update-actions">
+            <button type="submit" disabled={!activeSession || busy || draft.trim().length === 0}>
+              {busy ? "Generating…" : "Send"}
+            </button>
+            {busy && activeSession ? (
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={async () => {
+                  await window.maia?.invoke("chat.abort", { sessionId: activeSession.id });
+                }}
+              >
+                Stop
+              </button>
+            ) : null}
+            {!activeSession && !frozen ? (
+              <Link className="ghost-button" to="/catalogue">
+                Choose a model
+              </Link>
+            ) : null}
+          </div>
+        </form>
+      </div>
     </section>
   );
+}
+
+function shortModel(modelId: string): string {
+  return modelId.split("/").at(-1) ?? modelId;
+}
+
+function roleLabel(role: string): string {
+  switch (role) {
+    case "user":
+      return "You";
+    case "assistant":
+      return "Model";
+    case "system":
+      return "Notice";
+    default:
+      return role;
+  }
 }

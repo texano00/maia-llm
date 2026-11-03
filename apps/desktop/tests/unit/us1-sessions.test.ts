@@ -109,7 +109,11 @@ describe("SessionOrchestrator", () => {
     expect(store.getActive()).toHaveLength(1);
 
     const chunks: string[] = [];
-    const result = await orchestrator.send(session.id, "hi", (delta) => chunks.push(delta));
+    const result = await orchestrator.send(session.id, "hi", (kind, delta) => {
+      if (kind === "content") {
+        chunks.push(delta);
+      }
+    });
 
     expect(result.text).toBe("hello from the mock runtime");
     expect(chunks.join("")).toBe("hello from the mock runtime");
@@ -124,16 +128,45 @@ describe("SessionOrchestrator", () => {
     expect(orchestrator.getStatus()).toBeNull();
   });
 
-  it("refuses a second concurrent session", async () => {
+  it("runs several sessions in parallel, one per model conversation", async () => {
     const { orchestrator } = createOrchestrator();
     const first = await orchestrator.createEstimate("Qwen/Qwen2.5-7B-Instruct");
-    await orchestrator.start({ estimateId: first.id, confirmEstimate: true });
+    const firstSession = await orchestrator.start({ estimateId: first.id, confirmEstimate: true });
 
-    const second = await orchestrator.createEstimate("Qwen/Qwen2.5-7B-Instruct");
+    const second = await orchestrator.createEstimate("mistralai/Mistral-7B-Instruct-v0.3");
+    const secondSession = await orchestrator.start({ estimateId: second.id, confirmEstimate: true });
 
-    await expect(orchestrator.start({ estimateId: second.id, confirmEstimate: true })).rejects.toMatchObject(
-      { code: "SESSION_CONFLICT" }
+    expect(orchestrator.listSessions()).toHaveLength(2);
+    expect(orchestrator.findSessionForModel("mistralai/Mistral-7B-Instruct-v0.3")?.id).toBe(
+      secondSession.id
     );
+
+    await orchestrator.end(firstSession.id, "user");
+
+    expect(orchestrator.listSessions()).toHaveLength(1);
+    expect(orchestrator.getSession(secondSession.id)?.state).toBe("active");
+  });
+
+  it("respects the GPU filters when ranking offers", async () => {
+    const filtered = createMockComputeProvider();
+    const offer = await filtered.findOffer({
+      modelId: "Qwen/Qwen2.5-7B-Instruct",
+      filters: { countries: ["US"], datacenters: [], minReliability: null, maxHourlyMicroUsd: null }
+    });
+
+    expect(offer?.gpuName).toBe("Mock L40S");
+
+    const none = await filtered.findOffer({
+      modelId: "Qwen/Qwen2.5-7B-Instruct",
+      filters: {
+        countries: ["JP"],
+        datacenters: [],
+        minReliability: null,
+        maxHourlyMicroUsd: null
+      }
+    });
+
+    expect(none).toBeNull();
   });
 
   it("releases the GPU when the session idles past the configured window", async () => {
@@ -142,10 +175,10 @@ describe("SessionOrchestrator", () => {
     const session = await orchestrator.start({ estimateId: estimate.id, confirmEstimate: true });
 
     clock += 5 * 60_000;
-    await expect(orchestrator.reapIdle()).resolves.toBeNull();
+    await expect(orchestrator.reapIdle()).resolves.toHaveLength(0);
 
     clock += 6 * 60_000;
-    const ended = await orchestrator.reapIdle();
+    const [ended] = await orchestrator.reapIdle();
 
     expect(ended?.endReason).toBe("idle");
     expect(compute.destroyed).toEqual([session.instanceId]);
@@ -160,7 +193,7 @@ describe("SessionOrchestrator", () => {
     await orchestrator.send(session.id, "still here", () => undefined);
     clock += 9 * 60_000;
 
-    await expect(orchestrator.reapIdle()).resolves.toBeNull();
+    await expect(orchestrator.reapIdle()).resolves.toHaveLength(0);
   });
 
   it("reconciles instances left behind by a crash", async () => {

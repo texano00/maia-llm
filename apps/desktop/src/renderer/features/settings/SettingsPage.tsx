@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { DEFAULT_DIAGNOSTICS_URL, type AppSettings } from "@maia/contracts";
+import { DEFAULT_DIAGNOSTICS_URL, type AppSettings, type GpuFilters } from "@maia/contracts";
 import { useUpdates } from "../../shared/updates/UpdatesProvider";
 import { describeUpdateStatus } from "../../shared/updates/UpdateToast";
 
@@ -9,7 +9,12 @@ export function SettingsPage() {
 
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [diagnosticsUrl, setDiagnosticsUrl] = useState(DEFAULT_DIAGNOSTICS_URL);
+  const [countries, setCountries] = useState("");
+  const [datacenters, setDatacenters] = useState("");
+  const [minReliability, setMinReliability] = useState("");
+  const [maxHourlyUsd, setMaxHourlyUsd] = useState("");
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [gpuState, setGpuState] = useState<"idle" | "saving" | "saved">("idle");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -27,6 +32,7 @@ export function SettingsPage() {
       if (result.ok) {
         setSettings(result.data);
         setDiagnosticsUrl(result.data.diagnosticsUrl);
+        applyGpuFilters(result.data.gpuFilters);
       }
     });
 
@@ -34,6 +40,48 @@ export function SettingsPage() {
       mounted = false;
     };
   }, []);
+
+  function applyGpuFilters(filters: GpuFilters): void {
+    setCountries(filters.countries.join(", "));
+    setDatacenters(filters.datacenters.join(", "));
+    setMinReliability(filters.minReliability === null ? "" : String(filters.minReliability));
+    setMaxHourlyUsd(
+      filters.maxHourlyMicroUsd === null ? "" : (filters.maxHourlyMicroUsd / 1_000_000).toFixed(2)
+    );
+  }
+
+  async function saveGpuFilters(): Promise<void> {
+    const bridge = window.maia;
+    if (!bridge) {
+      return;
+    }
+
+    setGpuState("saving");
+    const filters: GpuFilters = {
+      countries: countries
+        .split(",")
+        .map((entry) => entry.trim().toUpperCase())
+        .filter((entry) => entry.length >= 2),
+      datacenters: datacenters
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0),
+      minReliability: minReliability.trim() === "" ? null : Math.min(1, Math.max(0, Number(minReliability))),
+      maxHourlyMicroUsd:
+        maxHourlyUsd.trim() === "" ? null : Math.round(Number(maxHourlyUsd) * 1_000_000)
+    };
+
+    const result = await bridge.invoke<AppSettings>("settings.update", { gpuFilters: filters });
+
+    if (result.ok) {
+      setSettings(result.data);
+      applyGpuFilters(result.data.gpuFilters);
+      setGpuState("saved");
+    } else {
+      setGpuState("idle");
+      setError(result.error.message);
+    }
+  }
 
   async function saveDiagnostics(next: string): Promise<void> {
     const bridge = window.maia;
@@ -107,6 +155,80 @@ export function SettingsPage() {
           )}
         </div>
       </div>
+
+      <form
+        className="settings-card settings-card-stacked"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void saveGpuFilters();
+        }}
+      >
+        <div>
+          <h2>GPU preferences</h2>
+          <p className="lede">
+            Optional filters applied when Maia ranks GPUs for a model. Leave everything empty to
+            consider every offer — no filters are active by default.
+          </p>
+          <label className="field">
+            <span>Countries (ISO codes, comma separated)</span>
+            <input
+              type="text"
+              placeholder="e.g. IT, DE"
+              value={countries}
+              onChange={(event) => setCountries(event.target.value)}
+            />
+          </label>
+          <label className="field">
+            <span>Trusted datacenters (comma separated, partial match)</span>
+            <input
+              type="text"
+              placeholder="e.g. trusted-it, trusted-us"
+              value={datacenters}
+              onChange={(event) => setDatacenters(event.target.value)}
+            />
+          </label>
+          <label className="field">
+            <span>Minimum reliability (0–1)</span>
+            <input
+              type="number"
+              min="0"
+              max="1"
+              step="0.01"
+              placeholder="any"
+              value={minReliability}
+              onChange={(event) => setMinReliability(event.target.value)}
+            />
+          </label>
+          <label className="field">
+            <span>Maximum hourly price (USD)</span>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              placeholder="no ceiling"
+              value={maxHourlyUsd}
+              onChange={(event) => setMaxHourlyUsd(event.target.value)}
+            />
+          </label>
+          {gpuState === "saved" ? <p className="field-hint">GPU preferences saved.</p> : null}
+        </div>
+        <div className="update-actions">
+          <button type="submit" disabled={!bridgeAvailable || gpuState === "saving"}>
+            {gpuState === "saving" ? "Saving…" : "Save GPU preferences"}
+          </button>
+          <button
+            type="button"
+            className="ghost-button"
+            disabled={!bridgeAvailable}
+            onClick={() => {
+              applyGpuFilters({ countries: [], datacenters: [], minReliability: null, maxHourlyMicroUsd: null });
+              void saveGpuFilters();
+            }}
+          >
+            Clear filters
+          </button>
+        </div>
+      </form>
 
       <form
         className="settings-card settings-card-stacked"

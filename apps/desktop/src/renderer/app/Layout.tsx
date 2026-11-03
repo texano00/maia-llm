@@ -6,7 +6,6 @@ import { UpdateToast } from "../shared/updates/UpdateToast";
 const navigation = [
   { to: "/catalogue", label: "Catalogue" },
   { to: "/chat", label: "Chat" },
-  { to: "/history", label: "History" },
   { to: "/settings", label: "Settings" }
 ];
 

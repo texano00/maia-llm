@@ -165,8 +165,14 @@ The user decides to protect themselves against Hugging Face outages or the remov
 - **FR-011**: Users MUST be able to adjust generation settings such as context size, response length, and randomness, with sensible defaults.
 - **FR-012**: System MUST release the remote GPU when the user ends the session, when the session is idle beyond a configurable timeout, when the app closes, or when a failure makes the session unusable.
 - **FR-013**: System MUST ensure no orphaned chargeable instances remain, including reconciliation of instances created by the app on startup.
-- **FR-014**: System MUST support exactly one active inference session per installation in this release and MUST explain this limit when a second session is attempted.
+- **FR-014**: System MUST support multiple concurrent inference sessions, one per conversation, and MUST expose every running model in a single model selector; users MUST be able to end each session independently.
 - **FR-015**: System MUST warn the user and offer alternatives when no GPU offer satisfies the model requirements and the user's price ceiling.
+- **FR-076**: Users MUST be able to define optional GPU preferences — allowed countries, trusted datacenters, minimum reliability, and a maximum hourly price — and no filter is active by default; when no offer satisfies the filters the app MUST say so and point to the filter settings.
+- **FR-077**: Catalogue results MUST be orderable by downloads, freshness, likes, parameter count, and context window, and MUST be filterable by enabled features such as tool use, reasoning, vision, code, long context, and multilingual support.
+- **FR-078**: The chat screen MUST offer a model selector for running sessions and MUST support continuing a conversation on a different model, inserting a visible switch notice in the transcript and recording it in the conversation metadata.
+- **FR-079**: While a model is working, System MUST stream and display its reasoning or thinking output separately from the answer, in a collapsible block that the user can hide.
+- **FR-080**: Conversation history MUST be presented as a sub-sidebar inside the chat screen, not in the primary navigation, and any conversation MUST be resumable at any time; a conversation whose model is no longer running MUST be shown as frozen.
+- **FR-081**: A frozen conversation MUST offer exactly two continuations — restart the original model, or continue with a different running model after an explicit confirmation — and MUST keep earlier replies attributed to the model that produced them.
 
 #### Cost Transparency and Control
 

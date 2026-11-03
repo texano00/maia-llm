@@ -9,6 +9,10 @@ export function CataloguePage() {
     loadingCatalogue,
     search,
     setSearch,
+    sort,
+    setSort,
+    capability,
+    setCapability,
     refreshCatalogue,
     selectModel,
     selected,
@@ -17,7 +21,7 @@ export function CataloguePage() {
     prepareEstimate,
     startSession,
     starting,
-    session,
+    sessions,
     error,
     clearError
   } = useWorkspace();
@@ -58,7 +62,35 @@ export function CataloguePage() {
           {loadingCatalogue ? "Refreshing…" : "Refresh"}
         </button>
         {stale ? <span className="pill pill-warning">Offline snapshot</span> : null}
-        {session ? <span className="pill pill-ok">Session active</span> : null}
+        {sessions.length > 0 ? (
+          <span className="pill pill-ok">{sessions.length} model(s) running</span>
+        ) : null}
+      </div>
+
+      <div className="toolbar">
+        <label className="inline-field">
+          <span>Order by</span>
+          <select value={sort} onChange={(event) => setSort(event.target.value as typeof sort)}>
+            <option value="downloads">Most downloads</option>
+            <option value="last-modified">Newest</option>
+            <option value="likes">Most liked</option>
+            <option value="context-desc">Largest context</option>
+            <option value="parameters-asc">Smallest model</option>
+            <option value="parameters-desc">Largest model</option>
+          </select>
+        </label>
+        <label className="inline-field">
+          <span>Feature</span>
+          <select value={capability} onChange={(event) => setCapability(event.target.value)}>
+            <option value="">Any feature</option>
+            <option value="tools">Tool use</option>
+            <option value="reasoning">Reasoning</option>
+            <option value="vision">Vision</option>
+            <option value="code">Code</option>
+            <option value="long-context">Long context</option>
+            <option value="multilingual">Multilingual</option>
+          </select>
+        </label>
       </div>
 
       <div className="catalogue-grid">
@@ -195,8 +227,7 @@ export function CataloguePage() {
                     }}
                   >
                     {starting ? "Provisioning…" : "Confirm and start session"}
-                  </button>
-                </div>
+                  </button>                </div>
               )}
             </>
           ) : (

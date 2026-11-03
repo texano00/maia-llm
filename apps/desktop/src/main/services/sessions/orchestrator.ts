@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
-import type { Estimate, Session, SessionStart } from "@maia/contracts";
+import type { Estimate, GpuFilters, Session, SessionStart } from "@maia/contracts";
 import { buildEstimate } from "../cost/estimator";
 import type { SessionStore } from "./store";
+
+export type StreamKind = "content" | "reasoning";
 
 export interface ComputeOffer {
   offerId: number;
@@ -13,7 +15,7 @@ export interface ComputeOffer {
 }
 
 export interface ComputeProvider {
-  findOffer(requirements: { modelId: string }): Promise<ComputeOffer | null>;
+  findOffer(requirements: { modelId: string; filters?: GpuFilters | undefined }): Promise<ComputeOffer | null>;
   createInstance(offer: ComputeOffer, label: string): Promise<{ instanceId: number }>;
   waitUntilReady(instanceId: number, timeoutMs: number): Promise<void>;
   destroyInstance(instanceId: number): Promise<void>;
@@ -25,7 +27,7 @@ export interface InferenceRuntime {
     modelId: string;
     prompt: string;
     signal: AbortSignal;
-    onDelta: (text: string) => void;
+    onDelta: (kind: StreamKind, text: string) => void;
   }): Promise<{ tokens: number; text: string }>;
 }
 
@@ -55,36 +57,46 @@ export interface SessionOrchestratorOptions {
   now?: () => number;
   logger?: { info(message: string, context?: Record<string, unknown>): void; warn(message: string, context?: Record<string, unknown>): void } | undefined;
   readinessTimeoutMs?: number;
+  /** Returns the user's current GPU preferences so offers respect them. */
+  filters?: () => GpuFilters | undefined;
+}
+
+interface SessionRuntime {
+  session: Session;
+  lastActivityAt: number;
+  abort: AbortController | null;
 }
 
 const DEFAULT_READINESS_TIMEOUT_MS = 5 * 60_000;
 
 /**
- * Owns the whole chargeable lifecycle: estimate → provisioning → ready → active
- * → ending → ended. Nothing is provisioned without a confirmed estimate
- * (FR-007), and only one session may be active per installation (FR-014).
+ * Owns the chargeable lifecycle of every session. Any number of sessions may run
+ * at once (one per model conversation), nothing is provisioned without a
+ * confirmed estimate (FR-007), and each session is released on idle, on demand,
+ * or by crash reconciliation (FR-012/FR-013).
  */
 export class SessionOrchestrator {
   private readonly now: () => number;
   private readonly estimates = new Map<string, Estimate>();
-  private active: { session: Session; lastActivityAt: number; abort: AbortController | null } | null = null;
+  private readonly runtimes = new Map<string, SessionRuntime>();
 
   constructor(private readonly options: SessionOrchestratorOptions) {
     this.now = options.now ?? (() => Date.now());
 
-    // Rebuild in-memory state from the database after a restart.
-    const [existing] = options.store.getActive();
-    if (existing) {
-      this.active = { session: existing, lastActivityAt: this.now(), abort: null };
+    for (const session of options.store.getActive()) {
+      this.runtimes.set(session.id, { session, lastActivityAt: this.now(), abort: null });
     }
   }
 
   async createEstimate(modelId: string, expectedMinutes = 30): Promise<Estimate> {
-    const offer = await this.options.compute.findOffer({ modelId });
+    const filters = this.options.filters?.();
+    const offer = await this.options.compute.findOffer({ modelId, filters });
     if (!offer) {
       throw new SessionError(
         "PROVIDER_UNAVAILABLE",
-        "No GPU offer currently meets this model's requirements."
+        filters && hasActiveFilters(filters)
+          ? "No GPU matches this model and your GPU filters. Relax the filters in Settings and try again."
+          : "No GPU offer currently meets this model's requirements."
       );
     }
 
@@ -117,14 +129,8 @@ export class SessionOrchestrator {
       );
     }
 
-    if (this.active) {
-      throw new SessionError(
-        "SESSION_CONFLICT",
-        "A session is already running. End it before starting another one."
-      );
-    }
-
-    const offer = await this.options.compute.findOffer({ modelId: estimate.modelId });
+    const filters = this.options.filters?.();
+    const offer = await this.options.compute.findOffer({ modelId: estimate.modelId, filters });
     if (!offer) {
       throw new SessionError("PROVIDER_UNAVAILABLE", "The selected GPU is no longer available.");
     }
@@ -159,7 +165,9 @@ export class SessionOrchestrator {
         this.options.readinessTimeoutMs ?? DEFAULT_READINESS_TIMEOUT_MS
       );
 
-      this.options.store.transition(sessionId, "ready", { readyAt: new Date(this.now()).toISOString() });
+      this.options.store.transition(sessionId, "ready", {
+        readyAt: new Date(this.now()).toISOString()
+      });
       const session = this.options.store.get(sessionId);
       if (!session) {
         throw new SessionError("NOT_FOUND", "The session disappeared while provisioning.");
@@ -167,13 +175,18 @@ export class SessionOrchestrator {
 
       this.options.store.transition(sessionId, "active");
       const activeSession: Session = { ...session, state: "active" };
-      this.active = { session: activeSession, lastActivityAt: this.now(), abort: null };
+      this.runtimes.set(sessionId, {
+        session: activeSession,
+        lastActivityAt: this.now(),
+        abort: null
+      });
       this.estimates.delete(estimate.id);
 
       this.options.logger?.info("Session active", {
         sessionId,
         modelId: estimate.modelId,
-        instanceId
+        instanceId,
+        running: this.runtimes.size
       });
 
       return activeSession;
@@ -192,83 +205,99 @@ export class SessionOrchestrator {
     }
   }
 
-  getStatus(): Session | null {
-    if (this.active) {
-      const fresh = this.options.store.get(this.active.session.id);
-      if (fresh) {
-        this.active.session = fresh;
+  listSessions(): Session[] {
+    return [...this.runtimes.values()].map((runtime) => this.refresh(runtime).session);
+  }
+
+  getSession(sessionId: string): Session | null {
+    const runtime = this.runtimes.get(sessionId);
+    return runtime ? this.refresh(runtime).session : null;
+  }
+
+  /** First running session for a model, used when reviving a conversation. */
+  findSessionForModel(modelId: string): Session | null {
+    for (const runtime of this.runtimes.values()) {
+      if (runtime.session.modelId === modelId) {
+        return this.refresh(runtime).session;
       }
     }
 
-    return this.active?.session ?? null;
+    return null;
+  }
+
+  getStatus(): Session | null {
+    const [first] = this.runtimes.values();
+    return first ? this.refresh(first).session : null;
   }
 
   async send(
     sessionId: string,
     content: string,
-    onDelta: (text: string) => void
+    onDelta: (kind: StreamKind, text: string) => void
   ): Promise<{ tokens: number; text: string }> {
-    const active = this.active;
-    if (!active || active.session.id !== sessionId) {
-      throw new SessionError("NOT_FOUND", "No active session to send a message to.");
+    const runtime = this.runtimes.get(sessionId);
+    if (!runtime) {
+      throw new SessionError("NOT_FOUND", "That model is not running any more.");
     }
 
-    this.touchActivity();
+    this.touchActivity(sessionId);
     const abort = new AbortController();
-    active.abort = abort;
+    runtime.abort = abort;
 
     try {
       return await this.options.inference.stream({
         sessionId,
-        modelId: active.session.modelId,
+        modelId: runtime.session.modelId,
         prompt: content,
         signal: abort.signal,
         onDelta
       });
     } finally {
-      active.abort = null;
-      this.touchActivity();
+      runtime.abort = null;
+      this.touchActivity(sessionId);
     }
   }
 
   abort(sessionId: string): void {
-    if (this.active?.session.id === sessionId) {
-      this.active.abort?.abort();
+    this.runtimes.get(sessionId)?.abort?.abort();
+  }
+
+  touchActivity(sessionId: string): void {
+    const runtime = this.runtimes.get(sessionId);
+    if (runtime) {
+      runtime.lastActivityAt = this.now();
     }
   }
 
-  touchActivity(): void {
-    if (this.active) {
-      this.active.lastActivityAt = this.now();
-    }
-  }
-
-  /** Releases the GPU after the configured idle window (FR-012). */
-  async reapIdle(): Promise<Session | null> {
-    const active = this.active;
-    if (!active) {
-      return null;
-    }
-
+  /** Releases GPUs whose sessions have been idle past the configured window. */
+  async reapIdle(): Promise<Session[]> {
     const idleMs = this.options.idleTimeoutMinutes * 60_000;
-    if (this.now() - active.lastActivityAt < idleMs) {
-      return null;
+    const expired = [...this.runtimes.entries()].filter(
+      ([, runtime]) => this.now() - runtime.lastActivityAt >= idleMs
+    );
+
+    const released: Session[] = [];
+    for (const [sessionId] of expired) {
+      const ended = await this.end(sessionId, "idle");
+      if (ended) {
+        released.push(ended);
+      }
     }
 
-    return this.end(active.session.id, "idle");
+    return released;
   }
 
   async end(sessionId: string, reason: NonNullable<Session["endReason"]>): Promise<Session | null> {
-    const active = this.active;
-    if (!active || active.session.id !== sessionId) {
+    const runtime = this.runtimes.get(sessionId);
+    if (!runtime) {
       return null;
     }
 
     this.options.store.transition(sessionId, "ending");
-    active.abort?.abort();
+    runtime.abort?.abort();
 
-    if (active.session.instanceId !== null) {
-      await this.options.compute.destroyInstance(active.session.instanceId).catch((error: unknown) => {
+    if (runtime.session.instanceId !== null) {
+      await this.options.compute.destroyInstance(runtime.session.instanceId).catch((error: unknown) => {
         this.options.logger?.warn("Instance teardown failed; it will be reconciled on next start", {
           sessionId,
           message: error instanceof Error ? error.message : String(error)
@@ -276,15 +305,30 @@ export class SessionOrchestrator {
       });
     }
 
-    const endedAt = new Date(this.now()).toISOString();
     this.options.store.transition(sessionId, reason === "failure" ? "failed" : "ended", {
-      endedAt,
+      endedAt: new Date(this.now()).toISOString(),
       endReason: reason
     });
 
     const ended = this.options.store.get(sessionId);
-    this.active = null;
+    this.runtimes.delete(sessionId);
     return ended;
+  }
+
+  /** Releases every running GPU, used when the app exits (FR-012, FR-073). */
+  async endAll(reason: NonNullable<Session["endReason"]>): Promise<void> {
+    const ids = [...this.runtimes.keys()];
+
+    await Promise.all(
+      ids.map(async (sessionId) => {
+        await this.end(sessionId, reason).catch((error: unknown) => {
+          this.options.logger?.warn("Failed to release a session during shutdown", {
+            sessionId,
+            message: error instanceof Error ? error.message : String(error)
+          });
+        });
+      })
+    );
   }
 
   /**
@@ -304,14 +348,32 @@ export class SessionOrchestrator {
         endedAt: new Date(this.now()).toISOString(),
         endReason: "reconciled"
       });
+      this.runtimes.delete(orphan.id);
       reconciled += 1;
     }
 
     if (reconciled > 0) {
-      this.active = null;
       this.options.logger?.warn("Reconciled orphaned sessions", { reconciled });
     }
 
     return reconciled;
   }
+
+  private refresh(runtime: SessionRuntime): SessionRuntime {
+    const fresh = this.options.store.get(runtime.session.id);
+    if (fresh) {
+      runtime.session = fresh;
+    }
+
+    return runtime;
+  }
+}
+
+export function hasActiveFilters(filters: GpuFilters): boolean {
+  return (
+    filters.countries.length > 0 ||
+    filters.datacenters.length > 0 ||
+    filters.minReliability !== null ||
+    filters.maxHourlyMicroUsd !== null
+  );
 }
