@@ -187,6 +187,18 @@ export function isOfferUnavailableError(error: unknown): boolean {
 }
 
 
+/**
+ * Errors vast.ai reports for a container that can never start on that host, for
+ * example a broken NVIDIA CDI setup (`failed to inject CDI devices`). Waiting for
+ * these is pointless: the machine has to be avoided and another one booked.
+ */
+const INSTANCE_START_FAILURE_PATTERN =
+  /failed to start containers|OCI runtime create failed|unresolvable CDI devices|failed to create task|failed to create shim|Error response from daemon/i;
+
+export function isInstanceStartFailureMessage(message: string | null | undefined): boolean {
+  return typeof message === "string" && INSTANCE_START_FAILURE_PATTERN.test(message);
+}
+
 /** `geolocation` arrives as "Italy, IT"; the ISO code is the last segment. */
 export function readCountry(geolocation: string | undefined): string | null {
   if (!geolocation) {
@@ -204,6 +216,7 @@ export function toComputeOffer(payload: VastAiOfferPayload): ComputeOffer | null
 
   return {
     offerId: payload.id,
+    machineId: typeof payload.machine_id === "number" ? payload.machine_id : null,
     gpuName: payload.gpu_name ?? "unknown GPU",
     gpuRamGb: Math.round((payload.gpu_ram ?? 0) / 1024),
     hourlyRateMicroUsd: Math.round(payload.dph_total * 1_000_000),

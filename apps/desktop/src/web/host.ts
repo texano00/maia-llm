@@ -18,6 +18,7 @@ import { createMockComputeProvider, createMockInference } from "../main/services
 import { createVastComputeProvider } from "../main/services/providers/vastai/compute-provider";
 import { VastAiClient } from "../main/services/providers/vastai/client";
 import { createVllmRuntime } from "../main/services/inference/vllm";
+import { GpuReputationClient } from "../main/services/gpu/reputation";
 import { IpcRegistry } from "../main/ipc/registry";
 import { registerSettingsHandlers } from "../main/ipc/settings";
 import { registerWorkspaceHandlers } from "../main/ipc/workspace";
@@ -81,6 +82,11 @@ export async function createWebHost(options: WebHostOptions): Promise<WebHost> {
     ...(options.providerMode === "mock" ? { ttlMs: 0 } : {})
   });
 
+  const reputation = new GpuReputationClient({
+    getBaseUrl: () => process.env.MAIA_REPUTATION_URL ?? settings.get().diagnosticsUrl,
+    logger
+  });
+
   const hasVastKey = Boolean(await credentials.get("vastai"));
   const useLiveGpu = options.providerMode === "live" && hasVastKey;
 
@@ -90,6 +96,8 @@ export async function createWebHost(options: WebHostOptions): Promise<WebHost> {
         getHfToken: () => credentials.get("huggingface"),
         getParameterCount: async (modelId) => catalogueRepository.get(modelId)?.parameterCount ?? null,
         getFilters: () => settings.get().gpuFilters,
+        getReputations: () => reputation.snapshot(),
+        reportOutcome: (input) => reputation.report(input),
         readyTimeoutMs: (options.readinessTimeoutMinutes ?? 20) * 60_000,
         logger
       })

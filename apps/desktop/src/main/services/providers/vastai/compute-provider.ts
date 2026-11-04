@@ -5,18 +5,30 @@ import {
   classifyOffer,
   estimateDiskGb,
   estimateGpuRamGb,
+  isInstanceStartFailureMessage,
   isOfferUnavailableError,
   readMappedPort,
   readPublicHost,
   toComputeOffer,
   VastAiClient
 } from "./client";
+import type { GpuOutcome, GpuReputation } from "@maia/contracts";
 
 export interface VastComputeProviderOptions {
   getApiKey: () => Promise<string | undefined>;
   getParameterCount: (modelId: string) => Promise<number | null>;
   getHfToken?: () => Promise<string | undefined>;
   getFilters?: () => GpuFilters | undefined;
+  /** Shared verdicts: machines that failed to start are skipped, good ones win ties. */
+  getReputations?: () => Promise<Map<number, GpuReputation>>;
+  /** Records the outcome of a provisioning attempt for every workspace to see. */
+  reportOutcome?: (input: {
+    machineId: number | null;
+    gpuName: string;
+    outcome: GpuOutcome;
+    offerId?: number;
+    error?: string;
+  }) => Promise<void>;
   containerImage?: string;
   /** Overrides the disk size derived from the model size. */
   diskGb?: number;
@@ -41,6 +53,14 @@ export interface ProvisioningProgress {
   /** Provider message for that status, when it sends one. */
   message: string | null;
   elapsedMs: number;
+}
+
+/** The container can never start on this host; another machine must be booked. */
+export class InstanceStartError extends Error {
+  constructor(message: string, public readonly instanceId: number) {
+    super(message);
+    this.name = "InstanceStartError";
+  }
 }
 
 /**
@@ -71,13 +91,22 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
       return isOfferUnavailableError(error);
     },
 
-    async findOffer({ modelId, filters, excludeOfferIds }): Promise<ComputeOffer | null> {
+    isUnrecoverable(error: unknown): boolean {
+      return error instanceof InstanceStartError;
+    },
+
+    async reportOutcome(input) {
+      await options.reportOutcome?.(input);
+    },
+
+    async findOffer({ modelId, filters, excludeOfferIds, excludeMachineIds }): Promise<ComputeOffer | null> {
       const api = await client();
       const parameterCount = await options.getParameterCount(modelId);
       const gpuRamGb = estimateGpuRamGb(parameterCount);
       const diskGb = options.diskGb ?? estimateDiskGb(parameterCount);
       const effectiveFilters = filters ?? options.getFilters?.();
       const excluded = new Set(excludeOfferIds ?? []);
+      const excludedMachines = new Set(excludeMachineIds ?? []);
 
       const offers = await api.searchOffers(
         buildSearchQuery({
@@ -100,13 +129,35 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
         if (verdict === "too-slow") rejected.tooSlow += 1;
       }
 
+      // Shared reputation: a machine that failed to start is never rented again
+      // while its verdict is fresh, and known-good machines win ties on price.
+      const reputations = (await options.getReputations?.()) ?? new Map<number, GpuReputation>();
+      const unstable = new Set(
+        [...reputations.values()]
+          .filter((record) => record.status === "unstable")
+          .map((record) => record.machineId)
+      );
+      const rank = (machineId: number | null): number => {
+        if (machineId === null) {
+          return 1;
+        }
+        const record = reputations.get(machineId);
+        if (!record) {
+          return 1;
+        }
+        return record.status === "good" ? 0 : 1;
+      };
+
       const reliability = new Map(bookable.map((offer) => [offer.id, offer.reliability2 ?? 0]));
       const mapped = bookable
         .map(toComputeOffer)
         .filter((offer): offer is ComputeOffer => offer !== null)
         .filter((offer) => !excluded.has(offer.offerId))
+        .filter((offer) => offer.machineId === null || !unstable.has(offer.machineId))
+        .filter((offer) => offer.machineId === null || !excludedMachines.has(offer.machineId))
         .sort(
           (left, right) =>
+            rank(left.machineId) - rank(right.machineId) ||
             left.hourlyRateMicroUsd - right.hourlyRateMicroUsd ||
             (reliability.get(right.offerId) ?? 0) - (reliability.get(left.offerId) ?? 0)
         );
@@ -120,7 +171,14 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
         bookable: bookable.length,
         rejected,
         excluded: excluded.size,
-        candidates: mapped.length
+        skippedUnstable: bookable.filter((offer) =>
+          offer.machine_id !== null && offer.machine_id !== undefined
+            ? unstable.has(offer.machine_id)
+            : false
+        ).length,
+        candidates: mapped.length,
+        chosenMachine: best?.machineId ?? null,
+        chosenRank: best ? rank(best.machineId) : null
       });
 
       return best ?? null;
@@ -175,6 +233,14 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
       for (;;) {
         const instance = await api.getInstance(instanceId);
         const status = instance.actual_status ?? "unknown";
+
+        // A host that cannot attach the GPU never recovers: stop waiting for it.
+        if (isInstanceStartFailureMessage(instance.status_msg)) {
+          throw new InstanceStartError(
+            `The container could not start on this machine: ${instance.status_msg}`,
+            instanceId
+          );
+        }
 
         if (status !== lastStatus) {
           lastStatus = status;

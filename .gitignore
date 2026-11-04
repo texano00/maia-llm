@@ -39,3 +39,6 @@ Thumbs.db
 
 # web host dev data
 .maia-web*/
+
+# telemetry service runtime data
+var/

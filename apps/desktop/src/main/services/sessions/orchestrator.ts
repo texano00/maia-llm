@@ -7,6 +7,8 @@ export type StreamKind = "content" | "reasoning";
 
 export interface ComputeOffer {
   offerId: number;
+  /** Stable host identity (vast.ai machine_id); null for simulated offers. */
+  machineId: number | null;
   gpuName: string;
   gpuRamGb: number;
   hourlyRateMicroUsd: number;
@@ -20,6 +22,8 @@ export interface ComputeProvider {
     filters?: GpuFilters | undefined;
     /** Offers that already failed to book, so a retry picks a different machine. */
     excludeOfferIds?: number[] | undefined;
+    /** Machines that cannot start a container, so a retry never returns to them. */
+    excludeMachineIds?: number[] | undefined;
   }): Promise<ComputeOffer | null>;
   createInstance(offer: ComputeOffer, context: { label: string; modelId: string }): Promise<{ instanceId: number }>;
   waitUntilReady(
@@ -35,6 +39,19 @@ export interface ComputeProvider {
    * wrong", so the session can be retried on another offer instead of failing.
    */
   isOfferUnavailable?(error: unknown): boolean;
+  /**
+   * True when the failure is terminal *for that machine* (the container cannot
+   * start), so the session moves to another host instead of waiting.
+   */
+  isUnrecoverable?(error: unknown): boolean;
+  /** Publishes the outcome so every workspace learns from this attempt. */
+  reportOutcome?(input: {
+    machineId: number | null;
+    gpuName: string;
+    outcome: "success" | "failure";
+    offerId?: number;
+    error?: string;
+  }): Promise<void>;
 }
 
 /** A status change reported by the provider while the instance boots. */
@@ -107,6 +124,9 @@ const SESSION_LABEL_PREFIX = "maia:";
  * disappear within seconds, so a booking may need several tries.
  */
 const MAX_OFFER_ATTEMPTS = 6;
+
+/** How many machines one session may try when a host cannot start the container. */
+const MAX_BOOT_ATTEMPTS = 3;
 
 /** States in which a session can serve chat (now or once it finishes booting). */
 function isServing(state: Session["state"]): boolean {
@@ -320,7 +340,10 @@ export class SessionOrchestrator {
       // Booting a model takes minutes. The caller must not be blocked for that
       // long, otherwise a second model cannot be started while the first one is
       // still downloading: the whole point of running models in parallel.
-      this.trackProvisioning(sessionId, this.activateSession(sessionId, estimate, instanceId));
+      this.trackProvisioning(
+        sessionId,
+        this.activateSession(sessionId, estimate, { instanceId, offer }, filters)
+      );
 
       return provisioning;
     } catch (error) {
@@ -360,92 +383,209 @@ export class SessionOrchestrator {
   }
 
   /**
-   * Boots a booked instance to the point where it can answer: waits for the GPU,
-   * then for vLLM to serve the model. Runs in the background so several models
-   * can provision at the same time.
+   * Boots a booked instance until vLLM serves the model, moving to another host
+   * when the machine cannot start the container at all. Runs in the background so
+   * several models can provision at the same time.
    */
-  private async activateSession(sessionId: string, estimate: Estimate, instanceId: number): Promise<void> {
+  private async activateSession(
+    sessionId: string,
+    estimate: Estimate,
+    booking: { instanceId: number; offer: ComputeOffer },
+    filters: GpuFilters | undefined
+  ): Promise<void> {
     const append = (level: "info" | "warn" | "error", message: string): void => {
       this.options.store.appendEvent(sessionId, level, message, new Date(this.now()));
     };
     const stillProvisioning = (): boolean =>
       this.runtimes.get(sessionId)?.session.state === "provisioning";
 
-    try {
-      const bootStartedAt = Date.now();
-      append("info", "Booting the instance and downloading the model…");
-      await this.options.compute.waitUntilReady(
-        instanceId,
-        this.options.readinessTimeoutMs ?? DEFAULT_READINESS_TIMEOUT_MS,
-        (update) => {
-          // Each provider status change is one line, so a slow boot shows
-          // progress instead of silence.
-          const detail = update.message ? ` — ${update.message}` : "";
-          append("info", `${describeStatus(update.status)}${detail} (${formatDuration(update.elapsedMs)})`);
-        }
-      );
+    let current = booking;
+    const failedMachines: number[] = [];
 
-      // The session may have been released while the model was loading; in that
-      // case there is nothing to activate and the instance is already destroyed.
-      if (!stillProvisioning()) {
+    for (let attempt = 1; ; attempt += 1) {
+      const bootStartedAt = Date.now();
+
+      try {
+        append("info", `Booting ${current.offer.gpuName} and downloading the model…`);
+        await this.options.compute.waitUntilReady(
+          current.instanceId,
+          this.options.readinessTimeoutMs ?? DEFAULT_READINESS_TIMEOUT_MS,
+          (update) => {
+            // Each provider status change is one line, so a slow boot shows
+            // progress instead of silence.
+            const detail = update.message ? ` — ${update.message}` : "";
+            append("info", `${describeStatus(update.status)}${detail} (${formatDuration(update.elapsedMs)})`);
+          }
+        );
+
+        // The session may have been released while the model was loading; in that
+        // case there is nothing to activate and the instance is already destroyed.
+        if (!stillProvisioning()) {
+          return;
+        }
+
+        await this.options.compute.reportOutcome?.({
+          machineId: current.offer.machineId,
+          gpuName: current.offer.gpuName,
+          offerId: current.offer.offerId,
+          outcome: "success"
+        });
+
+        append("info", `Model server is healthy after ${formatDuration(Date.now() - bootStartedAt)}.`);
+        this.options.store.transition(sessionId, "ready", {
+          readyAt: new Date(this.now()).toISOString()
+        });
+        this.options.store.transition(sessionId, "active");
+        append("info", "Session active. You can chat now.");
+
+        const active = this.options.store.get(sessionId);
+        const runtime = this.runtimes.get(sessionId);
+        if (active && runtime) {
+          runtime.session = { ...active, events: this.options.store.eventsFor(sessionId) };
+          runtime.lastActivityAt = this.now();
+        }
+
+        this.options.logger?.info("Session active", {
+          sessionId,
+          modelId: estimate.modelId,
+          instanceId: current.instanceId,
+          attempts: attempt,
+          running: this.runtimes.size
+        });
+        return;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const unrecoverable = this.options.compute.isUnrecoverable?.(error) === true;
+
+        this.options.logger?.warn("Provisioning attempt failed", {
+          sessionId,
+          modelId: estimate.modelId,
+          instanceId: current.instanceId,
+          machineId: current.offer.machineId,
+          attempt,
+          unrecoverable,
+          message
+        });
+
+        // The instance is unusable either way; release it before anything else.
+        await this.options.compute.destroyInstance(current.instanceId).catch((teardownError: unknown) => {
+          this.options.logger?.warn("Failed to release the GPU after a provisioning error", {
+            sessionId,
+            instanceId: current.instanceId,
+            message: teardownError instanceof Error ? teardownError.message : String(teardownError)
+          });
+        });
+
+        if (unrecoverable) {
+          await this.options.compute.reportOutcome?.({
+            machineId: current.offer.machineId,
+            gpuName: current.offer.gpuName,
+            offerId: current.offer.offerId,
+            outcome: "failure",
+            error: message
+          });
+          if (current.offer.machineId !== null) {
+            failedMachines.push(current.offer.machineId);
+          }
+        }
+
+        const canRetryOnAnotherHost =
+          unrecoverable && stillProvisioning() && attempt < MAX_BOOT_ATTEMPTS;
+
+        if (canRetryOnAnotherHost) {
+          append(
+            "warn",
+            `${current.offer.gpuName} could not start the container. Marking that machine as unstable and trying another GPU…`
+          );
+
+          const replacement = await this.bookAnotherOffer(sessionId, estimate.modelId, filters, failedMachines).catch(
+            (bookingError: unknown) => {
+              this.options.logger?.warn("Could not book a replacement GPU", {
+                sessionId,
+                reason: bookingError instanceof Error ? bookingError.message : String(bookingError)
+              });
+              return null;
+            }
+          );
+
+          if (replacement) {
+            this.options.store.setInstance(
+              sessionId,
+              replacement.instanceId,
+              replacement.offer.offerId
+            );
+            append(
+              "info",
+              `Retrying on ${replacement.offer.gpuName} (${replacement.offer.gpuRamGb} GB) at $${(
+                replacement.offer.hourlyRateMicroUsd / 1_000_000
+              ).toFixed(2)}/h.`
+            );
+            current = replacement;
+            continue;
+          }
+        }
+
+        if (stillProvisioning()) {
+          this.options.store.appendEvent(sessionId, "error", message, new Date(this.now()));
+          this.options.store.transition(sessionId, "failed", {
+            endedAt: new Date(this.now()).toISOString(),
+            endReason: "failure",
+            failureCode: "PROVIDER_UNAVAILABLE"
+          });
+
+          // Keep the failed session visible: its log is the only explanation for
+          // why the GPU never came up. The next start for this model replaces it.
+          const failed = this.options.store.get(sessionId);
+          const runtime = this.runtimes.get(sessionId);
+          if (failed && runtime) {
+            runtime.session = failed;
+          }
+        }
+
         return;
       }
+    }
+  }
 
-      append("info", `Model server is healthy after ${formatDuration(Date.now() - bootStartedAt)}.`);
-      this.options.store.transition(sessionId, "ready", {
-        readyAt: new Date(this.now()).toISOString()
+  /** Books a fresh instance on a machine that has not failed yet. */
+  private async bookAnotherOffer(
+    sessionId: string,
+    modelId: string,
+    filters: GpuFilters | undefined,
+    excludeMachineIds: number[]
+  ): Promise<{ instanceId: number; offer: ComputeOffer } | null> {
+    const triedOffers: number[] = [];
+
+    for (let attempt = 1; attempt <= MAX_OFFER_ATTEMPTS; attempt += 1) {
+      const offer = await this.options.compute.findOffer({
+        modelId,
+        filters,
+        excludeMachineIds,
+        excludeOfferIds: triedOffers
       });
-      this.options.store.transition(sessionId, "active");
-      append("info", "Session active. You can chat now.");
 
-      const active = this.options.store.get(sessionId);
-      const runtime = this.runtimes.get(sessionId);
-      if (active && runtime) {
-        runtime.session = { ...active, events: this.options.store.eventsFor(sessionId) };
-        runtime.lastActivityAt = this.now();
+      if (!offer) {
+        return null;
       }
 
-      this.options.logger?.info("Session active", {
-        sessionId,
-        modelId: estimate.modelId,
-        instanceId,
-        running: this.runtimes.size
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.options.logger?.warn("Session provisioning failed", {
-        sessionId,
-        modelId: estimate.modelId,
-        instanceId,
-        message
-      });
-
-      if (stillProvisioning()) {
-        this.options.store.appendEvent(sessionId, "error", message, new Date(this.now()));
-        this.options.store.transition(sessionId, "failed", {
-          endedAt: new Date(this.now()).toISOString(),
-          endReason: "failure",
-          failureCode: "PROVIDER_UNAVAILABLE"
+      try {
+        const created = await this.options.compute.createInstance(offer, {
+          label: `${SESSION_LABEL_PREFIX}${sessionId}`,
+          modelId
         });
-
-        // Keep the failed session visible: its log is the only explanation for
-        // why the GPU never came up. The next start for this model replaces it.
-        const failed = this.options.store.get(sessionId);
-        const runtime = this.runtimes.get(sessionId);
-        if (failed && runtime) {
-          runtime.session = failed;
+        return { instanceId: created.instanceId, offer };
+      } catch (error) {
+        triedOffers.push(offer.offerId);
+        if (
+          this.options.compute.isOfferUnavailable?.(error) !== true ||
+          attempt === MAX_OFFER_ATTEMPTS
+        ) {
+          throw error;
         }
       }
-
-      await this.options.compute.destroyInstance(instanceId).catch((teardownError: unknown) => {
-        // A GPU that cannot be released keeps billing, so never swallow this.
-        this.options.logger?.warn("Failed to release the GPU after a provisioning error", {
-          sessionId,
-          instanceId,
-          message: teardownError instanceof Error ? teardownError.message : String(teardownError)
-        });
-      });
     }
+
+    return null;
   }
 
   private trackProvisioning(sessionId: string, task: Promise<void>): void {

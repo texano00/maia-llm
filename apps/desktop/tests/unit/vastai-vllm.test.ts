@@ -327,6 +327,57 @@ describe("vast.ai offer picking", () => {
     expect(readMappedPort({})).toBeNull();
   });
 
+  it("skips machines the shared reputation marks unstable and prefers known-good ones", async () => {
+    const offers = [
+      // cheapest, but this machine failed to start for another workspace
+      { id: 1, machine_id: 111, gpu_name: "RTX 3090", gpu_ram: 24_576, dph_total: 0.1, rentable: true, compute_cap: 860, inet_down: 2000, inet_up: 900, disk_bw: 1200 },
+      // unknown machine
+      { id: 2, machine_id: 222, gpu_name: "RTX 3090", gpu_ram: 24_576, dph_total: 0.12, rentable: true, compute_cap: 860, inet_down: 2000, inet_up: 900, disk_bw: 1200 },
+      // known good, slightly more expensive: wins
+      { id: 3, machine_id: 333, gpu_name: "L40S", gpu_ram: 48_000, dph_total: 0.2, rentable: true, compute_cap: 890, inet_down: 2000, inet_up: 900, disk_bw: 1200 }
+    ];
+
+    const reputations = new Map([
+      [111, { machineId: 111, gpuName: "RTX 3090", status: "unstable" as const, successes: 0, failures: 2, lastSuccessAt: null, lastFailureAt: "2026-11-04T17:37:00.000Z", lastError: "failed to inject CDI devices", updatedAt: "2026-11-04T17:37:00.000Z" }],
+      [333, { machineId: 333, gpuName: "L40S", status: "good" as const, successes: 4, failures: 0, lastSuccessAt: "2026-11-04T17:00:00.000Z", lastFailureAt: null, lastError: null, updatedAt: "2026-11-04T17:00:00.000Z" }]
+    ]);
+
+    const fake = { searchOffers: async () => offers } as unknown as VastAiClient;
+    const provider = createVastComputeProvider({
+      getApiKey: async () => "key",
+      getParameterCount: async () => 7.6e9,
+      clientFactory: () => fake,
+      getReputations: async () => reputations
+    });
+
+    const offer = await provider.findOffer({ modelId: "Qwen/Qwen2.5-7B-Instruct" });
+
+    expect(offer?.offerId).toBe(3);
+    expect(offer?.machineId).toBe(333);
+  });
+
+  it("reports and clears verdicts through the shared service", async () => {
+    const reported: Array<{ machineId: number | null; outcome: string }> = [];
+    const fake = { searchOffers: async () => [] } as unknown as VastAiClient;
+    const provider = createVastComputeProvider({
+      getApiKey: async () => "key",
+      getParameterCount: async () => 7.6e9,
+      clientFactory: () => fake,
+      reportOutcome: async (input) => {
+        reported.push({ machineId: input.machineId, outcome: input.outcome });
+      }
+    });
+
+    await provider.reportOutcome?.({
+      machineId: 111,
+      gpuName: "RTX 3090",
+      outcome: "failure",
+      error: "failed to inject CDI devices"
+    });
+
+    expect(reported).toEqual([{ machineId: 111, outcome: "failure" }]);
+  });
+
   it("says which port should have been published when a running instance has none", async () => {
     const fake = {
       // Exactly the state observed on a real rental: the container is up and the

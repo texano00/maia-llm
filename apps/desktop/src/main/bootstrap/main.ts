@@ -26,6 +26,7 @@ import { createMockComputeProvider, createMockInference } from "../services/prov
 import { createVastComputeProvider } from "../services/providers/vastai/compute-provider";
 import { VastAiClient } from "../services/providers/vastai/client";
 import { createVllmRuntime } from "../services/inference/vllm";
+import { GpuReputationClient } from "../services/gpu/reputation";
 import { IpcRegistry } from "../ipc/registry";
 import { registerUpdateHandlers } from "../ipc/updates";
 import { registerSettingsHandlers } from "../ipc/settings";
@@ -185,6 +186,11 @@ async function bootstrap(): Promise<void> {
     ...(config.providerMode === "mock" ? { ttlMs: 0 } : {})
   });
 
+  const reputation = new GpuReputationClient({
+    getBaseUrl: () => config.reputationUrl ?? settings.get().diagnosticsUrl,
+    logger
+  });
+
   const hasVastKey = Boolean(await credentials.get("vastai"));
   const useLiveGpu = config.providerMode === "live" && hasVastKey;
 
@@ -194,6 +200,8 @@ async function bootstrap(): Promise<void> {
         getHfToken: () => credentials.get("huggingface"),
         getParameterCount: async (modelId) => catalogueRepository.get(modelId)?.parameterCount ?? null,
         getFilters: () => settings.get().gpuFilters,
+        getReputations: () => reputation.snapshot(),
+        reportOutcome: (input) => reputation.report(input),
         readyTimeoutMs: config.readinessTimeoutMinutes * 60_000,
         logger
       })

@@ -465,6 +465,109 @@ describe("SessionOrchestrator", () => {
     expect(reconciled).toBe(2);
   });
 
+  it("abandons a host that cannot start the container and marks it unstable", async () => {
+    const reports: Array<{ machineId: number | null; outcome: string }> = [];
+    const booked: number[] = [];
+    const bootedOn: number[] = [];
+
+    const compute: ComputeProvider = {
+      async findOffer({ excludeMachineIds }) {
+        // The bad host is cheapest, so it wins until it has been excluded.
+        if ((excludeMachineIds ?? []).includes(5001)) {
+          return { ...offer, offerId: 22, machineId: 5002, gpuName: "L40S", simulated: false };
+        }
+        return { ...offer, offerId: 21, machineId: 5001, gpuName: "RTX 3090", simulated: false };
+      },
+      async createInstance(candidate) {
+        booked.push(candidate.machineId ?? 0);
+        return { instanceId: 100 + booked.length };
+      },
+      async waitUntilReady(instanceId) {
+        bootedOn.push(instanceId);
+        if (instanceId === 101) {
+          // Exactly the failure reported by vast.ai for a broken CDI setup.
+          throw new Error(
+            "The container could not start on this machine: Error response from daemon: failed to inject CDI devices: unresolvable CDI devices D.759…/gpu=1: unknown"
+          );
+        }
+      },
+      async destroyInstance() {
+        return undefined;
+      },
+      isUnrecoverable(error) {
+        return error instanceof Error && error.message.includes("could not start");
+      },
+      async reportOutcome(input) {
+        reports.push({ machineId: input.machineId, outcome: input.outcome });
+      }
+    };
+
+    const orchestrator = new SessionOrchestrator({
+      store,
+      compute,
+      inference: createMockInference({ response: "ok" }),
+      idleTimeoutMinutes: 10,
+      delay: async () => undefined,
+      now: () => clock
+    });
+
+    const estimate = await orchestrator.createEstimate("Qwen/Qwen2.5-7B-Instruct");
+    const started = await orchestrator.start({ estimateId: estimate.id, confirmEstimate: true });
+    await orchestrator.awaitProvisioning(started.id);
+
+    const session = orchestrator.getSession(started.id);
+
+    expect(session?.state).toBe("active");
+    // Second machine, second instance, and the bad host was published as unstable.
+    expect(booked).toEqual([5001, 5002]);
+    expect(bootedOn).toEqual([101, 102]);
+    expect(session?.instanceId).toBe(102);
+    expect(reports).toEqual([
+      { machineId: 5001, outcome: "failure" },
+      { machineId: 5002, outcome: "success" }
+    ]);
+
+    const log = store.eventsFor(started.id).map((event) => event.message).join("\n");
+    expect(log).toContain("could not start the container");
+    expect(log).toContain("trying another GPU");
+    expect(log).toContain("Retrying on L40S");
+  });
+
+  it("gives up after the boot budget instead of renting machines forever", async () => {
+    const compute: ComputeProvider = {
+      async findOffer() {
+        return { ...offer, offerId: 31 + Math.floor(Math.random() * 1000), machineId: 6001, simulated: false };
+      },
+      async createInstance() {
+        return { instanceId: 200 + Math.floor(Math.random() * 1000) };
+      },
+      async waitUntilReady() {
+        throw new Error("The container could not start on this machine: OCI runtime create failed");
+      },
+      async destroyInstance() {
+        return undefined;
+      },
+      isUnrecoverable() {
+        return true;
+      }
+    };
+
+    const orchestrator = new SessionOrchestrator({
+      store,
+      compute,
+      inference: createMockInference({ response: "ok" }),
+      idleTimeoutMinutes: 10,
+      delay: async () => undefined,
+      now: () => clock
+    });
+
+    const estimate = await orchestrator.createEstimate("Qwen/Qwen2.5-7B-Instruct");
+    const started = await orchestrator.start({ estimateId: estimate.id, confirmEstimate: true });
+    await orchestrator.awaitProvisioning(started.id);
+
+    expect(orchestrator.getSession(started.id)?.state).toBe("failed");
+  });
+
   it("respects the GPU filters when ranking offers", async () => {
     const filtered = createMockComputeProvider();
     const offer = await filtered.findOffer({
@@ -491,6 +594,7 @@ describe("SessionOrchestrator", () => {
     const { orchestrator, compute } = createOrchestrator({ idleTimeoutMinutes: 10 });
     const estimate = await orchestrator.createEstimate("Qwen/Qwen2.5-7B-Instruct");
     const session = await orchestrator.start({ estimateId: estimate.id, confirmEstimate: true });
+    await orchestrator.awaitProvisioning(session.id);
 
     clock += 5 * 60_000;
     await expect(orchestrator.reapIdle()).resolves.toHaveLength(0);
@@ -506,6 +610,7 @@ describe("SessionOrchestrator", () => {
     const { orchestrator } = createOrchestrator({ idleTimeoutMinutes: 10 });
     const estimate = await orchestrator.createEstimate("Qwen/Qwen2.5-7B-Instruct");
     const session = await orchestrator.start({ estimateId: estimate.id, confirmEstimate: true });
+    await orchestrator.awaitProvisioning(session.id);
 
     clock += 9 * 60_000;
     await orchestrator.send(session.id, "still here", () => undefined);

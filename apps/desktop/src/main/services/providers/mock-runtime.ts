@@ -14,6 +14,7 @@ export interface MockOffer extends ComputeOffer {
 export const MOCK_OFFERS: MockOffer[] = [
   {
     offerId: 1,
+    machineId: 9001,
     gpuName: "Mock RTX 4090",
     gpuRamGb: 24,
     hourlyRateMicroUsd: 440_000,
@@ -24,6 +25,7 @@ export const MOCK_OFFERS: MockOffer[] = [
   },
   {
     offerId: 2,
+    machineId: 9002,
     gpuName: "Mock A100 40GB",
     gpuRamGb: 40,
     hourlyRateMicroUsd: 890_000,
@@ -34,6 +36,7 @@ export const MOCK_OFFERS: MockOffer[] = [
   },
   {
     offerId: 3,
+    machineId: 9003,
     gpuName: "Mock L40S",
     gpuRamGb: 48,
     hourlyRateMicroUsd: 760_000,

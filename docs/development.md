@@ -25,9 +25,13 @@ desktop app's OS-protected credential vault and must never be committed.
 npm run -w @maia/desktop dev
 MAIA_PROVIDER_MODE=mock npm run -w @maia/desktop dev
 
-# Telemetry API
+# Telemetry API + GPU reputation API (one service, port 8787)
 npm run -w @maia/telemetry-api dev
 ```
+
+The service also stores which GPU machines start reliably; the desktop app reads
+and writes it to skip broken hosts. See
+[docs/gpu-reputation-api.md](gpu-reputation-api.md) for the endpoints.
 
 `npm run -w @maia/desktop dev` rebuilds `better-sqlite3` for the Electron ABI
 before starting. Node-based unit tests expect the Node ABI; after running the

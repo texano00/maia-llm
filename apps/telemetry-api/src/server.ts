@@ -1,12 +1,31 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import { pathToFileURL } from "node:url";
+import { resolve } from "node:path";
 import { registerDiagnosticsRoutes } from "./diagnostics.js";
+import { registerReputationRoutes } from "./reputation.js";
+import { GpuReputationStore } from "./reputation-store.js";
 
-export function buildServer(): FastifyInstance {
+export interface BuildServerOptions {
+  /** Where GPU reputation is persisted; defaults to `MAIA_REPUTATION_FILE`. */
+  reputationFile?: string;
+  reputationStore?: GpuReputationStore;
+}
+
+export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
   const app = Fastify({ logger: process.env.NODE_ENV !== "test" });
 
   app.get("/health", async () => ({ status: "ok" }));
   registerDiagnosticsRoutes(app);
+
+  const store =
+    options.reputationStore ??
+    new GpuReputationStore({
+      filePath:
+        options.reputationFile ??
+        process.env.MAIA_REPUTATION_FILE ??
+        resolve(process.cwd(), "var/gpu-reputation.json")
+    });
+  registerReputationRoutes(app, store);
 
   return app;
 }

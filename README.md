@@ -38,6 +38,9 @@ Three ideas shape everything in the app:
   confirm it.
 - **Automatic GPU rental** through vast.ai, chosen to fit the model and your
   optional GPU preferences (country, trusted machines, reliability, price cap).
+  A shared reputation service records which machines actually start, so a broken
+  host is skipped for every workspace instead of failing again — see
+  [docs/gpu-reputation-api.md](docs/gpu-reputation-api.md).
 - **Chat like a modern LLM app**: streaming answers, live "thinking" output,
   multiple models running in parallel, a model selector per conversation, and a
   chat history sidebar you can rename and pin.
