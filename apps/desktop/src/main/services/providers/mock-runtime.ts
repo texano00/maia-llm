@@ -66,12 +66,16 @@ export function createMockComputeProvider(options: MockComputeOptions = {}): Com
   return {
     destroyed,
 
-    async findOffer({ filters }) {
+    async findOffer({ filters, excludeOfferIds }) {
       if (options.offer) {
         return options.offer;
       }
 
-      return pickOffer(filters);
+      const excluded = new Set(excludeOfferIds ?? []);
+      return pickOffer(
+        filters,
+        MOCK_OFFERS.filter((offer) => !excluded.has(offer.offerId))
+      );
     },
 
     async createInstance() {

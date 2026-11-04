@@ -15,10 +15,20 @@ export interface ComputeOffer {
 }
 
 export interface ComputeProvider {
-  findOffer(requirements: { modelId: string; filters?: GpuFilters | undefined }): Promise<ComputeOffer | null>;
+  findOffer(requirements: {
+    modelId: string;
+    filters?: GpuFilters | undefined;
+    /** Offers that already failed to book, so a retry picks a different machine. */
+    excludeOfferIds?: number[] | undefined;
+  }): Promise<ComputeOffer | null>;
   createInstance(offer: ComputeOffer, context: { label: string; modelId: string }): Promise<{ instanceId: number }>;
   waitUntilReady(instanceId: number, timeoutMs: number): Promise<void>;
   destroyInstance(instanceId: number): Promise<void>;
+  /**
+   * True when the failure means "that machine is gone" rather than "this request is
+   * wrong", so the session can be retried on another offer instead of failing.
+   */
+  isOfferUnavailable?(error: unknown): boolean;
 }
 
 export interface InferenceRuntime {
@@ -69,6 +79,9 @@ interface SessionRuntime {
 }
 
 const DEFAULT_READINESS_TIMEOUT_MS = 5 * 60_000;
+
+/** Offers churn constantly on vast.ai; three attempts covers a normal booking. */
+const MAX_OFFER_ATTEMPTS = 3;
 
 /**
  * Owns the chargeable lifecycle of every session. Any number of sessions may run
@@ -131,7 +144,7 @@ export class SessionOrchestrator {
     }
 
     const filters = this.options.filters?.();
-    const offer = await this.options.compute.findOffer({ modelId: estimate.modelId, filters });
+    let offer = await this.options.compute.findOffer({ modelId: estimate.modelId, filters });
     if (!offer) {
       throw new SessionError("PROVIDER_UNAVAILABLE", "The selected GPU is no longer available.");
     }
@@ -163,10 +176,53 @@ export class SessionOrchestrator {
       log("info", `Estimate confirmed: ${offer.gpuName} (${offer.gpuRamGb} GB) at $${(offer.hourlyRateMicroUsd / 1_000_000).toFixed(2)}/h`);
       log("info", "Creating the GPU instance…");
 
-      const created = await this.options.compute.createInstance(offer, {
-        label,
-        modelId: estimate.modelId
-      });
+      const triedOfferIds: number[] = [];
+      let created: { instanceId: number } | null = null;
+
+      // A machine can be rented by someone else between the search and the
+      // booking (vast.ai answers `400 no_such_ask`). That is normal market
+      // churn, so move to the next cheapest offer instead of failing the run.
+      for (let attempt = 1; created === null; attempt += 1) {
+        try {
+          created = await this.options.compute.createInstance(offer, {
+            label,
+            modelId: estimate.modelId
+          });
+        } catch (error) {
+          const canRetry =
+            attempt < MAX_OFFER_ATTEMPTS &&
+            this.options.compute.isOfferUnavailable?.(error) === true;
+
+          if (!canRetry) {
+            throw error;
+          }
+
+          triedOfferIds.push(offer.offerId);
+          const detail = error instanceof Error ? error.message : String(error);
+          this.options.logger?.warn("Chosen GPU offer vanished before booking", {
+            offerId: offer.offerId,
+            attempt,
+            detail
+          });
+          log("warn", `${offer.gpuName} was taken before it could be booked. Looking for another GPU…`);
+
+          const next = await this.options.compute.findOffer({
+            modelId: estimate.modelId,
+            filters,
+            excludeOfferIds: triedOfferIds
+          });
+          if (!next) {
+            throw error;
+          }
+
+          offer = next;
+          log(
+            "info",
+            `Trying ${offer.gpuName} (${offer.gpuRamGb} GB) at $${(offer.hourlyRateMicroUsd / 1_000_000).toFixed(2)}/h instead.`
+          );
+        }
+      }
+
       instanceId = created.instanceId;
       log("info", `Instance ${instanceId} requested. Waiting for vast.ai to assign it…`);
 

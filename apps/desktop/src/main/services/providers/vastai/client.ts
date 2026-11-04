@@ -39,6 +39,8 @@ export interface VastAiSearchQuery {
   gpu_ram_gb: number;
   maxHourlyMicroUsd: number | null;
   filters: GpuFilters | undefined;
+  /** Minimum free disk the machine must offer, so the booking cannot be rejected. */
+  minDiskGb?: number | undefined;
 }
 
 export function buildSearchQuery(input: VastAiSearchQuery): Record<string, unknown> {
@@ -50,24 +52,48 @@ export function buildSearchQuery(input: VastAiSearchQuery): Record<string, unkno
   if (input.maxHourlyMicroUsd !== null) {
     q.dph_total = { lte: input.maxHourlyMicroUsd / 1_000_000 };
   }
+  if (input.minDiskGb !== undefined && input.minDiskGb > 0) {
+    q.disk_space = { gte: input.minDiskGb };
+  }
   if (input.filters?.minReliability !== null && input.filters?.minReliability !== undefined) {
     q.reliability2 = { gte: input.filters.minReliability };
   }
-  if (input.filters && input.filters.countries.length > 0) {
-    q.geolocation = { in: input.filters.countries.map((country) => country.toUpperCase()) };
+  // An empty `in` list is accepted by the API but matches nothing, which reads as
+  // "no GPU available". Only send the filter when it actually has entries.
+  const countries = (input.filters?.countries ?? []).map((country) => country.toUpperCase()).filter(Boolean);
+  if (countries.length > 0) {
+    q.geolocation = { in: countries };
   }
-  if (input.filters && input.filters.datacenters.length > 0) {
+  const machineIds = (input.filters?.datacenters ?? [])
+    .map((entry) => Number(entry))
+    .filter((value) => Number.isFinite(value));
+  if (machineIds.length > 0) {
     // Offers do not expose datacenter names, so trusted entries are matched
-    // against the machine id of each offer by the caller.
-    q.machine_id = {
-      in: input.filters.datacenters
-        .map((entry) => Number(entry))
-        .filter((value) => Number.isFinite(value))
-    };
+    // against the machine id of each offer.
+    q.machine_id = { in: machineIds };
   }
 
   return q;
 }
+
+/**
+ * Offers disappear between the estimate and the booking: renting the cheapest
+ * match can fail with `400 invalid_args / no_such_ask`, which the app must treat
+ * as "pick another machine" rather than as a fatal provider error.
+ */
+const OFFER_GONE_PATTERN =
+  /no_such_ask|not available|no longer (?:be )?available|already (?:rented|taken|in use)|price (?:has )?changed|out of (?:stock|capacity)|insufficient/i;
+
+export function isOfferUnavailableError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  if (OFFER_GONE_PATTERN.test(message)) {
+    return true;
+  }
+
+  const status = (error as { status?: number } | null)?.status;
+  return status === 404 || status === 410;
+}
+
 
 /** `geolocation` arrives as "Italy, IT"; the ISO code is the last segment. */
 export function readCountry(geolocation: string | undefined): string | null {
@@ -247,4 +273,20 @@ export function estimateGpuRamGb(parameterCount: number | null): number {
   const rounded = Math.ceil(gib / 8) * 8;
 
   return Math.min(160, Math.max(8, rounded));
+}
+
+/**
+ * Container disk for a run: the bf16 weights plus wheel/cache headroom. vast.ai
+ * rejects a booking whose disk exceeds the machine's free space, so the value has
+ * to follow the model size instead of being a fixed 64 GB.
+ */
+export function estimateDiskGb(parameterCount: number | null): number {
+  if (!parameterCount || parameterCount <= 0) {
+    return 64;
+  }
+
+  const weightsGb = (parameterCount * 2) / 1024 ** 3;
+  const required = Math.ceil(weightsGb * 1.2) + 30;
+
+  return Math.min(400, Math.max(64, Math.ceil(required / 10) * 10));
 }

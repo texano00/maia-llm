@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { closeDatabase, openDatabase, type DatabaseConnection } from "../../src/main/storage/db";
 import { buildEstimate, MINIMUM_BILLABLE_MINUTES } from "../../src/main/services/cost/estimator";
-import { SessionOrchestrator, SessionError } from "../../src/main/services/sessions/orchestrator";
+import { SessionOrchestrator, SessionError, type ComputeOffer, type ComputeProvider } from "../../src/main/services/sessions/orchestrator";
+import { isOfferUnavailableError } from "../../src/main/services/providers/vastai/client";
 import { SessionStore } from "../../src/main/services/sessions/store";
 import { createMockComputeProvider, createMockInference } from "../../src/main/services/providers/mock-runtime";
 
@@ -145,6 +146,65 @@ describe("SessionOrchestrator", () => {
 
     expect(orchestrator.listSessions()).toHaveLength(1);
     expect(orchestrator.getSession(secondSession.id)?.state).toBe("active");
+  });
+
+  it("moves to the next GPU when the chosen offer is taken before booking", async () => {
+    const taken: ComputeOffer = {
+      offerId: 11,
+      gpuName: "RTX 4090",
+      gpuRamGb: 24,
+      hourlyRateMicroUsd: 440_000,
+      expectedWaitMinutes: 2,
+      simulated: false
+    };
+    const alternative: ComputeOffer = { ...taken, offerId: 12, gpuName: "L40S", hourlyRateMicroUsd: 610_000 };
+    const searches: number[][] = [];
+
+    const compute: ComputeProvider = {
+      async findOffer({ excludeOfferIds }) {
+        searches.push(excludeOfferIds ?? []);
+        const excluded = new Set(excludeOfferIds ?? []);
+        return excluded.has(taken.offerId) ? alternative : taken;
+      },
+      async createInstance(offer) {
+        if (offer.offerId === taken.offerId) {
+          // Exactly what vast.ai answers when the machine was rented meanwhile.
+          throw new Error(
+            "PUT /api/v0/asks/11/ failed with status 400: invalid_args — error 404/3603: no_such_ask  Instance type by id 11 is not available."
+          );
+        }
+
+        return { instanceId: 555 };
+      },
+      async waitUntilReady() {
+        return undefined;
+      },
+      async destroyInstance() {
+        return undefined;
+      },
+      isOfferUnavailable: isOfferUnavailableError
+    };
+
+    const orchestrator = new SessionOrchestrator({
+      store,
+      compute,
+      inference: createMockInference({ response: "ok" }),
+      idleTimeoutMinutes: 10,
+      now: () => clock
+    });
+
+    const estimate = await orchestrator.createEstimate("Qwen/Qwen2.5-7B-Instruct");
+    const session = await orchestrator.start({ estimateId: estimate.id, confirmEstimate: true });
+
+    expect(session.state).toBe("active");
+    expect(session.gpuName).toBe("L40S");
+    expect(session.instanceId).toBe(555);
+    // estimate search, start search, then one retry that excludes the taken offer
+    expect(searches).toEqual([[], [], [11]]);
+
+    const messages = store.eventsFor(session.id).map((event) => event.message);
+    expect(messages.some((message) => message.includes("was taken before it could be booked"))).toBe(true);
+    expect(messages.some((message) => message.includes("Trying L40S"))).toBe(true);
   });
 
   it("respects the GPU filters when ranking offers", async () => {

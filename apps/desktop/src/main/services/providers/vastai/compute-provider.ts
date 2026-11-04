@@ -2,7 +2,9 @@ import type { GpuFilters } from "@maia/contracts";
 import type { ComputeOffer, ComputeProvider } from "../../sessions/orchestrator";
 import {
   buildSearchQuery,
+  estimateDiskGb,
   estimateGpuRamGb,
+  isOfferUnavailableError,
   readMappedPort,
   readPublicHost,
   toComputeOffer,
@@ -15,6 +17,7 @@ export interface VastComputeProviderOptions {
   getHfToken?: () => Promise<string | undefined>;
   getFilters?: () => GpuFilters | undefined;
   containerImage?: string;
+  /** Overrides the disk size derived from the model size. */
   diskGb?: number;
   readyTimeoutMs?: number;
   pollIntervalMs?: number;
@@ -50,29 +53,39 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
       return endpoints.get(instanceId) ?? null;
     },
 
-    async findOffer({ modelId, filters }): Promise<ComputeOffer | null> {
+    isOfferUnavailable(error: unknown): boolean {
+      return isOfferUnavailableError(error);
+    },
+
+    async findOffer({ modelId, filters, excludeOfferIds }): Promise<ComputeOffer | null> {
       const api = await client();
       const parameterCount = await options.getParameterCount(modelId);
       const gpuRamGb = estimateGpuRamGb(parameterCount);
+      const diskGb = options.diskGb ?? estimateDiskGb(parameterCount);
       const effectiveFilters = filters ?? options.getFilters?.();
+      const excluded = new Set(excludeOfferIds ?? []);
 
       const offers = await api.searchOffers(
         buildSearchQuery({
           gpu_ram_gb: gpuRamGb,
           maxHourlyMicroUsd: effectiveFilters?.maxHourlyMicroUsd ?? null,
-          filters: effectiveFilters
+          filters: effectiveFilters,
+          minDiskGb: diskGb
         })
       );
 
       const mapped = offers
         .map(toComputeOffer)
         .filter((offer): offer is ComputeOffer => offer !== null)
+        .filter((offer) => !excluded.has(offer.offerId))
         .sort((left, right) => left.hourlyRateMicroUsd - right.hourlyRateMicroUsd);
 
       const [best] = mapped;
       options.logger?.info("vast.ai offer search finished", {
         modelId,
         gpuRamGb,
+        diskGb,
+        excluded: excluded.size,
         candidates: mapped.length
       });
 
@@ -82,11 +95,12 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
     async createInstance(offer, context) {
       const api = await client();
       const hfToken = await options.getHfToken?.();
+      const parameterCount = await options.getParameterCount(context.modelId);
 
       const instanceId = await api.createInstance({
         offerId: offer.offerId,
         image: options.containerImage ?? "vllm/vllm-openai:latest",
-        diskGb: options.diskGb ?? 64,
+        diskGb: options.diskGb ?? estimateDiskGb(parameterCount),
         label: context.label,
         env: hfToken ? { HUGGING_FACE_HUB_TOKEN: hfToken } : {},
         args: ["-p", "8000:8000", "--model", context.modelId, "--port", "8000"]

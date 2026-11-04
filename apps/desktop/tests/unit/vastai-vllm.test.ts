@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
   buildSearchQuery,
+  estimateDiskGb,
   estimateGpuRamGb,
+  isOfferUnavailableError,
   readCountry,
   readMappedPort,
   readPublicHost,
   toComputeOffer
 } from "../../src/main/services/providers/vastai/client";
+import { ProviderHttpError } from "../../src/main/services/providers/http";
 import { modelPath } from "../../src/main/services/catalogue/huggingface-source";
 import { createVllmRuntime, parseChunk, parseSseStream } from "../../src/main/services/inference/vllm";
 
@@ -28,8 +31,42 @@ describe("vast.ai offer search", () => {
       reliability2: { gte: 0.95 },
       geolocation: { in: ["IT", "DE"] }
     });
-    // Non-numeric trusted "datacenter" entries cannot be matched to a machine id.
-    expect(query.machine_id).toEqual({ in: [] });
+    // Non-numeric trusted "datacenter" entries cannot be matched to a machine id
+    // and an empty `in` list would match nothing, so the filter is omitted.
+    expect(query.machine_id).toBeUndefined();
+  });
+
+  it("asks for enough container disk for the model, and never for an empty list", () => {
+    const query = buildSearchQuery({
+      gpu_ram_gb: 24,
+      maxHourlyMicroUsd: null,
+      minDiskGb: 80,
+      filters: { countries: [], datacenters: ["12", "not-a-number"], minReliability: null, maxHourlyMicroUsd: null }
+    });
+
+    expect(query.disk_space).toEqual({ gte: 80 });
+    expect(query.geolocation).toBeUndefined();
+    expect(query.machine_id).toEqual({ in: [12] });
+  });
+
+  it("sizes the disk after the checkpoint instead of a fixed 64 GB", () => {
+    expect(estimateDiskGb(null)).toBe(64);
+    expect(estimateDiskGb(7.6e9)).toBe(64);
+    expect(estimateDiskGb(70e9)).toBeGreaterThan(150);
+  });
+
+  it("recognises an offer that vanished between search and booking", () => {
+    const gone = new ProviderHttpError(
+      "INVALID_REQUEST",
+      'PUT /api/v0/asks/999999999/ failed with status 400: invalid_args — error 404/3603: no_such_ask  Instance type by id 999999999 is not available.',
+      false,
+      400
+    );
+
+    expect(isOfferUnavailableError(gone)).toBe(true);
+    expect(isOfferUnavailableError(new Error("vast.ai did not return an instance id; the offer may no longer be available."))).toBe(true);
+    expect(isOfferUnavailableError(new ProviderHttpError("NOT_AUTHENTICATED", "Provider rejected the credentials", false, 401))).toBe(false);
+    expect(isOfferUnavailableError(new Error("disk too small"))).toBe(false);
   });
 
   it("sends no constraints when the user has no filters", () => {
