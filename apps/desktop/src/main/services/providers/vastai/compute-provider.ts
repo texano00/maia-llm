@@ -22,6 +22,8 @@ export interface VastComputeProviderOptions {
   diskGb?: number;
   readyTimeoutMs?: number;
   pollIntervalMs?: number;
+  /** How long a running container may stay portless before it is reported as broken. */
+  missingPortTimeoutMs?: number;
   fetchImpl?: typeof fetch;
   /** Injectable for tests; defaults to a live client built from the stored key. */
   clientFactory?: (apiKey: string) => VastAiClient;
@@ -167,6 +169,8 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
       const startedAt = Date.now();
       let lastStatus = "";
       let unknownSince: number | null = null;
+      let runningWithoutPortSince: number | null = null;
+      const missingPortTimeoutMs = options.missingPortTimeoutMs ?? 90_000;
 
       for (;;) {
         const instance = await api.getInstance(instanceId);
@@ -201,17 +205,34 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
           const port = readMappedPort(instance);
           if (host && port) {
             endpoints.set(instanceId, { host, port });
-            onProgress?.({ status: "starting", message: "waiting for the model server", elapsedMs: Date.now() - startedAt });
-            const served = await waitForServing(`http://${host}:${port}`, deadline, options.fetchImpl);
+            const endpoint = `http://${host}:${port}`;
+            onProgress?.({ status: "starting", message: endpoint, elapsedMs: Date.now() - startedAt });
+            const served = await waitForServing(endpoint, deadline, options.fetchImpl);
             if (served === null) {
               throw new Error(
                 "The model server did not become ready in time. The GPU was released — a cold start can take several minutes when the host is slow."
               );
             }
 
-            options.logger?.info("Model server is serving", { instanceId, models: served });
+            options.logger?.info("Model server is serving", { instanceId, endpoint, models: served });
+            onProgress?.({
+              status: "serving",
+              message: `${endpoint} (${served.join(", ")})`,
+              elapsedMs: Date.now() - startedAt
+            });
             return;
           }
+
+          // Running with no port means the Docker mapping never applied — the
+          // model is up but unreachable, which looks like "nothing happened".
+          runningWithoutPortSince ??= Date.now();
+          if (Date.now() - runningWithoutPortSince > missingPortTimeoutMs) {
+            throw new Error(
+              "The container is running but vast.ai published no port for 8000, so the model cannot be reached. The Docker port mapping did not apply to this instance."
+            );
+          }
+        } else {
+          runningWithoutPortSince = null;
         }
 
         // vast.ai documents that `exited`, `unknown` and `offline` never recover.

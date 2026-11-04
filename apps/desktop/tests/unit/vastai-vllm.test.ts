@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   buildSearchQuery,
   classifyOffer,
@@ -325,6 +325,67 @@ describe("vast.ai offer picking", () => {
     expect(readMappedPort({ ports: { "8000": [{ HostPort: 40000 }] } })).toBe(40000);
     expect(readMappedPort({ ports: { "8000/tcp": [] } })).toBeNull();
     expect(readMappedPort({})).toBeNull();
+  });
+
+  it("says which port should have been published when a running instance has none", async () => {
+    const fake = {
+      // Exactly the state observed on a real rental: the container is up and the
+      // model downloads, but vast.ai reports no published ports.
+      async getInstance() {
+        return { id: 7, actual_status: "running", public_ipaddr: "203.0.113.9", ports: null };
+      }
+    } as unknown as VastAiClient;
+
+    const provider = createVastComputeProvider({
+      getApiKey: async () => "key",
+      getParameterCount: async () => 7.6e9,
+      clientFactory: () => fake,
+      missingPortTimeoutMs: 0,
+      pollIntervalMs: 5
+    });
+
+    await expect(provider.waitUntilReady(7, 5_000)).rejects.toThrow(/published no port for 8000/);
+  });
+
+  it("reports the endpoint once the model is actually served", async () => {
+    const fake = {
+      async getInstance() {
+        return {
+          id: 8,
+          actual_status: "running",
+          public_ipaddr: "203.0.113.10",
+          ports: { "8000/tcp": [{ HostIp: "0.0.0.0", HostPort: "40123" }] }
+        };
+      }
+    } as unknown as VastAiClient;
+
+    const fetchImpl = vi.fn(async (url: string) => {
+      if (url.endsWith("/health")) {
+        return new Response("ok", { status: 200 });
+      }
+
+      return new Response(JSON.stringify({ data: [{ id: "Qwen/Qwen2.5-0.5B-Instruct" }] }), {
+        status: 200
+      });
+    });
+
+    const provider = createVastComputeProvider({
+      getApiKey: async () => "key",
+      getParameterCount: async () => 0.5e9,
+      clientFactory: () => fake,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      pollIntervalMs: 5
+    });
+
+    const statuses: string[] = [];
+    await provider.waitUntilReady(8, 5_000, (update) => statuses.push(update.status));
+
+    expect(statuses).toContain("serving");
+    expect(provider.resolveEndpoint(8)).toEqual({ host: "203.0.113.10", port: 40123 });
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "http://203.0.113.10:40123/v1/models",
+      expect.anything()
+    );
   });
 });
 

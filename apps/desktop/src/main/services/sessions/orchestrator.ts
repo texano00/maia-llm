@@ -688,6 +688,8 @@ function describeStatus(status: string): string {
       return "Container is running";
     case "starting":
       return "Waiting for the model server to answer";
+    case "serving":
+      return "Model server is serving at";
     default:
       return `Instance status: ${status}`;
   }
