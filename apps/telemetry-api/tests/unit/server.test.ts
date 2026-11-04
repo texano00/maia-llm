@@ -55,7 +55,8 @@ describe("configuration", () => {
     const config = loadConfig({});
 
     expect(config.databaseDriver).toBe("sqlite");
-    expect(config.databaseFile.endsWith("var/maia.sqlite")).toBe(true);
+    // `resolve` uses the platform separator, and desktop-ci runs on Windows.
+    expect(config.databaseFile.endsWith(join("var", "maia.sqlite"))).toBe(true);
     expect(config.unstableTtlMs).toBe(6 * 60 * 60_000);
     expect(config.telemetryRetentionMs).toBe(30 * 24 * 60 * 60_000);
     expect(config.legacyReputationFile).toBeNull();
