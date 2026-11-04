@@ -1,6 +1,6 @@
 {
   "name": "maia-llm",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "private": true,
   "type": "module",
   "description": "Desktop LLM suite with on-demand remote GPU and model archival",

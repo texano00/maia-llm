@@ -28,6 +28,31 @@ export const catalogueModelSchema = z.object({
   cachedAt: z.string()
 });
 
+/**
+ * Hugging Face pipeline tags that a vLLM chat server can actually serve.
+ *
+ * The catalogue lists the Hub, which also contains embedding, reranking, ASR and
+ * image models. Renting a GPU for one of those boots fine and then rejects every
+ * chat request with 404, so they are filtered out of the list and refused at
+ * session start instead.
+ */
+export const CHAT_PIPELINE_TAGS: readonly string[] = [
+  "text-generation",
+  "text2text-generation",
+  "image-text-to-text",
+  "conversational",
+  "visual-question-answering"
+];
+
+/**
+ * A model can be run when its pipeline is chat-capable. `null` is allowed: some
+ * Hub entries omit `pipeline_tag`, and the model card is the only other source.
+ */
+export function isChatCapableModel(model: { pipelineTag: string | null }): boolean {
+  return model.pipelineTag === null || CHAT_PIPELINE_TAGS.includes(model.pipelineTag);
+}
+
+
 export const modelArtifactSchema = z.object({
   id: z.string(),
   modelId: z.string(),

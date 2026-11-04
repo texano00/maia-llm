@@ -1,6 +1,7 @@
 import { memo } from "react";
 import { useNavigate } from "react-router-dom";
 import type { CatalogueModel, Session } from "@maia/contracts";
+import { isChatCapableModel } from "@maia/contracts";
 import { useWorkspace } from "../../shared/session/WorkspaceProvider";
 import { formatParameters, formatContext, formatBytes, formatUsd } from "../../shared/format";
 export function CataloguePage() {
@@ -239,13 +240,17 @@ export function CataloguePage() {
                   </ul>
                   <button
                     type="button"
-                    disabled={starting}
+                    disabled={starting || !isChatCapableModel(selected.model)}
                     onClick={() => {
                       navigate("/chat");
                       void startSession(selected.model.id);
                     }}
                   >
-                    {starting ? "Booking a GPU…" : "Confirm and start session"}
+                    {starting
+                      ? "Booking a GPU…"
+                      : isChatCapableModel(selected.model)
+                        ? "Confirm and start session"
+                        : "Not a chat model"}
                   </button>
                 </div>
               )}
@@ -282,6 +287,9 @@ const ModelRow = memo(function ModelRow({
         <span className="model-name-row">
           <span className="model-name">{model.id}</span>
           {model.gated !== "none" ? <span className="pill pill-warning">gated</span> : null}
+          {isChatCapableModel(model) ? null : (
+            <span className="pill pill-warning">not a chat model</span>
+          )}
         </span>
         <span className="model-meta">
           {model.pipelineTag ?? "unknown task"}

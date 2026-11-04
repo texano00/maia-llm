@@ -614,4 +614,24 @@ describe("vLLM streaming", () => {
       })
     ).rejects.toThrow(/not reachable/);
   });
+
+  it("explains a 404 as a model without a chat endpoint", async () => {
+    // Exactly what a vLLM server for an embedding model answers.
+    const runtime = createVllmRuntime({
+      resolveEndpoint: () => ({ host: "203.0.113.5", port: 32_100 }),
+      fetchImpl: (async () =>
+        new Response(JSON.stringify({ detail: "Not Found" }), { status: 404 })) as typeof fetch
+    });
+
+    await expect(
+      runtime.stream({
+        sessionId: "s1",
+        modelId: "BAAI/bge-small-en-v1.5",
+        instanceId: 1,
+        prompt: "hi",
+        signal: new AbortController().signal,
+        onDelta: () => undefined
+      })
+    ).rejects.toThrow(/no chat endpoint \(HTTP 404\)/);
+  });
 });

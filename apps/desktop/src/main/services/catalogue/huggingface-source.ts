@@ -50,6 +50,10 @@ export function createHuggingFaceSource(options: HuggingFaceSourceOptions = {}):
         limit: String(limit),
         sort: "downloads",
         direction: "-1",
+        // Without this the Hub happily returns embedding, reranking and ASR
+        // models, which boot on a GPU and then answer every chat request with
+        // 404 because vLLM exposes no chat endpoint for them.
+        filter: "text-generation",
         full: "true"
       });
       if (search) {

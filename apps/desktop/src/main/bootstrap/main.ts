@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, Menu } from "electron";
 import { join } from "node:path";
 import { z } from "zod";
-import { updateEventChannel, chatEventChannel } from "@maia/contracts";
+import { updateEventChannel, chatEventChannel, isChatCapableModel } from "@maia/contracts";
 import { closeDatabase, openDatabase, type DatabaseConnection } from "../storage/db";
 import { HistoryRepository } from "../services/history/repository";
 import { CredentialVault } from "../services/credentials/vault";
@@ -233,6 +233,14 @@ async function bootstrap(): Promise<void> {
     idleTimeoutMinutes: config.idleTimeoutMinutes,
     readinessTimeoutMs: config.readinessTimeoutMinutes * 60_000,
     filters: () => settings.get().gpuFilters,
+    assertRunnable: (modelId) => {
+      const model = catalogue.get(modelId);
+      if (model && !isChatCapableModel(model)) {
+        throw new Error(
+          `"${model.id}" is a ${model.pipelineTag} model, not a chat model. Pick a text-generation model to start a chat session.`
+        );
+      }
+    },
     logger
   });
 

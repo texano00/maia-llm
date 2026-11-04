@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { isChatCapableModel } from "@maia/contracts";
 import { closeDatabase, openDatabase, type DatabaseConnection } from "../../src/main/storage/db";
 import { CatalogueRepository } from "../../src/main/services/catalogue/repository";
 import { CatalogueService, filterAndSort, type CatalogueSource } from "../../src/main/services/catalogue/service";
@@ -47,6 +48,25 @@ describe("Hugging Face mapping", () => {
     expect(model.gated).toBe("manual");
     expect(model.license).toBe("mit");
     expect(model.contextWindow).toBeNull();
+  });
+
+  it("does not advertise chat for a model vLLM cannot chat with", () => {
+    // The exact model that was rented by mistake: an embedding model boots and
+    // then answers every message with 404.
+    const embedding = mapHuggingFaceModel(
+      {
+        id: "BAAI/bge-small-en-v1.5",
+        pipeline_tag: "sentence-similarity",
+        tags: ["sentence-transformers", "feature-extraction"],
+        downloads: 10,
+        likes: 1
+      },
+      "2026-11-04T00:00:00.000Z"
+    );
+
+    expect(embedding.capabilities).not.toContain("chat");
+    expect(isChatCapableModel(embedding)).toBe(false);
+    expect(isChatCapableModel(mapHuggingFaceModel(payload, "2026-11-04T00:00:00.000Z"))).toBe(true);
   });
 
   it("maps artifact formats, quantisation, and LFS sizes", () => {

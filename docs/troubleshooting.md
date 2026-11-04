@@ -36,6 +36,7 @@ at startup.
 | "Timed out waiting for the GPU instance to start (40 min)" | The whole boot budget was used. A cold start of a 14B model pulls a ~9 GB image and 25 GB of weights; check `inet_down` on that host. Raise `MAIA_READY_TIMEOUT_MINUTES` if the host is legitimately slow. |
 | "did not start the container within 15 min" | A different failure: the host never reached `running` and reported no progress, so the app released the GPU instead of letting it bill for 40 minutes. Retrying usually lands on another machine. |
 | A GPU was released after a crash | The log line `The GPU guardian released instances after the previous run ended unexpectedly` lists the instance ids the detached guardian destroyed. See [gpu-lifecycle.md](gpu-lifecycle.md). |
+| Chat answers "The model server has no chat endpoint (HTTP 404)" | The rented model is not a text-generation model (an embedding or reranking model, for example `BAAI/bge-small-en-v1.5`). vLLM serves `/v1/models` for those but registers no `/v1/chat/completions`. End that session and pick a text-generation model; the catalogue now lists only those, and a session start is refused otherwise. |
 | Startup takes 5–15 minutes | Check the host's `inet_down` (Mbps) in the log line `vast.ai offer search finished`. The default gates require 1000 Mbps down / 500 MB/s disk; lower them in Settings only if you accept a slower boot. |
 
 The main process now self-checks after the window loads and logs

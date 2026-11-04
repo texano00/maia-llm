@@ -1,4 +1,5 @@
 import type { CatalogueModel, ModelArtifact } from "@maia/contracts";
+import { isChatCapableModel } from "@maia/contracts";
 
 /** Shape returned by `GET /api/models` on huggingface.co. */
 export interface HuggingFaceModelPayload {
@@ -50,7 +51,7 @@ export function mapHuggingFaceModel(
     gated: normalizeGated(payload.gated),
     lastModifiedAt: payload.lastModified ?? null,
     tags: payload.tags ?? [],
-    capabilities: deriveCapabilities(payload.tags ?? [], contextWindow),
+    capabilities: deriveCapabilities(payload.tags ?? [], contextWindow, payload.pipeline_tag ?? null),
     cachedAt
   };
 }
@@ -74,8 +75,19 @@ const CAPABILITY_TAGS: Record<string, string> = {
  * Turns free-form Hub tags into the small set of features the catalogue can sort
  * and filter on ("order by features enabled").
  */
-export function deriveCapabilities(tags: string[], contextWindow: number | null): string[] {
-  const capabilities = new Set<string>(["chat"]);
+export function deriveCapabilities(
+  tags: string[],
+  contextWindow: number | null,
+  pipelineTag: string | null = null
+): string[] {
+  const capabilities = new Set<string>();
+
+  // An embedding or reranking model has tags like `sentence-transformers`, but
+  // no chat endpoint: claiming "chat" here is what let one be rented for a
+  // conversation in the first place.
+  if (isChatCapableModel({ pipelineTag })) {
+    capabilities.add("chat");
+  }
 
   for (const tag of tags) {
     const normalized = tag.toLowerCase();

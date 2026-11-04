@@ -47,6 +47,16 @@ export function createVllmRuntime(options: VllmRuntimeOptions): InferenceRuntime
 
       if (!response.ok || !response.body) {
         const detail = await response.text().catch(() => "");
+
+        // vLLM only registers /v1/chat/completions for generative models: a 404
+        // means the endpoint exists but this model has no chat surface, which is
+        // what an embedding or reranking model looks like from here.
+        if (response.status === 404) {
+          throw new Error(
+            "The model server has no chat endpoint (HTTP 404). This model was probably not a text-generation model, so no conversation can be served from it."
+          );
+        }
+
         throw new Error(
           `The model server rejected the request (HTTP ${response.status}). ${detail.slice(0, 200)}`.trim()
         );

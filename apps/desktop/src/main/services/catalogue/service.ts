@@ -1,4 +1,4 @@
-import type { CatalogueQuery, CatalogueResult, ModelDetail } from "@maia/contracts";
+import type { CatalogueModel, CatalogueQuery, CatalogueResult, ModelDetail } from "@maia/contracts";
 import type { CatalogueRepository } from "./repository";
 import { mapArtifacts, mapHuggingFaceModel, type HuggingFaceModelPayload, type HuggingFaceTreeEntry } from "./mapper";
 
@@ -61,6 +61,11 @@ export class CatalogueService {
 
   async refresh(): Promise<CatalogueResult> {
     return this.refreshInto("");
+  }
+
+  /** Cached record, without touching the network. */
+  get(id: string): CatalogueModel | null {
+    return this.options.repository.get(id);
   }
 
   private async refreshInto(search: string): Promise<CatalogueResult> {

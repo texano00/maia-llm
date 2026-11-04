@@ -102,6 +102,12 @@ export interface SessionOrchestratorOptions {
   readinessTimeoutMs?: number;
   /** Returns the user's current GPU preferences so offers respect them. */
   filters?: () => GpuFilters | undefined;
+  /**
+   * Refuses a model the runtime cannot serve before anything is rented. The
+   * composition root wires this to the catalogue; the orchestrator only needs
+   * to know that it may throw.
+   */
+  assertRunnable?: (modelId: string) => void;
 }
 
 interface SessionRuntime {
@@ -159,6 +165,10 @@ export class SessionOrchestrator {
   }
 
   async createEstimate(modelId: string, expectedMinutes = 30): Promise<Estimate> {
+    // Cheapest place to refuse a model that cannot chat: no offer search, no
+    // booking, no boot.
+    this.options.assertRunnable?.(modelId);
+
     const filters = this.options.filters?.();
     const offer = await this.options.compute.findOffer({ modelId, filters });
     if (!offer) {
@@ -193,6 +203,10 @@ export class SessionOrchestrator {
         "This estimate is no longer valid. Request a new estimate and review it."
       );
     }
+
+    // An embedding or reranking model boots happily and then answers every
+    // message with 404, so refuse it before a single minute is billed.
+    this.options.assertRunnable?.(estimate.modelId);
 
     const filters = this.options.filters?.();
     let offer = await this.options.compute.findOffer({ modelId: estimate.modelId, filters });

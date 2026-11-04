@@ -104,6 +104,31 @@ describe("SessionOrchestrator", () => {
     ).rejects.toMatchObject({ code: "ESTIMATE_REQUIRED" });
   });
 
+  it("refuses a model the runtime cannot serve before renting anything", async () => {
+    const compute = createMockComputeProvider({ offer });
+    const orchestrator = new SessionOrchestrator({
+      store,
+      compute,
+      inference: createMockInference({ response: "" }),
+      idleTimeoutMinutes: 10,
+      now: () => clock,
+      assertRunnable: (modelId) => {
+        if (modelId === "BAAI/bge-small-en-v1.5") {
+          throw new Error(`"${modelId}" is a sentence-similarity model, not a chat model.`);
+        }
+      }
+    });
+
+    // Refused at the estimate: no offer search, no booking, no boot.
+    await expect(orchestrator.createEstimate("BAAI/bge-small-en-v1.5")).rejects.toThrow(
+      /not a chat model/
+    );
+
+    // Nothing was booked, so nothing can bill.
+    expect(store.getActive()).toHaveLength(0);
+    expect(orchestrator.listSessions()).toHaveLength(0);
+  });
+
   it("provisions, streams, persists state, and releases the GPU", async () => {
     const { orchestrator, compute } = createOrchestrator();
     const estimate = await orchestrator.createEstimate("Qwen/Qwen2.5-7B-Instruct");
