@@ -114,7 +114,8 @@ interface SessionRuntime {
  * A cold start moves ~25 GB and then loads the weights: minutes, not seconds. The
  * startup gates keep the typical case at 2–5 minutes; this is the safety net.
  */
-const DEFAULT_READINESS_TIMEOUT_MS = 20 * 60_000;
+/** A cold boot pulls a multi-GB image and then the weights; 20 min was too tight. */
+const DEFAULT_READINESS_TIMEOUT_MS = 40 * 60_000;
 
 /** Every instance the app rents carries this label, so orphans can be found. */
 const SESSION_LABEL_PREFIX = "maia:";

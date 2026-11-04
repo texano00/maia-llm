@@ -49,7 +49,9 @@ Three ideas shape everything in the app:
   changed.
 - **A lifecycle log you can actually read.** Provisioning, boot, model download,
   "running", releases and errors are timestamped so you always know what the GPU
-  is doing.
+  is doing. Closing the app warns first and shuts the GPUs down; a detached
+  guardian does the same if the app crashes or is force-quit — see
+  [docs/gpu-lifecycle.md](docs/gpu-lifecycle.md).
 
 ### Optional extras
 

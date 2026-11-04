@@ -32,11 +32,25 @@ export interface VastComputeProviderOptions {
   containerImage?: string;
   /** Overrides the disk size derived from the model size. */
   diskGb?: number;
+  /**
+   * Hard cap on the whole boot. Generous on purpose: pulling a multi-GB image
+   * and then 10-25 GB of weights legitimately takes half an hour on a slow
+   * host, and the old 20-minute cap released healthy instances mid-download.
+   */
   readyTimeoutMs?: number;
+  /**
+   * How long a host may sit on the request without ever starting the container
+   * before it is treated as stuck. Ignored once the container has started:
+   * from then on the work is real and only `readyTimeoutMs` applies.
+   */
+  stallTimeoutMs?: number;
   pollIntervalMs?: number;
   /** How long a running container may stay portless before it is reported as broken. */
   missingPortTimeoutMs?: number;
   fetchImpl?: typeof fetch;
+  /** Injectable clock and pause, so timeout behaviour can be tested. */
+  now?: () => number;
+  pause?: (ms: number) => Promise<void>;
   /** Injectable for tests; defaults to a live client built from the stored key. */
   clientFactory?: (apiKey: string) => VastAiClient;
   logger?: { info(message: string, context?: Record<string, unknown>): void; warn(message: string, context?: Record<string, unknown>): void } | undefined;
@@ -222,17 +236,28 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
 
     async waitUntilReady(instanceId, timeoutMs, onProgress) {
       const api = await client();
-      const deadline = Date.now() + (options.readyTimeoutMs ?? timeoutMs);
+      const now = options.now ?? (() => Date.now());
+      const pause = options.pause ?? sleep;
       const pollInterval = options.pollIntervalMs ?? 5_000;
-      const startedAt = Date.now();
+      const startedAt = now();
+      const deadline = startedAt + (options.readyTimeoutMs ?? timeoutMs);
+      const stallTimeoutMs = options.stallTimeoutMs ?? 15 * 60_000;
+      const missingPortTimeoutMs = options.missingPortTimeoutMs ?? 90_000;
+
       let lastStatus = "";
+      let lastMessage = "";
+      let lastProgressAt = startedAt;
       let unknownSince: number | null = null;
       let runningWithoutPortSince: number | null = null;
-      const missingPortTimeoutMs = options.missingPortTimeoutMs ?? 90_000;
+      // Once the container is up the host is doing real work: pulling the image,
+      // then downloading weights. That phase gets the full deadline instead of
+      // being cancelled for "looking quiet".
+      let containerStarted = false;
 
       for (;;) {
         const instance = await api.getInstance(instanceId);
         const status = instance.actual_status ?? "unknown";
+        const message = instance.status_msg ?? "";
 
         // A host that cannot attach the GPU never recovers: stop waiting for it.
         if (isInstanceStartFailureMessage(instance.status_msg)) {
@@ -242,20 +267,24 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
           );
         }
 
-        if (status !== lastStatus) {
+        // Any change in status or provider message is progress worth reporting
+        // and worth extending the stall window for.
+        if (status !== lastStatus || message !== lastMessage) {
           lastStatus = status;
+          lastMessage = message;
+          lastProgressAt = now();
           onProgress?.({
             status,
-            message: instance.status_msg ?? null,
-            elapsedMs: Date.now() - startedAt
+            message: message.length > 0 ? message : null,
+            elapsedMs: now() - startedAt
           });
         }
 
         // A freshly created instance reports `unknown` until the host reports
         // back, so only a persistent unknown/offline is fatal.
         if (status === "unknown" || status === "offline") {
-          unknownSince ??= Date.now();
-          if (Date.now() - unknownSince > 120_000) {
+          unknownSince ??= now();
+          if (now() - unknownSince > 120_000) {
             throw new Error(`The GPU instance never became visible (${status}).`);
           }
         } else {
@@ -267,13 +296,17 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
         }
 
         if (status === "running") {
+          containerStarted = true;
           const host = readPublicHost(instance);
           const port = readMappedPort(instance);
           if (host && port) {
             endpoints.set(instanceId, { host, port });
             const endpoint = `http://${host}:${port}`;
-            onProgress?.({ status: "starting", message: endpoint, elapsedMs: Date.now() - startedAt });
-            const served = await waitForServing(endpoint, deadline, options.fetchImpl);
+            onProgress?.({ status: "starting", message: endpoint, elapsedMs: now() - startedAt });
+            const served = await waitForServing(endpoint, deadline, options.fetchImpl, {
+              now,
+              pause
+            });
             if (served === null) {
               throw new Error(
                 "The model server did not become ready in time. The GPU was released — a cold start can take several minutes when the host is slow."
@@ -284,31 +317,43 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
             onProgress?.({
               status: "serving",
               message: `${endpoint} (${served.join(", ")})`,
-              elapsedMs: Date.now() - startedAt
+              elapsedMs: now() - startedAt
             });
             return;
           }
 
           // Running with no port means the Docker mapping never applied — the
           // model is up but unreachable, which looks like "nothing happened".
-          runningWithoutPortSince ??= Date.now();
-          if (Date.now() - runningWithoutPortSince > missingPortTimeoutMs) {
+          runningWithoutPortSince ??= now();
+          if (now() - runningWithoutPortSince > missingPortTimeoutMs) {
             throw new Error(
               "The container is running but vast.ai published no port for 8000, so the model cannot be reached. The Docker port mapping did not apply to this instance."
             );
           }
         } else {
           runningWithoutPortSince = null;
+
+          // A host that never even starts the container is not slow, it is
+          // stuck: fail there instead of burning the whole boot budget.
+          if (!containerStarted && now() - lastProgressAt > stallTimeoutMs) {
+            throw new Error(
+              `The GPU host did not start the container within ${Math.round(
+                stallTimeoutMs / 60_000
+              )} min and reported no progress (last status: "${lastStatus}"). The GPU was released.`
+            );
+          }
         }
 
         // vast.ai documents that `exited`, `unknown` and `offline` never recover.
-        if (Date.now() > deadline) {
+        if (now() > deadline) {
           throw new Error(
-            `Timed out waiting for the GPU instance to start (${Math.round((Date.now() - startedAt) / 60_000)} min). The GPU was released.`
+            `Timed out waiting for the GPU instance to start (${Math.round(
+              (now() - startedAt) / 60_000
+            )} min). The GPU was released.`
           );
         }
 
-        await sleep(pollInterval);
+        await pause(pollInterval);
       }
     },
 
@@ -338,7 +383,11 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
 async function waitForServing(
   baseUrl: string,
   deadline: number,
-  fetchImpl: typeof fetch = fetch
+  fetchImpl: typeof fetch = fetch,
+  clock: { now: () => number; pause: (ms: number) => Promise<void> } = {
+    now: () => Date.now(),
+    pause: sleep
+  }
 ): Promise<string[] | null> {
   for (;;) {
     try {
@@ -357,11 +406,11 @@ async function waitForServing(
       // Model servers reject connections until vLLM finished loading weights.
     }
 
-    if (Date.now() > deadline) {
+    if (clock.now() > deadline) {
       return null;
     }
 
-    await sleep(5_000);
+    await clock.pause(5_000);
   }
 }
 

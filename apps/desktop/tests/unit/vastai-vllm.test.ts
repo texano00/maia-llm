@@ -398,6 +398,116 @@ describe("vast.ai offer picking", () => {
     await expect(provider.waitUntilReady(7, 5_000)).rejects.toThrow(/published no port for 8000/);
   });
 
+  it("keeps waiting past the old 20-minute mark while a started container downloads", async () => {
+    // Reproduces a real boot: the container is up at 11 s, then the host spends
+    // 26 minutes pulling the image and 15 GB of weights with no status change.
+    // The old fixed cap released that GPU mid-download.
+    let clock = 0;
+    const fake = {
+      async getInstance() {
+        return {
+          id: 9,
+          actual_status: "running",
+          status_msg: "Pulling the container image and starting it",
+          public_ipaddr: "203.0.113.11",
+          ports: { "8000/tcp": [{ HostIp: "0.0.0.0", HostPort: "40200" }] }
+        };
+      }
+    } as unknown as VastAiClient;
+
+    const fetchImpl = vi.fn(async (url: string) => {
+      // The model server only answers once the weights are loaded.
+      if (clock < 26 * 60_000) {
+        throw new Error("ECONNREFUSED");
+      }
+
+      return url.endsWith("/health")
+        ? new Response("ok", { status: 200 })
+        : new Response(JSON.stringify({ data: [{ id: "Qwen/Qwen2.5-7B-Instruct" }] }), {
+            status: 200
+          });
+    });
+
+    const provider = createVastComputeProvider({
+      getApiKey: async () => "key",
+      getParameterCount: async () => 7.6e9,
+      clientFactory: () => fake,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      readyTimeoutMs: 40 * 60_000,
+      pollIntervalMs: 5_000,
+      now: () => clock,
+      pause: async (ms: number) => {
+        clock += ms;
+      }
+    });
+
+    const statuses: string[] = [];
+    await provider.waitUntilReady(9, 40 * 60_000, (update) => statuses.push(update.status));
+
+    expect(statuses).toContain("serving");
+    expect(clock).toBeGreaterThan(20 * 60_000);
+    expect(clock).toBeLessThanOrEqual(40 * 60_000);
+  });
+
+  it("still gives up at the hard cap when the model never serves", async () => {
+    let clock = 0;
+    const fake = {
+      async getInstance() {
+        return {
+          id: 10,
+          actual_status: "running",
+          public_ipaddr: "203.0.113.12",
+          ports: { "8000/tcp": [{ HostIp: "0.0.0.0", HostPort: "40201" }] }
+        };
+      }
+    } as unknown as VastAiClient;
+
+    const provider = createVastComputeProvider({
+      getApiKey: async () => "key",
+      getParameterCount: async () => 7.6e9,
+      clientFactory: () => fake,
+      fetchImpl: (async () => {
+        throw new Error("ECONNREFUSED");
+      }) as unknown as typeof fetch,
+      readyTimeoutMs: 40 * 60_000,
+      pollIntervalMs: 5_000,
+      now: () => clock,
+      pause: async (ms: number) => {
+        clock += ms;
+      }
+    });
+
+    await expect(provider.waitUntilReady(10, 40 * 60_000)).rejects.toThrow(/did not become ready/);
+    expect(clock).toBeGreaterThanOrEqual(40 * 60_000);
+  });
+
+  it("fails fast when the host never starts the container", async () => {
+    let clock = 0;
+    const fake = {
+      async getInstance() {
+        return { id: 11, actual_status: "scheduling", status_msg: "scheduling" };
+      }
+    } as unknown as VastAiClient;
+
+    const provider = createVastComputeProvider({
+      getApiKey: async () => "key",
+      getParameterCount: async () => 7.6e9,
+      clientFactory: () => fake,
+      readyTimeoutMs: 40 * 60_000,
+      stallTimeoutMs: 15 * 60_000,
+      pollIntervalMs: 5_000,
+      now: () => clock,
+      pause: async (ms: number) => {
+        clock += ms;
+      }
+    });
+
+    await expect(provider.waitUntilReady(11, 40 * 60_000)).rejects.toThrow(
+      /did not start the container within 15 min/
+    );
+    expect(clock).toBeLessThan(20 * 60_000);
+  });
+
   it("reports the endpoint once the model is actually served", async () => {
     const fake = {
       async getInstance() {

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu } from "electron";
+import { app, BrowserWindow, dialog, Menu } from "electron";
 import { join } from "node:path";
 import { z } from "zod";
 import { updateEventChannel, chatEventChannel } from "@maia/contracts";
@@ -22,6 +22,7 @@ import { createHuggingFaceSource, testHuggingFaceToken } from "../services/catal
 import { CredentialStore } from "../services/credentials/store";
 import { SessionOrchestrator } from "../services/sessions/orchestrator";
 import { SessionStore } from "../services/sessions/store";
+import { GpuGuardian, guardianPaths } from "../services/sessions/guardian";
 import { createMockComputeProvider, createMockInference } from "../services/providers/mock-runtime";
 import { createVastComputeProvider } from "../services/providers/vastai/compute-provider";
 import { VastAiClient } from "../services/providers/vastai/client";
@@ -34,6 +35,7 @@ import { registerWorkspaceHandlers } from "../ipc/workspace";
 import { loadConfig } from "./config";
 import { ensureAppDirectories, resolveAppPaths } from "./paths";
 import { enforceSingleInstance, registerLifecycleHooks } from "./lifecycle";
+import { QuitCoordinator } from "./quit";
 import { createLogger } from "./logging";
 import { startCrashReporter } from "./crash-reporter";
 
@@ -76,7 +78,7 @@ function configureApplicationMenu(): void {
   Menu.setApplicationMenu(null);
 }
 
-function createWindow(): void {
+function createWindow(quit: QuitCoordinator): void {
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 840,
@@ -94,6 +96,15 @@ function createWindow(): void {
   });
 
   mainWindow.once("ready-to-show", () => mainWindow?.show());
+  // Closing the window is the usual quit path on Windows and Linux. Ask the
+  // coordinator first, otherwise the window would be gone by the time Electron
+  // asks about quitting, and there would be nothing on screen to warn with.
+  mainWindow.on("close", (event) => {
+    if (quit.intercept()) {
+      event.preventDefault();
+    }
+  });
+
   mainWindow.on("closed", () => {
     mainWindow = null;
   });
@@ -203,6 +214,7 @@ async function bootstrap(): Promise<void> {
         getReputations: () => reputation.snapshot(),
         reportOutcome: (input) => reputation.report(input),
         readyTimeoutMs: config.readinessTimeoutMinutes * 60_000,
+        stallTimeoutMs: config.readinessStallMinutes * 60_000,
         logger
       })
     : createMockComputeProvider({ provisionDelayMs: 400 });
@@ -341,40 +353,112 @@ async function bootstrap(): Promise<void> {
 
   void vault;
 
-  registerLifecycleHooks(() => {
-    if (updateTimer) {
-      clearInterval(updateTimer);
-      updateTimer = null;
-    }
-
-    clearInterval(idleTimer);
-
-    // Never leave a chargeable GPU running after the app exits (FR-073).
-    void sessions.endAll("app_exit");
-
-    updates?.dispose();
-    updates = null;
-    diagnostics?.stop();
-    diagnostics = null;
-    registry?.dispose();
-    if (database) {
-      closeDatabase(database);
-      database = null;
-    }
-
-    // The file destination is asynchronous now, so the tail must be written out.
-    logFlush?.();
+  // A detached process owns the clean-up if this one disappears without running
+  // the shutdown sequence (crash, "End task", `kill -9`).
+  const guardian = new GpuGuardian({
+    ...guardianPaths(paths.userData),
+    scriptPath: join(__dirname, "guardian.js"),
+    getApiKey: () => credentials.get("vastai"),
+    logger
   });
+
+  if (useLiveGpu) {
+    await guardian.start();
+    guardian.startSyncing(() =>
+      sessions
+        .listSessions()
+        .filter((session) => session.instanceId !== null)
+        .map((session) => ({ instanceId: session.instanceId as number, label: session.label }))
+    );
+
+    const previous = guardian.takeReport();
+    if (previous) {
+      logger.warn("The GPU guardian released instances after the previous run ended unexpectedly", {
+        released: previous.released,
+        failed: previous.failed,
+        finishedAt: previous.finishedAt
+      });
+    }
+  }
+
+  const quit = new QuitCoordinator({
+    describeRunningGpus: () => {
+      const running = sessions
+        .listSessions()
+        .filter((session) => session.instanceId !== null || session.state === "provisioning");
+
+      return {
+        count: running.length,
+        detail: running
+          .map(
+            (session) =>
+              `• ${session.gpuName ?? "GPU"}${
+                session.instanceId === null ? " (booting)" : ` #${session.instanceId}`
+              } — ${session.modelId}`
+          )
+          .join("\n")
+      };
+    },
+    confirm: async (summary) => {
+      const options = {
+        type: "warning" as const,
+        buttons: ["Keep the app open", "Shut down GPUs and quit"],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+        title: "Shut down the running GPUs?",
+        message:
+          summary.count === 1
+            ? "Closing Maia LLM will shut down the GPU it is renting."
+            : `Closing Maia LLM will shut down the ${summary.count} GPUs it is renting.`,
+        detail: `${summary.detail}\n\nBilling stops as soon as the instance is destroyed. Nothing is kept running in the background.`
+      };
+
+      const choice =
+        mainWindow === null
+          ? dialog.showMessageBoxSync(options)
+          : dialog.showMessageBoxSync(mainWindow, options);
+
+      return choice === 1;
+    },
+    releaseGpus: () => sessions.endAll("app_exit"),
+    dispose: () => {
+      if (updateTimer) {
+        clearInterval(updateTimer);
+        updateTimer = null;
+      }
+
+      clearInterval(idleTimer);
+      void guardian.dispose();
+
+      updates?.dispose();
+      updates = null;
+      diagnostics?.stop();
+      diagnostics = null;
+      registry?.dispose();
+      if (database) {
+        closeDatabase(database);
+        database = null;
+      }
+
+      // The file destination is asynchronous now, so the tail must be written out.
+      logFlush?.();
+    },
+    quit: () => app.quit(),
+    logger
+  });
+
+  registerLifecycleHooks(quit);
 
   // The window comes first: services that touch the network (reconcile, update
   // checks) finish in the background instead of delaying the first paint.
-  createWindow();
+  createWindow(quit);
   void reconcileTask;
   scheduleUpdateChecks(updates, config.updateCheckIntervalHours);
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
+      createWindow(quit);
     }
   });
 }

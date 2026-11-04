@@ -33,6 +33,9 @@ at startup.
 | Settings do not persist | `settings.update` should be followed by no error; a validation failure returns `VALIDATION_FAILED`. |
 | "Every GPU we tried was taken…" | Normal market churn: about three quarters of vast.ai asks disappear within seconds. The app retries on the next rentable offer; pressing start again is safe. |
 | The instance runs but no model appears | The container port must be published through vast.ai's `env` Docker flags (`-p 8000:8000`), not through `args`, which goes to the image entrypoint. The app now verifies `/v1/models` before reporting a session as active. |
+| "Timed out waiting for the GPU instance to start (40 min)" | The whole boot budget was used. A cold start of a 14B model pulls a ~9 GB image and 25 GB of weights; check `inet_down` on that host. Raise `MAIA_READY_TIMEOUT_MINUTES` if the host is legitimately slow. |
+| "did not start the container within 15 min" | A different failure: the host never reached `running` and reported no progress, so the app released the GPU instead of letting it bill for 40 minutes. Retrying usually lands on another machine. |
+| A GPU was released after a crash | The log line `The GPU guardian released instances after the previous run ended unexpectedly` lists the instance ids the detached guardian destroyed. See [gpu-lifecycle.md](gpu-lifecycle.md). |
 | Startup takes 5–15 minutes | Check the host's `inet_down` (Mbps) in the log line `vast.ai offer search finished`. The default gates require 1000 Mbps down / 500 MB/s disk; lower them in Settings only if you accept a slower boot. |
 
 The main process now self-checks after the window loads and logs

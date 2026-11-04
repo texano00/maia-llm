@@ -15,7 +15,12 @@ export default defineConfig({
     resolve: { alias },
     build: {
       rollupOptions: {
-        input: `${rootDir}/src/main/bootstrap/main.ts`
+        input: {
+          main: `${rootDir}/src/main/bootstrap/main.ts`,
+          // Separate entry: it is spawned as plain Node
+          // (ELECTRON_RUN_AS_NODE) and must outlive the app process.
+          guardian: `${rootDir}/src/main/guardian.ts`
+        }
       }
     }
   },
