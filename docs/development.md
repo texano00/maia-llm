@@ -49,13 +49,13 @@ npm run -w @maia/desktop web:dev
 # → http://127.0.0.1:5173  (mock providers, data in .maia-web/)
 ```
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `MAIA_PROVIDER_MODE` | `mock` | `live` rents real GPUs (needs a vast.ai key) |
-| `MAIA_WEB_PORT` | `5173` | HTTP port |
-| `MAIA_WEB_HOST` | `127.0.0.1` | Bind address (loopback only) |
-| `MAIA_WEB_DATA` | `.maia-web` | SQLite database directory |
-| `VAST_API_KEY` / `HF_TOKEN` | – | Imported into the credential store at start |
+| Variable                    | Default     | Purpose                                      |
+| --------------------------- | ----------- | -------------------------------------------- |
+| `MAIA_PROVIDER_MODE`        | `mock`      | `live` rents real GPUs (needs a vast.ai key) |
+| `MAIA_WEB_PORT`             | `5173`      | HTTP port                                    |
+| `MAIA_WEB_HOST`             | `127.0.0.1` | Bind address (loopback only)                 |
+| `MAIA_WEB_DATA`             | `.maia-web` | SQLite database directory                    |
+| `VAST_API_KEY` / `HF_TOKEN` | –           | Imported into the credential store at start  |
 
 How the transport differs, and why:
 
@@ -71,7 +71,6 @@ How the transport differs, and why:
 
 Only the Ollama/llama-compatible local endpoint is desktop-only: it binds a
 loopback port on the user's machine, which has no meaning in a browser tab.
-
 
 ## Verify
 
@@ -139,14 +138,20 @@ likewise overrides the update feed when testing a mirror.
 
 ## Brand assets
 
-`assets/logo.jpg` is the source artwork. Derived files (regenerate if the logo
-changes):
+`assets/logo.png` is the source artwork — the emblem on a transparent background.
+Everything else is generated from it:
 
-| File | Size | Used by |
-| --- | --- | --- |
-| `apps/desktop/resources/icon.png` | 512×512 (emblem crop) | Windows executable and NSIS installer icon |
-| `apps/desktop/src/renderer/assets/logo-mark.png` | 128×128 | Sidebar brand in the app |
-| `docs/logo.png` | 560 px wide | README header |
+```bash
+npm run assets:logo
+```
 
-The emblem crop is `extract({ left: 500, top: 78, width: 398, height: 398 })`
-followed by a resize, produced with `sharp`.
+| File                                             | Size                     | Used by                                    |
+| ------------------------------------------------ | ------------------------ | ------------------------------------------ |
+| `apps/desktop/resources/icon.png`                | 512×512, padded square   | Windows executable and NSIS installer icon |
+| `apps/desktop/src/renderer/assets/logo-mark.png` | 128×128, padded square   | Sidebar brand in the app                   |
+| `docs/logo.png`                                  | 560 px wide, aspect kept | README header                              |
+
+`scripts/generate-logo-assets.mjs` trims the transparent margin first, then pads
+the square targets with transparency so the emblem is never stretched, and
+quantises the palette to keep the files small (`docs/logo.png` is ~110 kB instead
+of ~430 kB for the same image at full colour).
