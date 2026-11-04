@@ -38,6 +38,36 @@ const MODELS: HuggingFaceModelPayload[] = [
     tags: ["license:apache-2.0", "text-generation", "mistral", "code"],
     cardData: { license: "apache-2.0", context_length: 32768 },
     safetensors: { parameters: { BF16: 7_248_023_552 } }
+  },
+  {
+    // A text-generation model with no chat template: it boots and then rejects
+    // every chat request with HTTP 400. Present so the picker exercises that path.
+    id: "openai-community/gpt2",
+    downloads: 21_400_000,
+    likes: 2_030,
+    gated: false,
+    pipeline_tag: "text-generation",
+    lastModified: "2026-07-14T08:20:00.000Z",
+    tags: ["license:mit", "text-generation", "gpt2", "en"],
+    cardData: { license: "mit", context_length: 1024 },
+    safetensors: { parameters: { F32: 124_439_808 } }
+  },
+  {
+    // The field case: a ComfyUI diffusion pack with no pipeline_tag and no
+    // config.json. vLLM cannot load it, so a start must be refused up front.
+    id: "Comfy-Org/MiniMax-H3",
+    library_name: "diffusion-single-file",
+    downloads: 31_900_000,
+    likes: 2_510,
+    gated: false,
+    lastModified: "2026-11-02T21:17:00.000Z",
+    tags: [
+      "diffusion-single-file",
+      "comfyui",
+      "base_model:MiniMaxAI/MiniMax-H3",
+      "license:other"
+    ],
+    cardData: { license: "other" }
   }
 ];
 
@@ -56,6 +86,17 @@ const FILES: Record<string, HuggingFaceTreeEntry[]> = {
   "mistralai/Mistral-7B-Instruct-v0.3": [
     { type: "file", path: "model-00001-of-00003.safetensors", size: 4_952_930_304, lfs: { size: 4_952_930_304 } },
     { type: "file", path: "tokenizer.model", size: 493_443 }
+  ],
+  "openai-community/gpt2": [
+    { type: "file", path: "model.safetensors", size: 548_105_192, lfs: { size: 548_105_192 } },
+    { type: "file", path: "tokenizer.json", size: 1_357_256 },
+    { type: "file", path: "README.md", size: 12_040 }
+  ],
+  "Comfy-Org/MiniMax-H3": [
+    { type: "file", path: "diffusion_models/minimax_h3_fl2va_bf16.safetensors", size: 17_200_000_000 },
+    { type: "file", path: "text_encoders/qwen_2.5_vl_7b.safetensors", size: 8_100_000_000 },
+    { type: "file", path: "vae/minimax_h3_vae.safetensors", size: 250_000_000 },
+    { type: "file", path: "README.md", size: 9_800 }
   ]
 };
 
@@ -76,6 +117,12 @@ export function createFixtureCatalogueSource(): CatalogueSource {
       }
 
       return { model, files: FILES[id] ?? [] };
+    },
+
+    // Instruct fixtures define a template; the gpt2 entry is the base model that
+    // boots and then rejects chat requests.
+    async getChatTemplate(id) {
+      return id !== "openai-community/gpt2";
     }
   };
 }

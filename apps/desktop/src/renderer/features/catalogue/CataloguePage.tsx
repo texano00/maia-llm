@@ -32,6 +32,14 @@ export function CataloguePage() {
   // Every model keeps its own estimate and its own start request, so a model that
   // is still loading never blocks a different one from being prepared.
   const estimate = selected ? (estimates[selected.model.id] ?? null) : null;
+  // A text-generation model can still be a base model with no chat template:
+  // vLLM boots it and then rejects every message with HTTP 400. It can also be a
+  // diffusion pack with no config.json, which vLLM cannot load at all.
+  const chatReady = selected
+    ? isChatCapableModel(selected.model) &&
+      selected.chatTemplate !== false &&
+      selected.runnable !== false
+    : false;
   const starting = selected ? startingIds.includes(selected.model.id) : false;
   const existingSession = selected
     ? (sessions.find(
@@ -163,6 +171,20 @@ export function CataloguePage() {
                 </div>
               </dl>
 
+              {selected.runnable === false ? (
+                <p className="pill pill-warning" role="note">
+                  vLLM cannot load this repository: it
+                  {" "}
+                  {selected.runnableProblem ?? "is not a transformers model"}
+                </p>
+              ) : null}
+
+              {selected.chatTemplate === false ? (
+                <p className="pill pill-warning" role="note">
+                  No chat template: a base model cannot answer chat requests
+                </p>
+              ) : null}
+
               {selected.artifacts.length > 0 ? (
                 <ul className="artifact-list">
                   {selected.artifacts.slice(0, 4).map((artifact) => (
@@ -186,10 +208,16 @@ export function CataloguePage() {
               ) : !estimate ? (
                 <button
                   type="button"
-                  disabled={preparing}
+                  disabled={preparing || !chatReady}
                   onClick={() => void prepareEstimate(selected.model.id)}
                 >
-                  {preparing ? "Estimating…" : "Estimate a session"}
+                  {preparing
+                    ? "Estimating…"
+                    : chatReady
+                      ? "Estimate a session"
+                      : selected.runnable === false
+                        ? "Cannot run this model"
+                        : "Not a chat model"}
                 </button>
               ) : (
                 <div className="estimate-card">
@@ -237,7 +265,7 @@ export function CataloguePage() {
                   </ul>
                   <button
                     type="button"
-                    disabled={starting || !isChatCapableModel(selected.model)}
+                    disabled={starting || !chatReady}
                     onClick={() => {
                       navigate("/chat");
                       void startSession(selected.model.id);
@@ -245,9 +273,11 @@ export function CataloguePage() {
                   >
                     {starting
                       ? "Booking a GPU…"
-                      : isChatCapableModel(selected.model)
+                      : chatReady
                         ? "Confirm and start session"
-                        : "Not a chat model"}
+                        : selected.runnable === false
+                          ? "Cannot run this model"
+                          : "Not a chat model"}
                   </button>
                 </div>
               )}

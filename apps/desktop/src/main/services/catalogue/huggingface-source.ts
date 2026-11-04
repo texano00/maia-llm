@@ -1,6 +1,6 @@
 import type { CatalogueSource } from "./service";
 import type { HuggingFaceModelPayload, HuggingFaceTreeEntry } from "./mapper";
-import { ProviderHttpClient } from "../providers/http";
+import { ProviderHttpClient, ProviderHttpError } from "../providers/http";
 
 interface HuggingFaceSibling {
   rfilename?: string;
@@ -44,6 +44,23 @@ export function createHuggingFaceSource(options: HuggingFaceSourceOptions = {}):
     return token ? { authorization: `Bearer ${token}` } : {};
   }
 
+  /** A raw repository file, or null when the repository does not ship it. */
+  async function readOptionalFile(path: string): Promise<string | null> {
+    try {
+      const response = await client.request(path, { headers: await headers() });
+      return await response.text();
+    } catch (error) {
+      // Missing files are the normal case: most base models ship no template.
+      if (
+        error instanceof ProviderHttpError &&
+        (error.status === 404 || error.status === 400)
+      ) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
   return {
     async listModels({ search, limit }) {
       const params = new URLSearchParams({
@@ -81,8 +98,64 @@ export function createHuggingFaceSource(options: HuggingFaceSourceOptions = {}):
       }));
 
       return { model: payload, files };
+    },
+
+    async getChatTemplate(id) {
+      const base = `/${modelPath(id)}/raw/main`;
+
+      const config = await readOptionalFile(`${base}/tokenizer_config.json`);
+      if (config !== null && tokenizerConfigHasTemplate(config)) {
+        return true;
+      }
+
+      // Newer repositories ship the template as a standalone jinja file…
+      const jinja = await readOptionalFile(`${base}/chat_template.jinja`);
+      if (jinja !== null && jinja.trim().length > 0) {
+        return true;
+      }
+
+      // …or as JSON, depending on the repository's tokenizer tooling.
+      const json = await readOptionalFile(`${base}/chat_template.json`);
+      return json !== null && tokenizerConfigHasTemplate(json);
     }
   };
+}
+
+/**
+ * `chat_template` is a string in the classic format and a list of named
+ * `{ name, template }` entries in the newer multi-template format. A `null` or
+ * an empty string means the tokenizer defines none.
+ */
+export function tokenizerConfigHasTemplate(raw: string): boolean {
+  let payload: unknown;
+  try {
+    payload = JSON.parse(raw);
+  } catch {
+    return false;
+  }
+
+  if (!payload || typeof payload !== "object") {
+    return false;
+  }
+
+  const template = (payload as { chat_template?: unknown }).chat_template;
+  const hasText = (value: unknown): boolean =>
+    typeof value === "string" && value.trim().length > 0;
+
+  if (hasText(template)) {
+    return true;
+  }
+
+  if (Array.isArray(template)) {
+    return template.some((entry) => {
+      if (hasText(entry)) {
+        return true;
+      }
+      return !!entry && typeof entry === "object" && hasText((entry as { template?: unknown }).template);
+    });
+  }
+
+  return false;
 }
 
 /** Cheap authenticated probe used by the "Test connection" button. */

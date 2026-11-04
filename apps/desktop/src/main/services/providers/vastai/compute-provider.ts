@@ -90,6 +90,18 @@ export class InstanceStartError extends Error {
 }
 
 /**
+ * The host never reported in, never started the container, or never opened its
+ * port. Nothing is wrong with the request, so another machine is worth a try;
+ * unlike `InstanceStartError` this does not blacklist the host for everyone.
+ */
+export class InstanceStartTimeoutError extends Error {
+  constructor(message: string, public readonly instanceId: number) {
+    super(message);
+    this.name = "InstanceStartTimeoutError";
+  }
+}
+
+/**
  * Real vast.ai provisioning. Instances are created from the chosen offer with a
  * vLLM container, labelled `maia:<install>:<session>`, and destroyed on teardown.
  */
@@ -119,6 +131,13 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
 
     isUnrecoverable(error: unknown): boolean {
       return error instanceof InstanceStartError;
+    },
+
+    isRetryableStartup(error: unknown): boolean {
+      // Both mean "this machine could not get the model running". A bad request
+      // fails in createInstance and an auth/network error repeats everywhere, so
+      // neither should burn the retry budget on more hosts.
+      return error instanceof InstanceStartError || error instanceof InstanceStartTimeoutError;
     },
 
     async reportOutcome(input) {
@@ -226,6 +245,31 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
       // sends that id in every request.
       const servedModelName = ["--served-model-name", context.modelId];
 
+      // Only vLLM arguments: the port mapping belongs to the Docker flags in
+      // `env`, otherwise nothing is published and the model is unreachable.
+      const vllmArgs = [
+        "--model",
+        plan.modelArg,
+        "--port",
+        "8000",
+        ...servedModelName,
+        ...plan.extraArgs,
+        // Skip CUDA graph capture and per-request logging: both cost startup
+        // time, and the graphs matter less than answering sooner.
+        "--enforce-eager",
+        "--disable-log-requests"
+      ];
+
+      // `onstart` only runs as a shell script under Vast's SSH/Jupyter entrypoint.
+      // With `runtype: "args"` the field becomes the container command verbatim,
+      // which is how `uv pip install … || python3 -m pip …` ended up as a single
+      // executable name and killed the container before vLLM started.
+      const launchScript = plan.onstart
+        ? `${plan.onstart}; exec python3 -m vllm.entrypoints.openai.api_server ${vllmArgs
+            .map(shellQuote)
+            .join(" ")}`
+        : null;
+
       const instanceId = await api.createInstance({
         offerId: offer.offerId,
         image: options.containerImage ?? "vllm/vllm-openai:latest",
@@ -239,21 +283,9 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
           ...plan.env,
           ...(hfToken ? { HUGGING_FACE_HUB_TOKEN: hfToken } : {})
         },
-        // Only vLLM arguments: the port mapping belongs to the Docker flags in
-        // `env`, otherwise nothing is published and the model is unreachable.
-        args: [
-          "--model",
-          plan.modelArg,
-          "--port",
-          "8000",
-          ...servedModelName,
-          ...plan.extraArgs,
-          // Skip CUDA graph capture and per-request logging: both cost startup
-          // time, and the graphs matter less than answering sooner.
-          "--enforce-eager",
-          "--disable-log-requests"
-        ],
-        ...(plan.onstart ? { onstart: plan.onstart } : {}),
+        ...(launchScript
+          ? { runtype: "ssh_direct" as const, onstart: launchScript }
+          : { runtype: "args" as const, args: vllmArgs }),
         port: 8000
       });
 
@@ -335,14 +367,20 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
         if (status === "unknown" || status === "offline") {
           unknownSince ??= now();
           if (now() - unknownSince > 120_000) {
-            throw new Error(`The GPU instance never became visible (${status}).`);
+            throw new InstanceStartTimeoutError(
+              `The GPU instance never became visible (${status}).`,
+              instanceId
+            );
           }
         } else {
           unknownSince = null;
         }
 
         if (["exited", "error", "destroyed"].includes(status)) {
-          throw new Error(`The GPU instance stopped while starting up (${status}).`);
+          throw new InstanceStartTimeoutError(
+            `The GPU instance stopped while starting up (${status}).`,
+            instanceId
+          );
         }
 
         if (status === "running") {
@@ -367,8 +405,9 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
               progressIntervalMs
             );
             if (served === null) {
-              throw new Error(
-                "The model server did not become ready in time. The GPU was released — a cold start can take several minutes when the host is slow."
+              throw new InstanceStartTimeoutError(
+                "The model server did not become ready in time. The GPU was released — a cold start can take several minutes when the host is slow.",
+                instanceId
               );
             }
 
@@ -385,8 +424,9 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
           // model is up but unreachable, which looks like "nothing happened".
           runningWithoutPortSince ??= now();
           if (now() - runningWithoutPortSince > missingPortTimeoutMs) {
-            throw new Error(
-              "The container is running but vast.ai published no port for 8000, so the model cannot be reached. The Docker port mapping did not apply to this instance."
+            throw new InstanceStartTimeoutError(
+              "The container is running but vast.ai published no port for 8000, so the model cannot be reached. The Docker port mapping did not apply to this instance.",
+              instanceId
             );
           }
         } else {
@@ -395,20 +435,22 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
           // A host that never even starts the container is not slow, it is
           // stuck: fail there instead of burning the whole boot budget.
           if (!containerStarted && now() - lastProgressAt > stallTimeoutMs) {
-            throw new Error(
+            throw new InstanceStartTimeoutError(
               `The GPU host did not start the container within ${Math.round(
                 stallTimeoutMs / 60_000
-              )} min and reported no progress (last status: "${lastStatus}"). The GPU was released.`
+              )} min and reported no progress (last status: "${lastStatus}"). The GPU was released.`,
+              instanceId
             );
           }
         }
 
         // vast.ai documents that `exited`, `unknown` and `offline` never recover.
         if (now() > deadline) {
-          throw new Error(
+          throw new InstanceStartTimeoutError(
             `Timed out waiting for the GPU instance to start (${Math.round(
               (now() - startedAt) / 60_000
-            )} min). The GPU was released.`
+            )} min). The GPU was released.`,
+            instanceId
           );
         }
 
@@ -485,4 +527,15 @@ async function waitForServing(
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * POSIX quoting for values inserted into the container's startup script. Model
+ * ids are usually safe, but a repository name may contain characters the shell
+ * would eat (`&`, `;`, spaces).
+ */
+export function shellQuote(value: string): string {
+  return /^[A-Za-z0-9_@%+=:,./-]+$/.test(value)
+    ? value
+    : `'${value.replace(/'/g, `'\\''`)}'`;
 }

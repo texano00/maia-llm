@@ -271,8 +271,15 @@ export class VastAiClient {
     diskGb: number;
     label: string;
     env: Record<string, string>;
-    args: string[];
-    /** Command run inside the container before the entrypoint (max 4048 chars). */
+    /**
+     * `args` preserves the image entrypoint and feeds vLLM its flags; `ssh_direct`
+     * replaces the entrypoint with Vast's and is the only runtype where `onstart`
+     * runs as a shell script.
+     */
+    runtype?: "args" | "ssh_direct";
+    /** vLLM arguments, used with the `args` runtype. */
+    args?: string[];
+    /** Shell script run before the server starts; requires the `ssh_direct` runtype. */
     onstart?: string;
     /** Container port published on the host, e.g. 8000 for the vLLM server. */
     port?: number;
@@ -295,8 +302,8 @@ export class VastAiClient {
         image: input.image,
         disk: input.diskGb,
         label: input.label,
-        runtype: "args",
-        args: input.args,
+        runtype: input.runtype ?? "args",
+        ...(input.args ? { args: input.args } : {}),
         env: dockerFlags,
         ...(input.onstart ? { onstart: input.onstart.slice(0, 4_048) } : {})
       })

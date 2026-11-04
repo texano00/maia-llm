@@ -12,6 +12,8 @@ export interface HuggingFaceModelPayload {
   pipeline_tag?: string | null;
   lastModified?: string | null;
   tags?: string[];
+  /** Hub library, e.g. `transformers`, `diffusers`, `diffusion-single-file`. */
+  library_name?: string | null;
   cardData?: { license?: string | string[]; context_length?: number } | null;
   safetensors?: { parameters?: Record<string, number> } | null;
   config?: { model_type?: string } | null;

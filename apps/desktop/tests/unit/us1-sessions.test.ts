@@ -553,9 +553,258 @@ describe("SessionOrchestrator", () => {
     ]);
 
     const log = store.eventsFor(started.id).map((event) => event.message).join("\n");
-    expect(log).toContain("could not start the container");
+    expect(log).toContain(
+      "startup failed on machine 5001 (attempt 1 of 6): The container could not start on this machine: Error response from daemon: failed to inject CDI devices"
+    );
+    expect(log).toContain("Marking machine 5001 as unstable");
     expect(log).toContain("trying another GPU");
     expect(log).toContain("Retrying on L40S");
+  });
+
+  it("uses the configured GPU startup retries", async () => {
+    const attempts: number[] = [];
+    const compute: ComputeProvider = {
+      async findOffer({ excludeMachineIds }) {
+        const machineId = 8000 + (excludeMachineIds ?? []).length;
+        return {
+          ...offer,
+          offerId: machineId,
+          machineId,
+          simulated: false
+        };
+      },
+      async createInstance(candidate) {
+        return { instanceId: candidate.offerId };
+      },
+      async waitUntilReady(instanceId) {
+        attempts.push(instanceId);
+        if (attempts.length <= 2) {
+          throw new Error("container startup failed");
+        }
+      },
+      async destroyInstance() {
+        return undefined;
+      },
+      isUnrecoverable: () => true
+    };
+
+    const orchestrator = new SessionOrchestrator({
+      store,
+      compute,
+      inference: createMockInference({ response: "ok" }),
+      idleTimeoutMinutes: 10,
+      startupRetries: () => 1,
+      delay: async () => undefined,
+      now: () => clock
+    });
+
+    const estimate = await orchestrator.createEstimate("Qwen/Qwen2.5-7B-Instruct");
+    const started = await orchestrator.start({ estimateId: estimate.id, confirmEstimate: true });
+    await orchestrator.awaitProvisioning(started.id);
+
+    expect(attempts).toHaveLength(2);
+    expect(orchestrator.getSession(started.id)?.state).toBe("failed");
+  });
+
+  it("retries a host that never reports in, without blacklisting it", async () => {
+    const reports: Array<{ machineId: number | null; outcome: string }> = [];
+    const booked: number[] = [];
+
+    const compute: ComputeProvider = {
+      async findOffer({ excludeMachineIds }) {
+        if ((excludeMachineIds ?? []).includes(9001)) {
+          return { ...offer, offerId: 52, machineId: 9002, gpuName: "L40S", simulated: false };
+        }
+        return { ...offer, offerId: 51, machineId: 9001, gpuName: "RTX 3090", simulated: false };
+      },
+      async createInstance(candidate) {
+        booked.push(candidate.machineId ?? 0);
+        return { instanceId: 900 + booked.length };
+      },
+      async waitUntilReady(instanceId) {
+        if (instanceId === 901) {
+          throw new Error("The GPU instance never became visible (unknown).");
+        }
+      },
+      async destroyInstance() {
+        return undefined;
+      },
+      // A timeout is not a verdict worth sharing, only a reason to move on.
+      isUnrecoverable: () => false,
+      isRetryableStartup: (error) =>
+        error instanceof Error && error.message.includes("never became visible"),
+      async reportOutcome(input) {
+        reports.push({ machineId: input.machineId, outcome: input.outcome });
+      }
+    };
+
+    const orchestrator = new SessionOrchestrator({
+      store,
+      compute,
+      inference: createMockInference({ response: "ok" }),
+      idleTimeoutMinutes: 10,
+      delay: async () => undefined,
+      now: () => clock
+    });
+
+    const estimate = await orchestrator.createEstimate("Qwen/Qwen2.5-7B-Instruct");
+    const started = await orchestrator.start({ estimateId: estimate.id, confirmEstimate: true });
+    await orchestrator.awaitProvisioning(started.id);
+
+    expect(orchestrator.getSession(started.id)?.state).toBe("active");
+    expect(booked).toEqual([9001, 9002]);
+    // Nothing was published as a failure: the host may be fine for someone else.
+    expect(reports).toEqual([{ machineId: 9002, outcome: "success" }]);
+
+    const log = store.eventsFor(started.id).map((event) => event.message).join("\n");
+    expect(log).toContain(
+      "startup failed on machine 9001 (attempt 1 of 6): The GPU instance never became visible (unknown)."
+    );
+    expect(log).toContain("did not come up (The GPU instance never became visible (unknown).)");
+    expect(log).toContain("Retrying on L40S");
+    // Only terminal container failures are labelled unstable.
+    expect(log).not.toContain("as unstable");
+  });
+
+  it("uses the whole default retry budget when offers keep coming", async () => {
+    const attempts: number[] = [];
+    let machine = 7000;
+    const compute: ComputeProvider = {
+      async findOffer({ excludeMachineIds }) {
+        // Like vast.ai: always another machine while any remain.
+        while ((excludeMachineIds ?? []).includes(machine)) {
+          machine += 1;
+        }
+        return { ...offer, offerId: machine, machineId: machine, simulated: false };
+      },
+      async createInstance(candidate) {
+        return { instanceId: 500 + (candidate.offerId ?? 0) };
+      },
+      async waitUntilReady(instanceId) {
+        attempts.push(instanceId);
+        throw new Error("The GPU instance never became visible (unknown).");
+      },
+      async destroyInstance() {
+        return undefined;
+      },
+      // A host problem: every failure is worth another machine.
+      isRetryableStartup: () => true
+    };
+
+    const orchestrator = new SessionOrchestrator({
+      store,
+      compute,
+      inference: createMockInference({ response: "ok" }),
+      idleTimeoutMinutes: 10,
+      delay: async () => undefined,
+      now: () => clock
+    });
+
+    const estimate = await orchestrator.createEstimate("Qwen/Qwen2.5-7B-Instruct");
+    const started = await orchestrator.start({ estimateId: estimate.id, confirmEstimate: true });
+    await orchestrator.awaitProvisioning(started.id);
+
+    // Default `gpuStartupRetries` is 5: the first machine plus five retries.
+    expect(attempts).toHaveLength(6);
+    expect(orchestrator.getSession(started.id)?.state).toBe("failed");
+    expect(store.eventsFor(started.id).map((event) => event.message).join("\n")).toContain(
+      "Gave up after 6 of 6 GPU attempts"
+    );
+  });
+
+  it("says when the retry budget stopped because no GPU was left", async () => {
+    const attempts: number[] = [];
+    const compute: ComputeProvider = {
+      async findOffer({ excludeMachineIds }) {
+        if ((excludeMachineIds ?? []).length >= 2) {
+          return null;
+        }
+        const machineId = 8000 + (excludeMachineIds ?? []).length;
+        return { ...offer, offerId: machineId, machineId, simulated: false };
+      },
+      async createInstance(candidate) {
+        return { instanceId: 600 + (candidate.offerId ?? 0) };
+      },
+      async waitUntilReady(instanceId) {
+        attempts.push(instanceId);
+        throw new Error("The GPU instance never became visible (unknown).");
+      },
+      async destroyInstance() {
+        return undefined;
+      },
+      isRetryableStartup: () => true
+    };
+
+    const orchestrator = new SessionOrchestrator({
+      store,
+      compute,
+      inference: createMockInference({ response: "ok" }),
+      idleTimeoutMinutes: 10,
+      delay: async () => undefined,
+      now: () => clock
+    });
+
+    const estimate = await orchestrator.createEstimate("Qwen/Qwen2.5-7B-Instruct");
+    const started = await orchestrator.start({ estimateId: estimate.id, confirmEstimate: true });
+    await orchestrator.awaitProvisioning(started.id);
+
+    expect(attempts).toHaveLength(2);
+    const log = store.eventsFor(started.id).map((event) => event.message).join("\n");
+    expect(log).toContain("No other GPU could be booked");
+    expect(log).toContain("Gave up after 2 of 6 GPU attempts");
+  });
+
+  it("does not retry a model that vLLM cannot load", async () => {
+    const attempts: number[] = [];
+    const compute: ComputeProvider = {
+      async findOffer() {
+        return { ...offer, offerId: 61, machineId: 9101, simulated: false };
+      },
+      async createInstance() {
+        return { instanceId: 401 };
+      },
+      async waitUntilReady(instanceId) {
+        attempts.push(instanceId);
+        throw new Error("The GPU instance stopped while starting up (exited).");
+      },
+      async destroyInstance() {
+        return undefined;
+      },
+      async getInstanceLogs() {
+        // The exact traceback from the field for Comfy-Org/MiniMax-H3.
+        return [
+          "pydantic_core._pydantic_core.ValidationError: 1 validation error for ModelConfig",
+          "Value error, Invalid repository ID or local directory specified: 'Comfy-Org/MiniMax-H3'.",
+          "- For Hugging Face models: ensure the presence of a 'config.json'.",
+          ""
+        ].join("\n");
+      },
+      isUnrecoverable: () => false,
+      // Even when the host failure alone looks retryable, the log wins.
+      isRetryableStartup: () => true
+    };
+
+    const orchestrator = new SessionOrchestrator({
+      store,
+      compute,
+      inference: createMockInference({ response: "ok" }),
+      idleTimeoutMinutes: 10,
+      delay: async () => undefined,
+      now: () => clock
+    });
+
+    const estimate = await orchestrator.createEstimate("Comfy-Org/MiniMax-H3");
+    const started = await orchestrator.start({ estimateId: estimate.id, confirmEstimate: true });
+    await orchestrator.awaitProvisioning(started.id);
+
+    expect(attempts).toHaveLength(1);
+    expect(orchestrator.getSession(started.id)?.state).toBe("failed");
+
+    const log = store.eventsFor(started.id).map((event) => event.message).join("\n");
+    expect(log).toContain("This is a model problem, not a GPU problem");
+    expect(log).toContain("no config.json");
+    expect(log).toContain("This model cannot be served");
+    expect(log).not.toContain("trying another GPU");
   });
 
   it("attaches the container log to a failed provisioning attempt", async () => {

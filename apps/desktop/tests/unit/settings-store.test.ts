@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { DEFAULT_DIAGNOSTICS_URL, DEFAULT_GPU_FILTERS } from "@maia/contracts";
+import {
+  DEFAULT_DIAGNOSTICS_URL,
+  DEFAULT_GPU_FILTERS,
+  DEFAULT_GPU_STARTUP_RETRIES
+} from "@maia/contracts";
 import { closeDatabase, openDatabase, type DatabaseConnection } from "../../src/main/storage/db";
 import { SettingsStore } from "../../src/main/services/settings/store";
 
@@ -19,7 +23,8 @@ describe("SettingsStore", () => {
   it("returns the documented defaults before anything is saved", () => {
     expect(store.get()).toEqual({
       diagnosticsUrl: DEFAULT_DIAGNOSTICS_URL,
-      gpuFilters: DEFAULT_GPU_FILTERS
+      gpuFilters: DEFAULT_GPU_FILTERS,
+      gpuStartupRetries: DEFAULT_GPU_STARTUP_RETRIES
     });
     expect(DEFAULT_DIAGNOSTICS_URL).toBe("http://localhost:8787");
     expect(DEFAULT_GPU_FILTERS).toEqual({
@@ -60,7 +65,8 @@ describe("SettingsStore", () => {
 
     expect(store.get()).toEqual({
       diagnosticsUrl: DEFAULT_DIAGNOSTICS_URL,
-      gpuFilters: DEFAULT_GPU_FILTERS
+      gpuFilters: DEFAULT_GPU_FILTERS,
+      gpuStartupRetries: DEFAULT_GPU_STARTUP_RETRIES
     });
   });
 
@@ -71,7 +77,29 @@ describe("SettingsStore", () => {
 
     expect(store.get()).toEqual({
       diagnosticsUrl: DEFAULT_DIAGNOSTICS_URL,
-      gpuFilters: DEFAULT_GPU_FILTERS
+      gpuFilters: DEFAULT_GPU_FILTERS,
+      gpuStartupRetries: DEFAULT_GPU_STARTUP_RETRIES
     });
+  });
+
+  it("uses the default retry count for settings saved before the option existed", () => {
+    db.prepare(
+      "INSERT INTO preferences (key, value_json, updated_at) VALUES (?, ?, ?)"
+    ).run(
+      "app_settings",
+      JSON.stringify({
+        diagnosticsUrl: DEFAULT_DIAGNOSTICS_URL,
+        gpuFilters: DEFAULT_GPU_FILTERS
+      }),
+      "2026-11-03T00:00:00.000Z"
+    );
+
+    expect(store.get().gpuStartupRetries).toBe(DEFAULT_GPU_STARTUP_RETRIES);
+  });
+
+  it("persists the configured GPU startup retry count", () => {
+    expect(store.update({ gpuStartupRetries: 2 }).gpuStartupRetries).toBe(2);
+    expect(store.get().gpuStartupRetries).toBe(2);
+    expect(() => store.update({ gpuStartupRetries: 11 })).toThrowError();
   });
 });

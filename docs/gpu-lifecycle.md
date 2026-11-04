@@ -12,12 +12,64 @@ boot is abandoned.
 | Repository ships | How it is served |
 | --- | --- |
 | `*.safetensors` | `vllm serve <repo>` — nothing special |
-| GGUF only | `vllm serve <repo>:<QUANT> --tokenizer <base repo>`, plus a one-time `uv pip install vllm-gguf-plugin` in the container's `onstart`. The quantisation is picked from `Q4_K_M, Q5_K_M, Q4_K_S, …` by what the repository actually contains. GGUF support in vLLM is experimental: it trades speed for a smaller footprint. |
-| Both | safetensors, which is the faster path |
+| GGUF only | `vllm serve <repo>:<QUANT> --tokenizer <base repo>`, plus a one-time `uv pip install vllm-gguf-plugin` in the container's `onstart`. The quantisation is picked from `Q4_K_M, Q5_K_M, Q4_K_S, …` by what the repository actually contains. GGUF support in vLLM is experimental: it trades speed for a smaller footprint. || Both | safetensors, which is the faster path |
 
 The served model name is pinned with `--served-model-name <catalogue id>` in every
 case, so the chat client always addresses the model by the id the user picked
 rather than the path vLLM happened to load.
+
+### How the instance is launched
+
+| Models | Vast runtype | Why |
+| --- | --- | --- |
+| safetensors | `args` | The image entrypoint (`python3 -m vllm.entrypoints.openai.api_server`) is preserved and receives the vLLM flags as `args` |
+| GGUF | `ssh_direct` + `onstart` | The plugin has to be installed before vLLM starts. `onstart` is only executed by a shell under Vast's SSH/Jupyter entrypoint — with `runtype: "args"` the whole string becomes the container command and Docker fails with `exec: "uv pip install … || python3 …": executable file not found in $PATH` |
+
+For GGUF the startup script is:
+
+```sh
+uv pip install --system vllm-gguf-plugin || python3 -m pip install vllm-gguf-plugin;
+exec python3 -m vllm.entrypoints.openai.api_server --model repo:QUANT --port 8000 \
+  --served-model-name <catalogue id> --tokenizer <base repo> --enforce-eager --disable-log-requests
+```
+
+The port still comes from the Docker flags in `env` (`-p 8000:8000`), never from
+the entrypoint arguments.
+
+
+### Model checks before renting
+
+The Hub's `pipeline_tag` is uploader metadata and cannot be trusted alone. Two
+classes of model fail after the GPU is already billing, so both are checked while
+the estimate is prepared:
+
+| Check | What it catches | How |
+| --- | --- | --- |
+| Repository loadable | Diffusion packs and adapters republished with a `text-generation` tag (`Comfy-Org/MiniMax-H3` → _"Invalid repository ID or local directory specified"_) | `library_name` (`diffusers`, `diffusion-single-file`, `peft`, `timm`, …), the presence of `.safetensors`/`.gguf` weights, and a root `config.json` for safetensors repositories (GGUF carries its config in the file) |
+| Chat template | Base/completion models (`openai-community/gpt2`) → vLLM **HTTP 400** on every message since transformers v4.44 | `tokenizer_config.json` (`chat_template` as a string or list), then `chat_template.jinja`, then `chat_template.json` |
+
+Both verdicts are cached per model, shown in the detail panel, and enforced by
+`assertChatRunnable` before `createEstimate` rents anything. An unreachable Hub
+returns "unknown" and never blocks a start on its own.
+
+Defence in depth for anything that still reaches a GPU: the orchestrator reads the
+container log on every failed boot. A traceback that names the model
+(`Invalid repository ID…`, `validation error for ModelConfig`, missing
+`config.json`, unsupported architecture, gated repo, missing weights) is
+classified as a **model** failure, so it fails after one attempt instead of
+retrying the same broken repository on five more machines, and the machine is not
+published as unstable.
+
+### Chat templates
+
+Text-generation is not enough: transformers v4.44+ no longer supplies a default
+chat template, so vLLM answers **HTTP 400** for every chat request to a model whose
+tokenizer defines none. Base/completion checkpoints (`openai-community/gpt2`,
+`*-base`, most non-instruct releases) therefore boot successfully and are useless
+in a conversation.
+
+A session that reaches the GPU anyway reports the 400 as _"this model defines no
+chat template"_.
 
 ### Timeouts
 
@@ -43,6 +95,37 @@ a 27B boot looks frozen for ten minutes and the telemetry says nothing.
 MAIA_READY_TIMEOUT_MINUTES=40   # hard cap for the whole boot
 MAIA_READY_STALL_MINUTES=15     # host never started the container
 ```
+
+### Startup retries
+
+A failed boot is not the user's fault, so the session books another machine
+instead of giving up:
+
+- `GPU startup retries after the first attempt` in **Settings → GPU preferences**
+  (`gpuStartupRetries`, default `5`, range `0–10`) is the number of **extra**
+  machines tried after the first one. `5` means up to six GPUs in total.
+- Every retryable failure uses one retry: the container refusing to start, the
+  host never reporting in (`unknown`/`offline` for 2 minutes), the container
+  exiting while starting, no published port, the stall window expiring, or the
+  model server not becoming ready before the deadline.
+- The machine that failed is excluded from the rest of that boot, so a retry
+  never lands on the same host. Only terminal container failures (the CDI/OCI
+  class) are also published as `unstable` for other workspaces; a timeout is
+  retried but does not blacklist the host.
+- Each failure appends an `error` line to the session log with the GPU, the
+  machine id and `attempt N of M`, followed by the container log summary. The
+  `trying another GPU (retry N of M)` warning only follows that line, so the
+  cause of a switch is always visible.
+- A failure caused by the model itself (traceback naming the repository, a
+  missing `config.json`, an unsupported architecture, a gated repo) does **not**
+  consume retries at all: the session fails after one boot with
+  `This is a model problem, not a GPU problem`.
+- Running out of bookable machines is different from running out of budget, and
+  the log says which happened: `No other GPU could be booked, so the remaining N
+  attempt(s) were skipped.` A session that used fewer attempts than configured is
+  therefore explained, not silent.
+- With the defaults the worst case is six full boot budgets; lower the value if
+  the user would rather fail fast than spend an hour hopping hosts.
 
 ## Releasing
 

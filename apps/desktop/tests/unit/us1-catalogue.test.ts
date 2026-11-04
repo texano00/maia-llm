@@ -3,6 +3,13 @@ import { isChatCapableModel, isGgufOnlyRepository } from "@maia/contracts";
 import { closeDatabase, openDatabase, type DatabaseConnection } from "../../src/main/storage/db";
 import { CatalogueRepository } from "../../src/main/services/catalogue/repository";
 import { CatalogueService, filterAndSort, type CatalogueSource } from "../../src/main/services/catalogue/service";
+import { assertChatRunnable } from "../../src/main/services/catalogue/runnable";
+import { assessRepository } from "../../src/main/services/catalogue/repository-check";
+import {
+  createHuggingFaceSource,
+  tokenizerConfigHasTemplate
+} from "../../src/main/services/catalogue/huggingface-source";
+import { ProviderHttpError, type ProviderHttpClient } from "../../src/main/services/providers/http";
 import {
   mapArtifacts,
   mapHuggingFaceModel,
@@ -104,6 +111,193 @@ describe("Hugging Face mapping", () => {
 
     expect(readFormat("weights.safetensors")).toBe("safetensors");
     expect(readFormat("notes.txt")).toBe("other");
+  });
+});
+
+describe("chat template detection", () => {
+  it("reads the classic, multi-template and empty formats", () => {
+    expect(tokenizerConfigHasTemplate(JSON.stringify({ chat_template: "{{ messages }}" }))).toBe(true);
+    expect(
+      tokenizerConfigHasTemplate(
+        JSON.stringify({ chat_template: [{ name: "default", template: "{{ messages }}" }] })
+      )
+    ).toBe(true);
+    // gpt2 and other base models: the key is absent or null.
+    expect(tokenizerConfigHasTemplate(JSON.stringify({ model_max_length: 1024 }))).toBe(false);
+    expect(tokenizerConfigHasTemplate(JSON.stringify({ chat_template: null }))).toBe(false);
+    expect(tokenizerConfigHasTemplate(JSON.stringify({ chat_template: "   " }))).toBe(false);
+    expect(tokenizerConfigHasTemplate("not json")).toBe(false);
+  });
+
+  it("falls back to the standalone chat_template.jinja file", async () => {
+    const requested: string[] = [];
+    const client = {
+      async request(path: string) {
+        requested.push(path);
+        if (path.endsWith("/tokenizer_config.json")) {
+          return new Response(JSON.stringify({ model_max_length: 1024 }));
+        }
+        if (path.endsWith("/chat_template.jinja")) {
+          return new Response("{% for message in messages %}{{ message.content }}{% endfor %}");
+        }
+        throw new ProviderHttpError("INVALID_REQUEST", "not found", false, 404);
+      }
+    } as unknown as ProviderHttpClient;
+
+    const source = createHuggingFaceSource({ client });
+
+    await expect(source.getChatTemplate?.("org/new-style-chat")).resolves.toBe(true);
+    expect(requested.some((path) => path.endsWith("/chat_template.jinja"))).toBe(true);
+  });
+
+  it("reports a base model as chat-less after checking both files", async () => {
+    const client = {
+      async request(path: string) {
+        if (path.endsWith("/tokenizer_config.json")) {
+          // The exact shape shipped by openai-community/gpt2.
+          return new Response(JSON.stringify({ model_max_length: 1024, tokenizer_class: "GPT2Tokenizer" }));
+        }
+        throw new ProviderHttpError("INVALID_REQUEST", "not found", false, 404);
+      }
+    } as unknown as ProviderHttpClient;
+
+    const source = createHuggingFaceSource({ client });
+
+    await expect(source.getChatTemplate?.("openai-community/gpt2")).resolves.toBe(false);
+  });
+
+  it("caches the verdict and exposes it in the detail payload", async () => {
+    const db = openDatabase(":memory:");
+    try {
+      const repository = new CatalogueRepository(db);
+      let calls = 0;
+      const source: CatalogueSource = {
+        async listModels() {
+          return [payload];
+        },
+        async getModel(id) {
+          return {
+            model: { ...payload, id },
+            files: [
+              { type: "file" as const, path: "config.json", size: 1 },
+              { type: "file" as const, path: "model.safetensors", size: 1 }
+            ]
+          };
+        },
+        async getChatTemplate() {
+          calls += 1;
+          return false;
+        }
+      };
+      const service = new CatalogueService({
+        repository,
+        source,
+        now: () => new Date("2026-11-04T10:00:00.000Z")
+      });
+
+      const first = await service.detail("openai-community/gpt2");
+      const second = await service.detail("openai-community/gpt2");
+
+      expect(first.chatTemplate).toBe(false);
+      expect(second.chatTemplate).toBe(false);
+      expect(first.runnable).toBe(true);
+      expect(calls).toBe(1);
+    } finally {
+      closeDatabase(db);
+    }
+  });
+});
+
+describe("repository assessment", () => {
+  const file = (path: string) => ({ type: "file" as const, path, size: 1 });
+
+  it("refuses a ComfyUI diffusion pack that claims text-generation", () => {
+    // Comfy-Org/MiniMax-H3 in the field: diffusion weights, no config.json.
+    const verdict = assessRepository({ library_name: "diffusion-single-file" }, [
+      file("diffusion_models/minimax_h3_fl2va_bf16.safetensors"),
+      file("README.md")
+    ]);
+
+    expect(verdict).toEqual({
+      loadable: false,
+      problem: "is a ComfyUI diffusion pack, not a text-generation transformer"
+    });
+  });
+
+  it("requires config.json when the repository ships safetensors", () => {
+    const verdict = assessRepository({}, [file("model.safetensors")]);
+
+    expect(verdict.loadable).toBe(false);
+    expect(verdict.problem).toMatch(/no config\.json/);
+  });
+
+  it("accepts GGUF repositories, which carry their config in the file", () => {
+    expect(assessRepository({}, [file("model-Q4_K_M.gguf")])).toEqual({
+      loadable: true,
+      problem: null
+    });
+  });
+
+  it("accepts a transformers repository and refuses one without weights", () => {
+    expect(
+      assessRepository({ library_name: "transformers" }, [
+        file("config.json"),
+        file("model.safetensors"),
+        file("tokenizer.json")
+      ])
+    ).toEqual({ loadable: true, problem: null });
+
+    const noWeights = assessRepository({}, [file("README.md"), file("config.json")]);
+    expect(noWeights.loadable).toBe(false);
+    expect(noWeights.problem).toMatch(/neither \.safetensors nor \.gguf/);
+  });
+});
+
+describe("start guard", () => {
+  const catalogue = (
+    pipelineTag: string | null,
+    facts: { chatTemplate?: boolean | null; loadable?: boolean | null; problem?: string | null } = {}
+  ) => ({
+    get: () => ({ id: "model/selected", pipelineTag }),
+    checkRepository: async () => ({
+      chatTemplate: facts.chatTemplate ?? null,
+      loadable: facts.loadable ?? null,
+      problem: facts.problem ?? null
+    })
+  });
+
+  it("refuses a base model before a GPU is rented", async () => {
+    // The earlier field case: gpt2 is text-generation, boots fine, then 400s chat.
+    await expect(
+      assertChatRunnable(catalogue("text-generation", { chatTemplate: false }), "model/selected")
+    ).rejects.toThrow(/defines no chat template/);
+  });
+
+  it("refuses a pipeline that has no chat endpoint at all", async () => {
+    await expect(
+      assertChatRunnable(catalogue("sentence-similarity", { loadable: true }), "model/selected")
+    ).rejects.toThrow(/not a chat model/);
+  });
+
+  it("refuses a repository vLLM cannot load", async () => {
+    // The MiniMax-H3 field case: tagged (or untagged) text-generation, but the
+    // repository has no config.json and only diffusion weights.
+    await expect(
+      assertChatRunnable(
+        catalogue(null, {
+          loadable: false,
+          problem: "is a ComfyUI diffusion pack, not a text-generation transformer"
+        }),
+        "model/selected"
+      )
+    ).rejects.toThrow(/cannot be served by vLLM: it is a ComfyUI diffusion pack/);
+  });
+
+  it("never blocks a start when a verdict could not be checked", async () => {
+    await expect(assertChatRunnable(catalogue("text-generation"), "model/selected")).resolves.toBeUndefined();
+    await expect(
+      assertChatRunnable(catalogue("text-generation", { chatTemplate: true, loadable: true }), "model/selected")
+    ).resolves.toBeUndefined();
   });
 });
 

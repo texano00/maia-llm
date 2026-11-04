@@ -102,6 +102,19 @@ export const catalogueResultSchema = z.object({
 export const modelDetailSchema = z.object({
   model: catalogueModelSchema,
   artifacts: z.array(modelArtifactSchema),
+  /**
+   * Whether the repository defines a chat template. `false` means it is a base /
+   * completion model (gpt2 and friends): vLLM boots it, then rejects every chat
+   * request with HTTP 400. `null` means it could not be checked.
+   */
+  chatTemplate: z.boolean().nullable(),
+  /**
+   * Whether vLLM can load the repository at all. `false` covers diffusion packs,
+   * adapters and repositories without a `config.json`. `null` means unknown.
+   */
+  runnable: z.boolean().nullable(),
+  /** One sentence explaining a `runnable: false` verdict. */
+  runnableProblem: z.string().nullable(),
   licenseAccepted: z.boolean(),
   stale: z.boolean()
 });

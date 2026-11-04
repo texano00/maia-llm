@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import {
   DEFAULT_DIAGNOSTICS_URL,
   DEFAULT_GPU_FILTERS,
+  DEFAULT_GPU_STARTUP_RETRIES,
   DEFAULT_MIN_DISK_BANDWIDTH_MBPS,
   DEFAULT_MIN_DOWNLOAD_MBPS,
   DEFAULT_MIN_UPLOAD_MBPS,
@@ -23,6 +24,16 @@ function toPositiveInt(value: string): number | null {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
+function toStartupRetries(value: string): number | null {
+  const trimmed = value.trim();
+  if (trimmed === "") {
+    return null;
+  }
+
+  const parsed = Number(trimmed);
+  return Number.isInteger(parsed) && parsed >= 0 && parsed <= 10 ? parsed : null;
+}
+
 export function SettingsPage() {
   const { appInfo, status, bridgeAvailable, check, download, install } = useUpdates();
   const busy = status?.phase === "checking" || status?.phase === "downloading";
@@ -36,6 +47,7 @@ export function SettingsPage() {
   const [minDownloadMbps, setMinDownloadMbps] = useState("");
   const [minUploadMbps, setMinUploadMbps] = useState("");
   const [minDiskMBps, setMinDiskMBps] = useState("");
+  const [gpuStartupRetries, setGpuStartupRetries] = useState(String(DEFAULT_GPU_STARTUP_RETRIES));
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [gpuState, setGpuState] = useState<"idle" | "saving" | "saved">("idle");
   const [hfToken, setHfToken] = useState("");
@@ -63,6 +75,7 @@ export function SettingsPage() {
         setSettings(result.data);
         setDiagnosticsUrl(result.data.diagnosticsUrl);
         applyGpuFilters(result.data.gpuFilters);
+        setGpuStartupRetries(String(result.data.gpuStartupRetries));
       }
     });
 
@@ -169,7 +182,15 @@ export function SettingsPage() {
       return;
     }
 
+    const startupRetries = toStartupRetries(gpuStartupRetries);
+    if (startupRetries === null) {
+      setGpuState("idle");
+      setError("GPU startup retries must be a whole number between 0 and 10.");
+      return;
+    }
+
     setGpuState("saving");
+    setError(null);
     const filters: GpuFilters = override ?? {
       countries: countries
         .split(",")
@@ -187,11 +208,15 @@ export function SettingsPage() {
       minDiskBandwidthMBps: toPositiveInt(minDiskMBps)
     };
 
-    const result = await bridge.invoke<AppSettings>("settings.update", { gpuFilters: filters });
+    const result = await bridge.invoke<AppSettings>("settings.update", {
+      gpuFilters: filters,
+      gpuStartupRetries: startupRetries
+    });
 
     if (result.ok) {
       setSettings(result.data);
       applyGpuFilters(result.data.gpuFilters);
+      setGpuStartupRetries(String(result.data.gpuStartupRetries));
       setGpuState("saved");
     } else {
       setGpuState("idle");
@@ -466,9 +491,24 @@ export function SettingsPage() {
               }}
             />
           </label>
+          <label className="field">
+            <span>GPU startup retries after the first attempt (0–10)</span>
+            <input
+              type="number"
+              min="0"
+              max="10"
+              step="1"
+              value={gpuStartupRetries}
+              onChange={(event) => {
+                setGpuStartupRetries(event.target.value);
+                setGpuState("idle");
+              }}
+            />
+          </label>
           <p className="field-hint">
             Maia also requires a GPU that vLLM supports (compute capability 7.5 or newer) and that
-            vast.ai reports as rentable at booking time.
+            vast.ai reports as rentable at booking time. Each retry books a different machine and
+            logs the error that caused the switch.
           </p>
           {gpuState === "saved" ? <p className="field-hint">GPU preferences saved.</p> : null}
         </div>

@@ -280,10 +280,13 @@ describe("vast.ai offer picking", () => {
     );
 
     const input = captured as unknown as
-      | { args: string[]; env: Record<string, string>; port?: number }
+      | { runtype?: string; args?: string[]; env: Record<string, string>; port?: number }
       | null;
     expect(input).not.toBeNull();
 
+    // A normal (non-GGUF) model keeps the image entrypoint, so the vLLM flags
+    // travel as `args` and no shell is involved.
+    expect(input!.runtype).toBe("args");
     // CUDA graph capture and per-request logging cost startup time.
     expect(input!.args).toContain("--enforce-eager");
     expect(input!.args).toContain("--disable-log-requests");
@@ -296,11 +299,12 @@ describe("vast.ai offer picking", () => {
 
   it("pins the served model name and applies a GGUF launch plan", async () => {
     let captured:
-      | { args: string[]; env: Record<string, string>; onstart?: string; port?: number }
+      | { runtype?: string; args?: string[]; env: Record<string, string>; onstart?: string; port?: number }
       | null = null;
     const fake = {
       async createInstance(input: {
-        args: string[];
+        runtype?: string;
+        args?: string[];
         env: Record<string, string>;
         onstart?: string;
         port?: number;
@@ -336,19 +340,25 @@ describe("vast.ai offer picking", () => {
     );
 
     const input = captured as unknown as {
-      args: string[];
+      runtype?: string;
+      args?: string[];
       env: Record<string, string>;
       onstart?: string;
       port?: number;
     };
 
+    // `onstart` is only a shell script under Vast's SSH runtype. With `args` the
+    // string was exec'd verbatim and the container died before vLLM started.
+    expect(input.runtype).toBe("ssh_direct");
+    expect(input.args).toBeUndefined();
+    expect(input.onstart).toContain("vllm-gguf-plugin");
+    expect(input.onstart).toContain("python3 -m vllm.entrypoints.openai.api_server");
+
     // vLLM exposes the model as `repo:QUANT`; the chat client sends the
     // catalogue id, so the name has to be pinned.
-    expect(input.args).toContain("--served-model-name");
-    expect(input.args[input.args.indexOf("--served-model-name") + 1]).toBe("org/model-GGUF");
-    expect(input.args[input.args.indexOf("--model") + 1]).toBe("org/model-GGUF:Q4_K_M");
-    expect(input.args).toContain("--tokenizer");
-    expect(input.onstart).toContain("vllm-gguf-plugin");
+    expect(input.onstart).toContain("--served-model-name org/model-GGUF");
+    expect(input.onstart).toContain("--model org/model-GGUF:Q4_K_M");
+    expect(input.onstart).toContain("--tokenizer org/model");
   });
 
   it("sends the port mapping as a Docker flag, where vast.ai expects it", async () => {
@@ -375,6 +385,34 @@ describe("vast.ai offer picking", () => {
     expect(body!.env).toBe("-e HF_HUB_ENABLE_HF_TRANSFER=1 -p 8000:8000");
     expect(body!.args).toEqual(["--model", "Qwen/Qwen2.5-7B-Instruct"]);
     expect(body!.runtype).toBe("args");
+  });
+
+  it("sends the GGUF startup script with the SSH runtype", async () => {
+    let body: Record<string, unknown> | null = null;
+    const http = {
+      async request(_path: string, init: RequestInit) {
+        body = JSON.parse(String(init.body)) as Record<string, unknown>;
+        return new Response(JSON.stringify({ success: true, new_contract: 4243 }), { status: 200 });
+      }
+    };
+
+    const client = new VastAiClientImpl("key", { client: http as never });
+    await client.createInstance({
+      offerId: 8,
+      image: "vllm/vllm-openai:latest",
+      diskGb: 64,
+      label: "maia:abc",
+      env: { HF_HUB_ENABLE_HF_TRANSFER: "1" },
+      runtype: "ssh_direct",
+      onstart: "uv pip install --system vllm-gguf-plugin; exec python3 -m vllm.entrypoints.openai.api_server --model org/m:Q4_K_M",
+      port: 8000
+    });
+
+    // `onstart` is a shell script only under Vast's SSH entrypoint; with the args
+    // runtype it was exec'd verbatim and killed the container.
+    expect(body!.runtype).toBe("ssh_direct");
+    expect(String(body!.onstart)).toContain("vllm-gguf-plugin");
+    expect(body!.args).toBeUndefined();
   });
 
   it("fetches instance logs through the signed result URL", async () => {
@@ -648,6 +686,39 @@ describe("vast.ai offer picking", () => {
     expect(clock).toBeLessThan(20 * 60_000);
   });
 
+  it("treats a host that never reports in as retryable but not as unstable", async () => {
+    let clock = 0;
+    const fake = {
+      async getInstance() {
+        return { id: 11, actual_status: "unknown", status_msg: "" };
+      }
+    } as unknown as VastAiClient;
+
+    const provider = createVastComputeProvider({
+      getApiKey: async () => "key",
+      getParameterCount: async () => 7.6e9,
+      clientFactory: () => fake,
+      readyTimeoutMs: 40 * 60_000,
+      pollIntervalMs: 30_000,
+      now: () => clock,
+      pause: async (ms: number) => {
+        clock += ms;
+      }
+    });
+
+    const failure: unknown = await provider
+      .waitUntilReady(11, 40 * 60_000)
+      .catch((error: unknown) => error);
+
+    expect((failure as Error).message).toMatch(/never became visible \(unknown\)/);
+    // The request was fine, the host was not: another GPU is worth a try…
+    expect(provider.isRetryableStartup?.(failure)).toBe(true);
+    // …but a timeout is not a verdict that should blacklist the machine.
+    expect(provider.isUnrecoverable?.(failure)).toBe(false);
+    // Auth and network errors repeat on every host, so they must not burn retries.
+    expect(provider.isRetryableStartup?.(new Error("401 invalid api key"))).toBe(false);
+  });
+
   it("reports the endpoint once the model is actually served", async () => {
     const fake = {
       async getInstance() {
@@ -773,5 +844,33 @@ describe("vLLM streaming", () => {
         onDelta: () => undefined
       })
     ).rejects.toThrow(/no chat endpoint \(HTTP 404\)/);
+  });
+
+  it("explains a 400 as a model without a chat template", async () => {
+    // Exactly what vLLM answers for a base model such as openai-community/gpt2.
+    const runtime = createVllmRuntime({
+      resolveEndpoint: () => ({ host: "203.0.113.5", port: 32_100 }),
+      fetchImpl: (async () =>
+        new Response(
+          JSON.stringify({
+            error: {
+              message:
+                "As of transformers v4.44, default chat template is no longer allowed, so you must provide a chat template if the tokenizer does not define one."
+            }
+          }),
+          { status: 400 }
+        )) as typeof fetch
+    });
+
+    await expect(
+      runtime.stream({
+        sessionId: "s1",
+        modelId: "openai-community/gpt2",
+        instanceId: 1,
+        prompt: "hi",
+        signal: new AbortController().signal,
+        onDelta: () => undefined
+      })
+    ).rejects.toThrow(/defines no chat template \(HTTP 400\)/);
   });
 });

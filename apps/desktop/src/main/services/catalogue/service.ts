@@ -1,12 +1,18 @@
 import type { CatalogueModel, CatalogueQuery, CatalogueResult, ModelDetail } from "@maia/contracts";
 import type { CatalogueRepository } from "./repository";
 import { mapArtifacts, mapHuggingFaceModel, type HuggingFaceModelPayload, type HuggingFaceTreeEntry } from "./mapper";
+import { assessRepository, type RepositoryVerdict } from "./repository-check";
 
 export interface CatalogueSource {
   /** Latest model listing, optionally scoped by a search term. */
   listModels(options: { search?: string; limit: number }): Promise<HuggingFaceModelPayload[]>;
   /** Single model plus its file tree. */
   getModel(id: string): Promise<{ model: HuggingFaceModelPayload; files: HuggingFaceTreeEntry[] }>;
+  /**
+   * Does the repository define a chat template? Optional: an offline fixture has
+   * no tokenizer config to inspect and reports nothing.
+   */
+  getChatTemplate?(id: string): Promise<boolean>;
 }
 
 export interface CatalogueServiceOptions {
@@ -19,6 +25,13 @@ export interface CatalogueServiceOptions {
 
 const ACCEPTED_LICENSES = new Set<string>();
 
+/** What a start needs to know about a repository, beyond its pipeline tag. */
+export interface RepositoryCheck extends RepositoryVerdict {
+  chatTemplate: boolean | null;
+}
+
+const UNKNOWN_REPOSITORY: RepositoryVerdict = { loadable: null, problem: null };
+
 /**
  * The SQLite snapshot serves instant results and offline browsing; a search term
  * is also sent to the provider so models outside the cached page can be found.
@@ -26,9 +39,74 @@ const ACCEPTED_LICENSES = new Set<string>();
  */
 export class CatalogueService {
   private readonly now: () => Date;
+  /** Chat-template verdicts, so a start does not re-fetch the tokenizer config. */
+  private readonly chatTemplates = new Map<string, boolean>();
+  /** Repository verdicts (config.json, weights), also cached per model. */
+  private readonly repositories = new Map<string, RepositoryVerdict>();
 
   constructor(private readonly options: CatalogueServiceOptions) {
     this.now = options.now ?? (() => new Date());
+  }
+
+  /**
+   * Everything a start must know before renting a GPU: can vLLM boot this
+   * repository, and can it answer chat requests? All the falsy-but-known
+   * verdicts block the start; `null` (could not check) does not.
+   */
+  async checkRepository(id: string): Promise<RepositoryCheck> {
+    const chatTemplate = await this.hasChatTemplate(id);
+    const verdict = this.repositories.get(id) ?? (await this.probeRepository(id));
+
+    return { chatTemplate, loadable: verdict.loadable, problem: verdict.problem };
+  }
+
+  private async probeRepository(id: string): Promise<RepositoryVerdict> {
+    if (!this.options.source.getModel) {
+      return UNKNOWN_REPOSITORY;
+    }
+
+    try {
+      const { model, files } = await this.options.source.getModel(id);
+      const verdict = assessRepository(model, files);
+      this.repositories.set(id, verdict);
+      return verdict;
+    } catch (error) {
+      // A Hub hiccup must not stop a session: only a definite verdict does.
+      this.options.logger?.warn("Could not inspect the model repository", {
+        modelId: id,
+        message: errorMessage(error)
+      });
+      return UNKNOWN_REPOSITORY;
+    }
+  }
+
+  /**
+   * Whether the repository defines a chat template. `null` means "could not
+   * check" (offline, rate limited, provider without support) and must never
+   * block a start on its own.
+   */
+  async hasChatTemplate(id: string): Promise<boolean | null> {
+    const cached = this.chatTemplates.get(id);
+    if (cached !== undefined) {
+      return cached;
+    }
+
+    if (!this.options.source.getChatTemplate) {
+      return null;
+    }
+
+    try {
+      const verdict = await this.options.source.getChatTemplate(id);
+      this.chatTemplates.set(id, verdict);
+      return verdict;
+    } catch (error) {
+      // The check is an optimisation: a Hub hiccup must not stop a session.
+      this.options.logger?.warn("Could not check whether the model defines a chat template", {
+        modelId: id,
+        message: errorMessage(error)
+      });
+      return null;
+    }
   }
 
   async search(query: CatalogueQuery = {}): Promise<CatalogueResult> {
@@ -93,6 +171,7 @@ export class CatalogueService {
       const mapped = mapHuggingFaceModel(model, this.now().toISOString());
       const artifacts = mapArtifacts(id, "main", files);
 
+      this.repositories.set(id, assessRepository(model, files));
       this.options.repository.saveModels([mapped]);
       this.options.repository.saveArtifacts(artifacts);
       stale = false;
@@ -114,9 +193,14 @@ export class CatalogueService {
       throw new Error(`Unknown model: ${id}`);
     }
 
+    const verdict = this.repositories.get(id) ?? UNKNOWN_REPOSITORY;
+
     return {
       model,
       artifacts: this.options.repository.getArtifacts(id),
+      chatTemplate: await this.hasChatTemplate(id),
+      runnable: verdict.loadable,
+      runnableProblem: verdict.problem,
       licenseAccepted: ACCEPTED_LICENSES.has(id),
       stale
     };
@@ -129,9 +213,14 @@ export class CatalogueService {
       throw new Error(`Unknown model: ${id}`);
     }
 
+    const verdict = this.repositories.get(id) ?? UNKNOWN_REPOSITORY;
+
     return {
       model,
       artifacts: this.options.repository.getArtifacts(id),
+      chatTemplate: this.chatTemplates.get(id) ?? null,
+      runnable: verdict.loadable,
+      runnableProblem: verdict.problem,
       licenseAccepted: true,
       stale: !this.options.repository.isFresh(this.options.ttlMs, this.now())
     };

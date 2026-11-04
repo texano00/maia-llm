@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
-import type { Estimate, GpuFilters, Session, SessionStart } from "@maia/contracts";
+import { DEFAULT_GPU_STARTUP_RETRIES, type Estimate, type GpuFilters, type Session, type SessionStart } from "@maia/contracts";
 import { buildEstimate } from "../cost/estimator";
+import { describeModelFailure } from "./failure";
 import type { SessionStore } from "./store";
 
 export type StreamKind = "content" | "reasoning";
@@ -46,9 +47,17 @@ export interface ComputeProvider {
   isOfferUnavailable?(error: unknown): boolean;
   /**
    * True when the failure is terminal *for that machine* (the container cannot
-   * start), so the session moves to another host instead of waiting.
+   * start), so the machine is published as unstable.
    */
   isUnrecoverable?(error: unknown): boolean;
+  /**
+   * True when another host could plausibly boot where this one failed (a stuck
+   * container, a host that never reported in, a port that never opened). Wider
+   * than `isUnrecoverable`: a timeout does not disqualify the machine for other
+   * users, but it does make retrying elsewhere worth the user's time.
+   * Defaults to `isUnrecoverable` when a provider does not implement it.
+   */
+  isRetryableStartup?(error: unknown): boolean;
   /** Publishes the outcome so every workspace learns from this attempt. */
   reportOutcome?(input: {
     machineId: number | null;
@@ -105,6 +114,11 @@ export interface SessionOrchestratorOptions {
   delay?: (ms: number) => Promise<void>;
   logger?: { info(message: string, context?: Record<string, unknown>): void; warn(message: string, context?: Record<string, unknown>): void } | undefined;
   readinessTimeoutMs?: number;
+  /**
+   * Extra machines to try when a boot fails on the current one (settings:
+   * `gpuStartupRetries`). The total number of GPUs tried is this value + 1.
+   */
+  startupRetries?: () => number;
   /** Returns the user's current GPU preferences so offers respect them. */
   filters?: () => GpuFilters | undefined;
   /**
@@ -136,9 +150,6 @@ const SESSION_LABEL_PREFIX = "maia:";
  * disappear within seconds, so a booking may need several tries.
  */
 const MAX_OFFER_ATTEMPTS = 6;
-
-/** How many machines one session may try when a host cannot start the container. */
-const MAX_BOOT_ATTEMPTS = 3;
 
 /** States in which a session can serve chat (now or once it finishes booting). */
 function isServing(state: Session["state"]): boolean {
@@ -436,8 +447,9 @@ export class SessionOrchestrator {
 
   /**
    * Boots a booked instance until vLLM serves the model, moving to another host
-   * when the machine cannot start the container at all. Runs in the background so
-   * several models can provision at the same time.
+   * when this one cannot get the container up or never reports in. The number of
+   * switches is capped by the user's `gpuStartupRetries` setting. Runs in the
+   * background so several models can provision at the same time.
    */
   private async activateSession(
     sessionId: string,
@@ -453,6 +465,7 @@ export class SessionOrchestrator {
 
     let current = booking;
     const failedMachines: number[] = [];
+    const startupRetries = this.options.startupRetries?.() ?? DEFAULT_GPU_STARTUP_RETRIES;
 
     for (let attempt = 1; ; attempt += 1) {
       const bootStartedAt = Date.now();
@@ -520,10 +533,26 @@ export class SessionOrchestrator {
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         const unrecoverable = this.options.compute.isUnrecoverable?.(error) === true;
+        const totalAttempts = startupRetries + 1;
+        const host = describeHost(current.offer);
 
         // Ask the container what it actually said before it disappears with the
         // instance: "the port never opened" is not a diagnosis.
         const remoteLogs = await this.collectRemoteLogs(current.instanceId);
+
+        // A model vLLM cannot load fails identically on every machine. The
+        // container log is the only place that says so, so it has to be read
+        // before the retry decision — otherwise a bad repository rents six GPUs.
+        const modelFailure = describeModelFailure({
+          message,
+          logs: remoteLogs?.tail ?? null
+        });
+
+        // "The host never reported in" is not a broken request: retrying on
+        // another machine usually works, so the retry budget covers it too.
+        const retryable =
+          modelFailure === null &&
+          (this.options.compute.isRetryableStartup?.(error) ?? unrecoverable);
 
         this.options.logger?.warn("Provisioning attempt failed", {
           sessionId,
@@ -532,12 +561,29 @@ export class SessionOrchestrator {
           machineId: current.offer.machineId,
           attempt,
           unrecoverable,
+          retryable,
+          modelFailure,
           message,
           ...(remoteLogs ? { remoteLogs: remoteLogs.tail } : {})
         });
 
+        // The failure that triggered the switch is the only thing that explains
+        // the next line, so it is logged at error level with the host and the
+        // attempt it belongs to — never folded into a "trying another GPU" note.
+        append(
+          "error",
+          `${current.offer.gpuName} startup failed on ${host} (attempt ${attempt} of ${totalAttempts}): ${message}`
+        );
+
         if (remoteLogs) {
           append("error", `Container log: ${remoteLogs.summary}`);
+        }
+
+        if (modelFailure) {
+          append(
+            "error",
+            `This is a model problem, not a GPU problem: ${modelFailure}. Another machine would fail the same way, so no retry is attempted.`
+          );
         }
 
         // The instance is unusable either way; release it before anything else.
@@ -557,18 +603,23 @@ export class SessionOrchestrator {
             outcome: "failure",
             error: message
           });
-          if (current.offer.machineId !== null) {
-            failedMachines.push(current.offer.machineId);
-          }
+        }
+
+        // Retries must never land on the machine that just failed, even when the
+        // failure was a timeout rather than a verdict worth sharing.
+        if (current.offer.machineId !== null) {
+          failedMachines.push(current.offer.machineId);
         }
 
         const canRetryOnAnotherHost =
-          unrecoverable && stillProvisioning() && attempt < MAX_BOOT_ATTEMPTS;
+          retryable && stillProvisioning() && attempt <= startupRetries;
 
         if (canRetryOnAnotherHost) {
           append(
             "warn",
-            `${current.offer.gpuName} could not start the container. Marking that machine as unstable and trying another GPU…`
+            `${current.offer.gpuName} did not come up (${message}). ${
+              unrecoverable ? `Marking ${host} as unstable and ` : ""
+            }trying another GPU (retry ${attempt} of ${startupRetries})…`
           );
 
           const replacement = await this.bookAnotherOffer(sessionId, estimate.modelId, filters, failedMachines).catch(
@@ -577,6 +628,12 @@ export class SessionOrchestrator {
                 sessionId,
                 reason: bookingError instanceof Error ? bookingError.message : String(bookingError)
               });
+              append(
+                "warn",
+                `Could not book a replacement GPU: ${
+                  bookingError instanceof Error ? bookingError.message : String(bookingError)
+                }`
+              );
               return null;
             }
           );
@@ -591,15 +648,34 @@ export class SessionOrchestrator {
               "info",
               `Retrying on ${replacement.offer.gpuName} (${replacement.offer.gpuRamGb} GB) at $${(
                 replacement.offer.hourlyRateMicroUsd / 1_000_000
-              ).toFixed(2)}/h.`
+              ).toFixed(2)}/h (attempt ${attempt + 1} of ${totalAttempts}).`
             );
             current = replacement;
             continue;
           }
+
+          // The retry budget was not the limit: there was nothing left to book.
+          // Say so, otherwise "3 of 6 attempts" looks like a lost retry.
+          append(
+            "warn",
+            `No other GPU could be booked, so the remaining ${Math.max(
+              totalAttempts - attempt,
+              0
+            )} attempt(s) were skipped (the GPU filters or the price cap may be too tight).`
+          );
         }
 
         if (stillProvisioning()) {
-          this.options.store.appendEvent(sessionId, "error", message, new Date(this.now()));
+          const reason = modelFailure
+            ? `This model cannot be served: ${modelFailure}.`
+            : attempt > 1
+              ? `Gave up after ${attempt} of ${totalAttempts} GPU attempts. Last error: ${message}${
+                  attempt < totalAttempts
+                    ? " No further GPU offers matched your preferences — relax the GPU filters or raise the price cap in Settings."
+                    : ` Raise "GPU startup retries" in Settings to try more hosts.`
+                }`
+              : message;
+          this.options.store.appendEvent(sessionId, "error", reason, new Date(this.now()));
           this.options.store.transition(sessionId, "failed", {
             endedAt: new Date(this.now()).toISOString(),
             endReason: "failure",
@@ -906,6 +982,11 @@ function describeStatus(status: string): string {
     default:
       return `Instance status: ${status}`;
   }
+}
+
+/** "machine 5001" / "a simulated host" — so a log line names who failed. */
+function describeHost(offer: ComputeOffer): string {
+  return offer.machineId === null ? "a simulated host" : `machine ${offer.machineId}`;
 }
 
 function formatDuration(ms: number): string {

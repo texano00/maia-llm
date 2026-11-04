@@ -57,6 +57,15 @@ export function createVllmRuntime(options: VllmRuntimeOptions): InferenceRuntime
           );
         }
 
+        // A base/completion model (gpt2, llama-base…) defines no chat template,
+        // and transformers v4.44+ refuses to guess one: every chat request is a
+        // 400 even though the server is healthy.
+        if (response.status === 400 && /chat template/i.test(detail)) {
+          throw new Error(
+            "The model server rejected the request because this model defines no chat template (HTTP 400). It is a base/completion model, not an instruct or chat model — end this session and pick a chat model."
+          );
+        }
+
         throw new Error(
           `The model server rejected the request (HTTP ${response.status}). ${detail.slice(0, 200)}`.trim()
         );

@@ -11,6 +11,7 @@ import {
   createHuggingFaceSource,
   testHuggingFaceToken
 } from "../main/services/catalogue/huggingface-source";
+import { assertChatRunnable } from "../main/services/catalogue/runnable";
 import { CredentialStore } from "../main/services/credentials/store";
 import { SessionOrchestrator } from "../main/services/sessions/orchestrator";
 import { SessionStore } from "../main/services/sessions/store";
@@ -117,6 +118,10 @@ export async function createWebHost(options: WebHostOptions): Promise<WebHost> {
     idleTimeoutMinutes: options.idleTimeoutMinutes ?? 10,
     readinessTimeoutMs: (options.readinessTimeoutMinutes ?? 20) * 60_000,
     filters: () => settings.get().gpuFilters,
+    startupRetries: () => settings.get().gpuStartupRetries,
+    assertRunnable: async (modelId) => {
+      await assertChatRunnable(catalogue, modelId);
+    },
     logger
   });
 

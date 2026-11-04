@@ -101,6 +101,7 @@ export const ipcChannels = [
 export const updateEventChannel = "update.event" as const;
 
 export const DEFAULT_DIAGNOSTICS_URL = "http://localhost:8787";
+export const DEFAULT_GPU_STARTUP_RETRIES = 5;
 
 const httpUrlSchema = z
   .string()
@@ -118,7 +119,13 @@ const httpUrlSchema = z
 export const appSettingsSchema = z.object({
   diagnosticsUrl: httpUrlSchema,
   /** Optional GPU preferences used when ranking offers; empty means no filter. */
-  gpuFilters: gpuFiltersSchema
+  gpuFilters: gpuFiltersSchema,
+  /**
+   * Extra GPU machines to try when a boot fails (the container will not start,
+   * the host never reports in, the port never opens…). One more attempt follows
+   * the first one, so the total is this value + 1.
+   */
+  gpuStartupRetries: z.number().int().min(0).max(10).default(DEFAULT_GPU_STARTUP_RETRIES)
 });
 
 export const settingsUpdateSchema = appSettingsSchema.partial();

@@ -4,7 +4,6 @@ import { z } from "zod";
 import {
   updateEventChannel,
   chatEventChannel,
-  isChatCapableModel,
   isGgufOnlyRepository
 } from "@maia/contracts";
 import { baseModelCandidate, planVllmModel } from "../services/inference/model-plan";
@@ -25,6 +24,7 @@ import { CatalogueRepository } from "../services/catalogue/repository";
 import { CatalogueService } from "../services/catalogue/service";
 import { createFixtureCatalogueSource } from "../services/catalogue/fixture-source";
 import { createHuggingFaceSource, testHuggingFaceToken } from "../services/catalogue/huggingface-source";
+import { assertChatRunnable } from "../services/catalogue/runnable";
 import { CredentialStore } from "../services/credentials/store";
 import { SessionOrchestrator } from "../services/sessions/orchestrator";
 import { SessionStore } from "../services/sessions/store";
@@ -262,13 +262,11 @@ async function bootstrap(): Promise<void> {
     idleTimeoutMinutes: config.idleTimeoutMinutes,
     readinessTimeoutMs: config.readinessTimeoutMinutes * 60_000,
     filters: () => settings.get().gpuFilters,
+    startupRetries: () => settings.get().gpuStartupRetries,
     assertRunnable: async (modelId) => {
-      const model = catalogue.get(modelId);
-      if (model && !isChatCapableModel(model)) {
-        throw new Error(
-          `"${model.id}" is a ${model.pipelineTag} model, not a chat model. Pick a text-generation model to start a chat session.`
-        );
-      }
+      // Refuses embedding models (no chat endpoint) and base models such as gpt2
+      // (no chat template) before the user pays for a boot.
+      await assertChatRunnable(catalogue, modelId);
     },
     logger
   });

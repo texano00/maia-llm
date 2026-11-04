@@ -39,6 +39,11 @@ export interface VllmModelPlan {
  * Installs vLLM's out-of-tree GGUF loader. The official API image does not ship
  * it, and `vllm serve` refuses `repo:QUANT` without it; `uv` is present in the
  * vLLM image, pip is the fallback.
+ *
+ * This is a **shell script**: the instance must be created with Vast's SSH
+ * runtype, where `onstart` is executed by a shell. With `runtype: "args"` the
+ * whole string becomes the container command and Docker fails with
+ * `exec: "uv pip install …": executable file not found in $PATH`.
  */
 export const GGUF_PLUGIN_INSTALL =
   "uv pip install --system vllm-gguf-plugin || python3 -m pip install vllm-gguf-plugin";
