@@ -26,7 +26,12 @@ describe("SettingsStore", () => {
       countries: [],
       datacenters: [],
       minReliability: null,
-      maxHourlyMicroUsd: null
+      maxHourlyMicroUsd: null,
+      // Startup gates are on by default; a host slower than this turns a two
+      // minute boot into a ten minute one.
+      minDownloadMbps: 1000,
+      minUploadMbps: 200,
+      minDiskBandwidthMBps: 500
     });
   });
 

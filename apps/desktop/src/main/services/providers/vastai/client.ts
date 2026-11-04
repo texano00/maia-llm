@@ -27,6 +27,7 @@ export interface VastAiOfferPayload {
   compute_cap?: number;
   verification?: string;
   inet_down?: number;
+  inet_up?: number;
   disk_bw?: number;
   disk_space?: number;
 }
@@ -67,10 +68,21 @@ export function isRentableOffer(payload: Pick<VastAiOfferPayload, "rentable">): 
   return payload.rentable !== false;
 }
 
-/** Offers the app may actually try to book: rentable and supported by vLLM. */
-export function isBookableOffer(payload: VastAiOfferPayload): boolean {
+export interface StartupGates {
+  minDownloadMbps?: number | null | undefined;
+  minUploadMbps?: number | null | undefined;
+  minDiskBandwidthMBps?: number | null | undefined;
+}
+
+export type OfferVerdict = "bookable" | "not-rentable" | "unsupported-capability" | "too-slow";
+
+/**
+ * Says why an offer cannot be used, so the picker can log and explain
+ * rejections instead of silently returning "no GPU".
+ */
+export function classifyOffer(payload: VastAiOfferPayload, gates?: StartupGates): OfferVerdict {
   if (!isRentableOffer(payload)) {
-    return false;
+    return "not-rentable";
   }
 
   const capability = payload.compute_cap;
@@ -78,11 +90,33 @@ export function isBookableOffer(payload: VastAiOfferPayload): boolean {
     // vast.ai reports hundredths (700 = 7.0, 860 = 8.6).
     const normalised = capability >= 100 ? capability / 100 : capability;
     if (normalised < MIN_COMPUTE_CAPABILITY) {
-      return false;
+      return "unsupported-capability";
     }
   }
 
-  return true;
+  // The API already filters on these, but it has been seen to ignore query keys
+  // (`rentable`), so the gate is enforced here as well.
+  const down = gates?.minDownloadMbps ?? 0;
+  if (down > 0 && typeof payload.inet_down === "number" && payload.inet_down < down) {
+    return "too-slow";
+  }
+
+  const up = gates?.minUploadMbps ?? 0;
+  if (up > 0 && typeof payload.inet_up === "number" && payload.inet_up < up) {
+    return "too-slow";
+  }
+
+  const disk = gates?.minDiskBandwidthMBps ?? 0;
+  if (disk > 0 && typeof payload.disk_bw === "number" && payload.disk_bw < disk) {
+    return "too-slow";
+  }
+
+  return "bookable";
+}
+
+/** Offers the app may actually try to book: rentable, capable and fast enough. */
+export function isBookableOffer(payload: VastAiOfferPayload, gates?: StartupGates): boolean {
+  return classifyOffer(payload, gates) === "bookable";
 }
 
 export function buildSearchQuery(input: VastAiSearchQuery): Record<string, unknown> {
@@ -98,8 +132,17 @@ export function buildSearchQuery(input: VastAiSearchQuery): Record<string, unkno
     q.disk_space = { gte: input.minDiskGb };
   }
   // Sending `rentable: {eq: true}` is accepted but ignored by the bundle search,
-  // so ghosts are filtered client-side via `isBookableOffer`.
+  // so ghosts are filtered client-side via `classifyOffer`.
   q.compute_cap = { gte: MIN_COMPUTE_CAPABILITY };
+  if (input.filters?.minDownloadMbps) {
+    q.inet_down = { gte: input.filters.minDownloadMbps };
+  }
+  if (input.filters?.minUploadMbps) {
+    q.inet_up = { gte: input.filters.minUploadMbps };
+  }
+  if (input.filters?.minDiskBandwidthMBps) {
+    q.disk_bw = { gte: input.filters.minDiskBandwidthMBps };
+  }
   if (input.filters?.minReliability !== null && input.filters?.minReliability !== undefined) {
     q.reliability2 = { gte: input.filters.minReliability };
   }

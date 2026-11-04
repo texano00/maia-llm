@@ -114,7 +114,10 @@ removes the warning entirely is described in
    simulation mode: the whole flow works, but no real GPU is rented.
 2. **Settings → Hugging Face token** (optional) — needed only for gated models.
 3. **Settings → GPU preferences** (optional) — limit offers to countries,
-   machines, a reliability floor or a price ceiling. Empty means "no filter".
+   machines, a reliability floor or a price ceiling. The startup gates
+   (1000 Mbps down, 200 Mbps up, 500 MB/s disk) are on by default: a cold start
+   moves about 25 GB, so a slower host turns a two-minute boot into a ten-minute
+   one. Clear a gate to disable it.
 4. **Catalogue** — search a model, open it, press *Estimate a session*, review the
    price, then *Confirm and start session*.
 5. The first run downloads and loads the model on the GPU, which can take 5–20

@@ -226,6 +226,7 @@ describe("SessionOrchestrator", () => {
       compute,
       inference: createMockInference({ response: "ok" }),
       idleTimeoutMinutes: 10,
+      delay: async () => undefined,
       now: () => clock
     });
 
@@ -241,7 +242,7 @@ describe("SessionOrchestrator", () => {
     expect(searches).toEqual([[], [], [11]]);
 
     const messages = store.eventsFor(started.id).map((event) => event.message);
-    expect(messages.some((message) => message.includes("was taken before it could be booked"))).toBe(true);
+    expect(messages.some((message) => message.includes("could not be booked"))).toBe(true);
     expect(messages.some((message) => message.includes("Trying L40S"))).toBe(true);
   });
 
@@ -271,6 +272,7 @@ describe("SessionOrchestrator", () => {
       compute,
       inference: createMockInference({ response: "ok" }),
       idleTimeoutMinutes: 10,
+      delay: async () => undefined,
       now: () => clock
     });
 
@@ -325,6 +327,7 @@ describe("SessionOrchestrator", () => {
       compute,
       inference: createMockInference({ response: "ok" }),
       idleTimeoutMinutes: 10,
+      delay: async () => undefined,
       now: () => clock
     });
 
@@ -338,8 +341,51 @@ describe("SessionOrchestrator", () => {
     });
 
     // The estimate search, the start search, then one search per retry.
-    expect(searches).toBe(6);
+    expect(searches).toBe(7);
     expect(store.getActive()).toHaveLength(0);
+  });
+
+  it("retries any booking failure on the next GPU, not only vanished offers", async () => {
+    let attempts = 0;
+    const compute: ComputeProvider = {
+      async findOffer({ excludeOfferIds }) {
+        const excluded = new Set(excludeOfferIds ?? []);
+        return { ...offer, offerId: excluded.size === 0 ? 21 : 22, simulated: false };
+      },
+      async createInstance(candidate) {
+        attempts += 1;
+        if (candidate.offerId === 21) {
+          // A transient provider hiccup that is not an offer-gone error.
+          throw new Error("PUT /api/v0/asks/21/ failed with status 502 (Provider request failed)");
+        }
+
+        return { instanceId: 777 };
+      },
+      async waitUntilReady() {
+        return undefined;
+      },
+      async destroyInstance() {
+        return undefined;
+      },
+      isOfferUnavailable: isOfferUnavailableError
+    };
+
+    const orchestrator = new SessionOrchestrator({
+      store,
+      compute,
+      inference: createMockInference({ response: "ok" }),
+      idleTimeoutMinutes: 10,
+      delay: async () => undefined,
+      now: () => clock
+    });
+
+    const estimate = await orchestrator.createEstimate("Qwen/Qwen2.5-7B-Instruct");
+    const started = await orchestrator.start({ estimateId: estimate.id, confirmEstimate: true });
+    await orchestrator.awaitProvisioning(started.id);
+
+    expect(attempts).toBe(2);
+    expect(orchestrator.getSession(started.id)?.state).toBe("active");
+    expect(orchestrator.getSession(started.id)?.instanceId).toBe(777);
   });
 
   it("respects the GPU filters when ranking offers", async () => {
@@ -403,6 +449,7 @@ describe("SessionOrchestrator", () => {
       compute: restartedCompute,
       inference: createMockInference(),
       idleTimeoutMinutes: 10,
+      delay: async () => undefined,
       now: () => clock
     });
 

@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react";
 import {
   DEFAULT_DIAGNOSTICS_URL,
+  DEFAULT_GPU_FILTERS,
+  DEFAULT_MIN_DISK_BANDWIDTH_MBPS,
+  DEFAULT_MIN_DOWNLOAD_MBPS,
+  DEFAULT_MIN_UPLOAD_MBPS,
   type AppSettings,
   type CredentialStatus,
   type CredentialTestResult,
@@ -8,6 +12,16 @@ import {
 } from "@maia/contracts";
 import { useUpdates } from "../../shared/updates/UpdatesProvider";
 import { describeUpdateStatus } from "../../shared/updates/UpdateToast";
+
+function toPositiveInt(value: string): number | null {
+  const trimmed = value.trim();
+  if (trimmed === "") {
+    return null;
+  }
+
+  const parsed = Math.round(Number(trimmed));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
 
 export function SettingsPage() {
   const { appInfo, status, bridgeAvailable, check, download, install } = useUpdates();
@@ -19,6 +33,9 @@ export function SettingsPage() {
   const [datacenters, setDatacenters] = useState("");
   const [minReliability, setMinReliability] = useState("");
   const [maxHourlyUsd, setMaxHourlyUsd] = useState("");
+  const [minDownloadMbps, setMinDownloadMbps] = useState("");
+  const [minUploadMbps, setMinUploadMbps] = useState("");
+  const [minDiskMBps, setMinDiskMBps] = useState("");
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [gpuState, setGpuState] = useState<"idle" | "saving" | "saved">("idle");
   const [hfToken, setHfToken] = useState("");
@@ -139,16 +156,21 @@ export function SettingsPage() {
     setMaxHourlyUsd(
       filters.maxHourlyMicroUsd === null ? "" : (filters.maxHourlyMicroUsd / 1_000_000).toFixed(2)
     );
+    setMinDownloadMbps(filters.minDownloadMbps === null ? "" : String(filters.minDownloadMbps));
+    setMinUploadMbps(filters.minUploadMbps === null ? "" : String(filters.minUploadMbps));
+    setMinDiskMBps(
+      filters.minDiskBandwidthMBps === null ? "" : String(filters.minDiskBandwidthMBps)
+    );
   }
 
-  async function saveGpuFilters(): Promise<void> {
+  async function saveGpuFilters(override?: GpuFilters): Promise<void> {
     const bridge = window.maia;
     if (!bridge) {
       return;
     }
 
     setGpuState("saving");
-    const filters: GpuFilters = {
+    const filters: GpuFilters = override ?? {
       countries: countries
         .split(",")
         .map((entry) => entry.trim().toUpperCase())
@@ -159,7 +181,10 @@ export function SettingsPage() {
         .filter((entry) => entry.length > 0),
       minReliability: minReliability.trim() === "" ? null : Math.min(1, Math.max(0, Number(minReliability))),
       maxHourlyMicroUsd:
-        maxHourlyUsd.trim() === "" ? null : Math.round(Number(maxHourlyUsd) * 1_000_000)
+        maxHourlyUsd.trim() === "" ? null : Math.round(Number(maxHourlyUsd) * 1_000_000),
+      minDownloadMbps: toPositiveInt(minDownloadMbps),
+      minUploadMbps: toPositiveInt(minUploadMbps),
+      minDiskBandwidthMBps: toPositiveInt(minDiskMBps)
     };
 
     const result = await bridge.invoke<AppSettings>("settings.update", { gpuFilters: filters });
@@ -347,8 +372,9 @@ export function SettingsPage() {
         <div>
           <h2>GPU preferences</h2>
           <p className="lede">
-            Optional filters applied when Maia ranks GPUs for a model. Leave everything empty to
-            consider every offer — no filters are active by default.
+            Applied whenever Maia ranks GPUs for a model. The startup gates are on by default: a
+            cold start downloads about 25 GB (container image plus model weights), so a slow host
+            turns a two-minute boot into a ten-minute one. Leave a gate empty to disable it.
           </p>
           <label className="field">
             <span>Countries (ISO codes, comma separated)</span>
@@ -391,6 +417,52 @@ export function SettingsPage() {
               onChange={(event) => setMaxHourlyUsd(event.target.value)}
             />
           </label>
+          <label className="field">
+            <span>Minimum download speed (Mbps)</span>
+            <input
+              type="number"
+              min="0"
+              step="50"
+              placeholder={String(DEFAULT_MIN_DOWNLOAD_MBPS)}
+              value={minDownloadMbps}
+              onChange={(event) => {
+                setMinDownloadMbps(event.target.value);
+                setGpuState("idle");
+              }}
+            />
+          </label>
+          <label className="field">
+            <span>Minimum upload speed (Mbps)</span>
+            <input
+              type="number"
+              min="0"
+              step="50"
+              placeholder={String(DEFAULT_MIN_UPLOAD_MBPS)}
+              value={minUploadMbps}
+              onChange={(event) => {
+                setMinUploadMbps(event.target.value);
+                setGpuState("idle");
+              }}
+            />
+          </label>
+          <label className="field">
+            <span>Minimum disk speed (MB/s)</span>
+            <input
+              type="number"
+              min="0"
+              step="50"
+              placeholder={String(DEFAULT_MIN_DISK_BANDWIDTH_MBPS)}
+              value={minDiskMBps}
+              onChange={(event) => {
+                setMinDiskMBps(event.target.value);
+                setGpuState("idle");
+              }}
+            />
+          </label>
+          <p className="field-hint">
+            Maia also requires a GPU that vLLM supports (compute capability 7.5 or newer) and that
+            vast.ai reports as rentable at booking time.
+          </p>
           {gpuState === "saved" ? <p className="field-hint">GPU preferences saved.</p> : null}
         </div>
         <div className="update-actions">
@@ -402,8 +474,8 @@ export function SettingsPage() {
             className="ghost-button"
             disabled={!bridgeAvailable}
             onClick={() => {
-              applyGpuFilters({ countries: [], datacenters: [], minReliability: null, maxHourlyMicroUsd: null });
-              void saveGpuFilters();
+              applyGpuFilters(DEFAULT_GPU_FILTERS);
+              void saveGpuFilters(DEFAULT_GPU_FILTERS);
             }}
           >
             Clear filters

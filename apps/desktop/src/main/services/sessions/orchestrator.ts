@@ -66,6 +66,8 @@ export interface SessionOrchestratorOptions {
   idleTimeoutMinutes: number;
   installId?: string;
   now?: () => number;
+  /** Injectable pause between booking attempts so tests stay fast. */
+  delay?: (ms: number) => Promise<void>;
   logger?: { info(message: string, context?: Record<string, unknown>): void; warn(message: string, context?: Record<string, unknown>): void } | undefined;
   readinessTimeoutMs?: number;
   /** Returns the user's current GPU preferences so offers respect them. */
@@ -84,7 +86,7 @@ const DEFAULT_READINESS_TIMEOUT_MS = 5 * 60_000;
  * Offers churn constantly on vast.ai: roughly three quarters of the listed asks
  * disappear within seconds, so a booking may need several tries.
  */
-const MAX_OFFER_ATTEMPTS = 5;
+const MAX_OFFER_ATTEMPTS = 6;
 
 /** States in which a session can serve chat (now or once it finishes booting). */
 function isServing(state: Session["state"]): boolean {
@@ -99,6 +101,7 @@ function isServing(state: Session["state"]): boolean {
  */
 export class SessionOrchestrator {
   private readonly now: () => number;
+  private readonly delay: (ms: number) => Promise<void>;
   private readonly estimates = new Map<string, Estimate>();
   private readonly runtimes = new Map<string, SessionRuntime>();
   /** In-flight boot sequences, so a session can be awaited or released safely. */
@@ -106,6 +109,8 @@ export class SessionOrchestrator {
 
   constructor(private readonly options: SessionOrchestratorOptions) {
     this.now = options.now ?? (() => Date.now());
+    this.delay =
+      options.delay ?? ((ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 
     for (const session of options.store.getActive()) {
       this.runtimes.set(session.id, { session, lastActivityAt: this.now(), abort: null });
@@ -116,12 +121,7 @@ export class SessionOrchestrator {
     const filters = this.options.filters?.();
     const offer = await this.options.compute.findOffer({ modelId, filters });
     if (!offer) {
-      throw new SessionError(
-        "PROVIDER_UNAVAILABLE",
-        filters && hasActiveFilters(filters)
-          ? "No GPU matches this model and your GPU filters. Relax the filters in Settings and try again."
-          : "No GPU offer currently meets this model's requirements."
-      );
+      throw new SessionError("PROVIDER_UNAVAILABLE", noOfferMessage(filters));
     }
 
     const estimate = buildEstimate({
@@ -156,7 +156,7 @@ export class SessionOrchestrator {
     const filters = this.options.filters?.();
     let offer = await this.options.compute.findOffer({ modelId: estimate.modelId, filters });
     if (!offer) {
-      throw new SessionError("PROVIDER_UNAVAILABLE", "The selected GPU is no longer available.");
+      throw new SessionError("PROVIDER_UNAVAILABLE", noOfferMessage(filters));
     }
 
     const sessionId = randomUUID();
@@ -198,10 +198,9 @@ export class SessionOrchestrator {
       let created: { instanceId: number } | null = null;
       let lastError: unknown = null;
 
-      // A machine can be rented by someone else between the search and the
-      // booking (vast.ai answers `400 no_such_ask`). Almost a quarter of the
-      // listed offers churn within seconds, so move to the next offer instead
-      // of failing the run, and say plainly when the market beats us.
+      // Renting must feel seamless: any booking failure (a machine taken by
+      // someone else, a price change, a transient 5xx) is retried on the next
+      // best offer. Almost a quarter of the listed asks churn within seconds.
       for (let attempt = 1; created === null; attempt += 1) {
         try {
           created = await this.options.compute.createInstance(offer, {
@@ -210,9 +209,7 @@ export class SessionOrchestrator {
           });
         } catch (error) {
           lastError = error;
-          const canRetry =
-            attempt < MAX_OFFER_ATTEMPTS &&
-            this.options.compute.isOfferUnavailable?.(error) === true;
+          const canRetry = attempt < MAX_OFFER_ATTEMPTS;
 
           if (!canRetry) {
             break;
@@ -220,12 +217,14 @@ export class SessionOrchestrator {
 
           triedOfferIds.push(offer.offerId);
           const detail = error instanceof Error ? error.message : String(error);
-          this.options.logger?.warn("Chosen GPU offer vanished before booking", {
+          this.options.logger?.warn("GPU booking failed; trying another offer", {
             offerId: offer.offerId,
             attempt,
+            of: MAX_OFFER_ATTEMPTS,
             detail
           });
-          log("warn", `${offer.gpuName} was taken before it could be booked. Looking for another GPU…`);
+          log("warn", `${offer.gpuName} could not be booked (attempt ${attempt} of ${MAX_OFFER_ATTEMPTS}). Trying another GPU…`);
+          await this.delay(attempt * 150);
 
           const next = await this.options.compute.findOffer({
             modelId: estimate.modelId,
@@ -245,8 +244,7 @@ export class SessionOrchestrator {
       }
 
       if (created === null) {
-        const offerChurned =
-          triedOfferIds.length > 0 && this.options.compute.isOfferUnavailable?.(lastError) === true;
+        const offerChurned = this.options.compute.isOfferUnavailable?.(lastError) === true;
 
         if (offerChurned) {
           throw new SessionError(
@@ -605,4 +603,39 @@ export function hasActiveFilters(filters: GpuFilters): boolean {
     filters.minReliability !== null ||
     filters.maxHourlyMicroUsd !== null
   );
+}
+
+/** "≥1000 Mbps down, ≥200 Mbps up, ≥500 MB/s disk" — what the gates allow. */
+export function describeStartupGates(filters: GpuFilters): string {
+  const parts: string[] = [];
+
+  if (filters.minDownloadMbps) {
+    parts.push(`≥${filters.minDownloadMbps} Mbps down`);
+  }
+  if (filters.minUploadMbps) {
+    parts.push(`≥${filters.minUploadMbps} Mbps up`);
+  }
+  if (filters.minDiskBandwidthMBps) {
+    parts.push(`≥${filters.minDiskBandwidthMBps} MB/s disk`);
+  }
+
+  return parts.join(", ");
+}
+
+/**
+ * A model needs a GPU that is rentable, recent enough for vLLM and fast enough to
+ * boot in minutes; when nothing qualifies, say which gate is in the way.
+ */
+function noOfferMessage(filters: GpuFilters | undefined): string {
+  const gates = filters ? describeStartupGates(filters) : "";
+
+  if (gates.length > 0) {
+    return `No GPU is both available and fast enough right now (startup gates: ${gates}). Try again in a moment, or lower the gates in Settings → GPU preferences.`;
+  }
+
+  if (filters && hasActiveFilters(filters)) {
+    return "No GPU matches this model and your GPU filters. Relax the filters in Settings and try again.";
+  }
+
+  return "No GPU offer currently meets this model's requirements.";
 }

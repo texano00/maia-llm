@@ -95,13 +95,47 @@ export const chatChunkSchema = z.object({
   errorMessage: z.string().optional()
 });
 
+/**
+ * Startup gates. A cold start transfers ~25 GB (9.7 GB image + model weights)
+ * before vLLM can answer, so a host slower than these figures turns a two-minute
+ * boot into a ten-minute one. Measured on vast.ai: hosts below 1 Gbps downlink
+ * are ~3x slower to first token.
+ */
+export const DEFAULT_MIN_DOWNLOAD_MBPS = 1000;
+export const DEFAULT_MIN_UPLOAD_MBPS = 200;
+export const DEFAULT_MIN_DISK_BANDWIDTH_MBPS = 500;
+
 export const gpuFiltersSchema = z.object({
   /** Empty means "any country" — filters are opt-in. */
   countries: z.array(z.string().trim().min(2).max(3)).max(50),
   /** Empty means "any datacenter". */
   datacenters: z.array(z.string().trim().min(1).max(80)).max(50),
   minReliability: z.number().min(0).max(1).nullable(),
-  maxHourlyMicroUsd: microUsdSchema.nullable()
+  maxHourlyMicroUsd: microUsdSchema.nullable(),
+  /** Host downlink in Mbps; null disables the gate. */
+  minDownloadMbps: z
+    .number()
+    .int()
+    .min(0)
+    .max(100_000)
+    .nullable()
+    .default(DEFAULT_MIN_DOWNLOAD_MBPS),
+  /** Host uplink in Mbps; null disables the gate. */
+  minUploadMbps: z
+    .number()
+    .int()
+    .min(0)
+    .max(100_000)
+    .nullable()
+    .default(DEFAULT_MIN_UPLOAD_MBPS),
+  /** Local disk bandwidth in MB/s; null disables the gate. */
+  minDiskBandwidthMBps: z
+    .number()
+    .int()
+    .min(0)
+    .max(100_000)
+    .nullable()
+    .default(DEFAULT_MIN_DISK_BANDWIDTH_MBPS)
 });
 
 export const conversationSummarySchema = z.object({
@@ -158,5 +192,8 @@ export const DEFAULT_GPU_FILTERS: GpuFilters = {
   countries: [],
   datacenters: [],
   minReliability: null,
-  maxHourlyMicroUsd: null
+  maxHourlyMicroUsd: null,
+  minDownloadMbps: DEFAULT_MIN_DOWNLOAD_MBPS,
+  minUploadMbps: DEFAULT_MIN_UPLOAD_MBPS,
+  minDiskBandwidthMBps: DEFAULT_MIN_DISK_BANDWIDTH_MBPS
 };

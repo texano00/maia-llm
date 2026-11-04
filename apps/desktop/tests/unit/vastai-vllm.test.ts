@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildSearchQuery,
+  classifyOffer,
   estimateDiskGb,
   estimateGpuRamGb,
   isBookableOffer,
@@ -11,6 +12,8 @@ import {
   readPublicHost,
   toComputeOffer
 } from "../../src/main/services/providers/vastai/client";
+import { createVastComputeProvider } from "../../src/main/services/providers/vastai/compute-provider";
+import type { VastAiClient } from "../../src/main/services/providers/vastai/client";
 import { ProviderHttpError } from "../../src/main/services/providers/http";
 import { modelPath } from "../../src/main/services/catalogue/huggingface-source";
 import { createVllmRuntime, parseChunk, parseSseStream } from "../../src/main/services/inference/vllm";
@@ -68,6 +71,55 @@ describe("vast.ai offer search", () => {
     expect(isBookableOffer({ id: 2, rentable: true, compute_cap: 700 })).toBe(false);
     expect(isBookableOffer({ id: 3, rentable: true, compute_cap: 860 })).toBe(true);
     expect(isBookableOffer({ id: 4, rentable: true })).toBe(true);
+  });
+
+  it("enforces the startup speed gates and says which one failed", () => {
+    const gates = { minDownloadMbps: 1000, minUploadMbps: 200, minDiskBandwidthMBps: 500 };
+
+    expect(classifyOffer({ id: 1, rentable: false }, gates)).toBe("not-rentable");
+    expect(classifyOffer({ id: 2, rentable: true, compute_cap: 700 }, gates)).toBe(
+      "unsupported-capability"
+    );
+    expect(classifyOffer({ id: 3, rentable: true, compute_cap: 860, inet_down: 300 }, gates)).toBe(
+      "too-slow"
+    );
+    expect(
+      classifyOffer({ id: 4, rentable: true, compute_cap: 860, inet_down: 2000, inet_up: 50 }, gates)
+    ).toBe("too-slow");
+    expect(
+      classifyOffer(
+        { id: 5, rentable: true, compute_cap: 860, inet_down: 2000, inet_up: 500, disk_bw: 120 },
+        gates
+      )
+    ).toBe("too-slow");
+    expect(
+      classifyOffer(
+        { id: 6, rentable: true, compute_cap: 860, inet_down: 2000, inet_up: 500, disk_bw: 1200 },
+        gates
+      )
+    ).toBe("bookable");
+    // Empty gates must not reject anything.
+    expect(classifyOffer({ id: 7, rentable: true, compute_cap: 860, inet_down: 10 })).toBe("bookable");
+  });
+
+  it("sends the startup gates to vast.ai", () => {
+    const query = buildSearchQuery({
+      gpu_ram_gb: 24,
+      maxHourlyMicroUsd: null,
+      filters: {
+        countries: [],
+        datacenters: [],
+        minReliability: null,
+        maxHourlyMicroUsd: null,
+        minDownloadMbps: 1000,
+        minUploadMbps: 200,
+        minDiskBandwidthMBps: 500
+      }
+    });
+
+    expect(query.inet_down).toEqual({ gte: 1000 });
+    expect(query.inet_up).toEqual({ gte: 200 });
+    expect(query.disk_bw).toEqual({ gte: 500 });
   });
 
   it("sizes the disk after the checkpoint instead of a fixed 64 GB", () => {
@@ -138,6 +190,65 @@ describe("vast.ai offer search", () => {
     expect(readMappedPort({})).toBeNull();
     expect(readPublicHost({ public_ipaddr: "203.0.113.5:22" })).toBe("203.0.113.5");
     expect(readPublicHost({})).toBeNull();
+  });
+});
+
+describe("vast.ai offer picking", () => {
+  it("only returns offers that are rentable, vLLM-capable and fast enough", async () => {
+    const offers = [
+      // cheapest, but the machine is not rentable: booking it answers no_such_ask
+      { id: 1, gpu_name: "RTX 4090", gpu_ram: 24_576, dph_total: 0.1, rentable: false, compute_cap: 890, inet_down: 5000, inet_up: 1000, disk_bw: 2000 },
+      // cheapest rentable, but Volta: vLLM cannot run on it
+      { id: 2, gpu_name: "Tesla V100", gpu_ram: 32_768, dph_total: 0.07, rentable: true, compute_cap: 700, inet_down: 5000, inet_up: 1000, disk_bw: 2000 },
+      // rentable and supported, but a 300 Mbps downlink
+      { id: 3, gpu_name: "RTX 3090", gpu_ram: 24_576, dph_total: 0.12, rentable: true, compute_cap: 860, inet_down: 300, inet_up: 900, disk_bw: 2000 },
+      // the one that should win
+      { id: 4, gpu_name: "RTX 3090", gpu_ram: 24_576, dph_total: 0.14, rentable: true, compute_cap: 860, inet_down: 2000, inet_up: 900, disk_bw: 1200 }
+    ];
+
+    const fake = { searchOffers: async () => offers } as unknown as VastAiClient;
+    const provider = createVastComputeProvider({
+      getApiKey: async () => "key",
+      getParameterCount: async () => 7.6e9,
+      clientFactory: () => fake,
+      getFilters: () => ({
+        countries: [],
+        datacenters: [],
+        minReliability: null,
+        maxHourlyMicroUsd: null,
+        minDownloadMbps: 1000,
+        minUploadMbps: 200,
+        minDiskBandwidthMBps: 500
+      })
+    });
+
+    const offer = await provider.findOffer({ modelId: "Qwen/Qwen2.5-7B-Instruct" });
+
+    expect(offer?.offerId).toBe(4);
+    expect(offer?.hourlyRateMicroUsd).toBe(140_000);
+  });
+
+  it("honours the exclusion list so a retry moves to a different machine", async () => {
+    const offers = [
+      { id: 10, gpu_name: "RTX 3090", gpu_ram: 24_576, dph_total: 0.12, rentable: true, compute_cap: 860, inet_down: 2000, inet_up: 900, disk_bw: 1200 },
+      { id: 11, gpu_name: "L40S", gpu_ram: 48_000, dph_total: 0.34, rentable: true, compute_cap: 890, inet_down: 3000, inet_up: 900, disk_bw: 1500 }
+    ];
+
+    const fake = { searchOffers: async () => offers } as unknown as VastAiClient;
+    const provider = createVastComputeProvider({
+      getApiKey: async () => "key",
+      getParameterCount: async () => 7.6e9,
+      clientFactory: () => fake
+    });
+
+    const first = await provider.findOffer({ modelId: "Qwen/Qwen2.5-7B-Instruct" });
+    const second = await provider.findOffer({
+      modelId: "Qwen/Qwen2.5-7B-Instruct",
+      excludeOfferIds: [10]
+    });
+
+    expect(first?.offerId).toBe(10);
+    expect(second?.offerId).toBe(11);
   });
 });
 

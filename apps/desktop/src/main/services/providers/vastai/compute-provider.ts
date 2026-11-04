@@ -2,9 +2,9 @@ import type { GpuFilters } from "@maia/contracts";
 import type { ComputeOffer, ComputeProvider } from "../../sessions/orchestrator";
 import {
   buildSearchQuery,
+  classifyOffer,
   estimateDiskGb,
   estimateGpuRamGb,
-  isBookableOffer,
   isOfferUnavailableError,
   readMappedPort,
   readPublicHost,
@@ -78,8 +78,17 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
       );
 
       // Offers whose machine is not rentable stay listed but cannot be booked;
-      // asking for one answers `400 no_such_ask`, so they are dropped here.
-      const bookable = offers.filter(isBookableOffer);
+      // asking for one answers `400 no_such_ask`. Slow hosts are dropped by the
+      // configured startup gates, and Volta cards cannot run vLLM at all.
+      const verdicts = new Map(offers.map((offer) => [offer.id, classifyOffer(offer, effectiveFilters)]));
+      const bookable = offers.filter((offer) => verdicts.get(offer.id) === "bookable");
+      const rejected = { notRentable: 0, unsupportedCapability: 0, tooSlow: 0 };
+      for (const verdict of verdicts.values()) {
+        if (verdict === "not-rentable") rejected.notRentable += 1;
+        if (verdict === "unsupported-capability") rejected.unsupportedCapability += 1;
+        if (verdict === "too-slow") rejected.tooSlow += 1;
+      }
+
       const reliability = new Map(bookable.map((offer) => [offer.id, offer.reliability2 ?? 0]));
       const mapped = bookable
         .map(toComputeOffer)
@@ -98,6 +107,7 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
         diskGb,
         listed: offers.length,
         bookable: bookable.length,
+        rejected,
         excluded: excluded.size,
         candidates: mapped.length
       });
