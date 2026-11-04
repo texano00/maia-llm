@@ -105,9 +105,9 @@ export interface SessionOrchestratorOptions {
   /**
    * Refuses a model the runtime cannot serve before anything is rented. The
    * composition root wires this to the catalogue; the orchestrator only needs
-   * to know that it may throw.
+   * to know that it may throw (or reject).
    */
-  assertRunnable?: (modelId: string) => void;
+  assertRunnable?: (modelId: string) => void | Promise<void>;
 }
 
 interface SessionRuntime {
@@ -167,7 +167,7 @@ export class SessionOrchestrator {
   async createEstimate(modelId: string, expectedMinutes = 30): Promise<Estimate> {
     // Cheapest place to refuse a model that cannot chat: no offer search, no
     // booking, no boot.
-    this.options.assertRunnable?.(modelId);
+    await this.options.assertRunnable?.(modelId);
 
     const filters = this.options.filters?.();
     const offer = await this.options.compute.findOffer({ modelId, filters });
@@ -206,7 +206,7 @@ export class SessionOrchestrator {
 
     // An embedding or reranking model boots happily and then answers every
     // message with 404, so refuse it before a single minute is billed.
-    this.options.assertRunnable?.(estimate.modelId);
+    await this.options.assertRunnable?.(estimate.modelId);
 
     const filters = this.options.filters?.();
     let offer = await this.options.compute.findOffer({ modelId: estimate.modelId, filters });
@@ -429,7 +429,19 @@ export class SessionOrchestrator {
             // Each provider status change is one line, so a slow boot shows
             // progress instead of silence.
             const detail = update.message ? ` — ${update.message}` : "";
-            append("info", `${describeStatus(update.status)}${detail} (${formatDuration(update.elapsedMs)})`);
+            const line = `${describeStatus(update.status)}${detail} (${formatDuration(update.elapsedMs)})`;
+            append("info", line);
+
+            // Mirror it into the diagnostics stream: the UI log is local to the
+            // machine, so a boot that stalls in the field is invisible otherwise.
+            this.options.logger?.info("Provisioning progress", {
+              sessionId,
+              instanceId: current.instanceId,
+              modelId: estimate.modelId,
+              status: update.status,
+              message: update.message,
+              elapsedMs: update.elapsedMs
+            });
           }
         );
 

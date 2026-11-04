@@ -45,6 +45,12 @@ export interface VastComputeProviderOptions {
    */
   stallTimeoutMs?: number;
   pollIntervalMs?: number;
+  /**
+   * How often a quiet boot still reports its elapsed time. vLLM binds its port
+   * only after the weights are loaded, so a 27B model looks dead for ten
+   * minutes unless the wait says something.
+   */
+  progressIntervalMs?: number;
   /** How long a running container may stay portless before it is reported as broken. */
   missingPortTimeoutMs?: number;
   fetchImpl?: typeof fetch;
@@ -243,10 +249,12 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
       const deadline = startedAt + (options.readyTimeoutMs ?? timeoutMs);
       const stallTimeoutMs = options.stallTimeoutMs ?? 15 * 60_000;
       const missingPortTimeoutMs = options.missingPortTimeoutMs ?? 90_000;
+      const progressIntervalMs = options.progressIntervalMs ?? 60_000;
 
       let lastStatus = "";
       let lastMessage = "";
       let lastProgressAt = startedAt;
+      let lastReportAt = startedAt;
       let unknownSince: number | null = null;
       let runningWithoutPortSince: number | null = null;
       // Once the container is up the host is doing real work: pulling the image,
@@ -273,6 +281,16 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
           lastStatus = status;
           lastMessage = message;
           lastProgressAt = now();
+          lastReportAt = now();
+          onProgress?.({
+            status,
+            message: message.length > 0 ? message : null,
+            elapsedMs: now() - startedAt
+          });
+        } else if (now() - lastReportAt >= progressIntervalMs) {
+          // Nothing changed, but the boot is alive: say so rather than let the
+          // log sit silent for the whole weight download.
+          lastReportAt = now();
           onProgress?.({
             status,
             message: message.length > 0 ? message : null,
@@ -303,10 +321,19 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
             endpoints.set(instanceId, { host, port });
             const endpoint = `http://${host}:${port}`;
             onProgress?.({ status: "starting", message: endpoint, elapsedMs: now() - startedAt });
-            const served = await waitForServing(endpoint, deadline, options.fetchImpl, {
-              now,
-              pause
-            });
+            const served = await waitForServing(
+              endpoint,
+              deadline,
+              options.fetchImpl,
+              { now, pause },
+              (elapsedMs) => {
+                // vLLM binds the port only after loading the weights, so this
+                // is the longest silent phase of a boot.
+                lastReportAt = now();
+                onProgress?.({ status: "starting", message: endpoint, elapsedMs });
+              },
+              progressIntervalMs
+            );
             if (served === null) {
               throw new Error(
                 "The model server did not become ready in time. The GPU was released — a cold start can take several minutes when the host is slow."
@@ -387,8 +414,13 @@ async function waitForServing(
   clock: { now: () => number; pause: (ms: number) => Promise<void> } = {
     now: () => Date.now(),
     pause: sleep
-  }
+  },
+  onWait?: (elapsedMs: number) => void,
+  reportIntervalMs = 60_000
 ): Promise<string[] | null> {
+  const startedAt = clock.now();
+  let lastReportAt = startedAt;
+
   for (;;) {
     try {
       const health = await fetchImpl(`${baseUrl}/health`, { signal: AbortSignal.timeout(5_000) });
@@ -408,6 +440,11 @@ async function waitForServing(
 
     if (clock.now() > deadline) {
       return null;
+    }
+
+    if (onWait && clock.now() - lastReportAt >= reportIntervalMs) {
+      lastReportAt = clock.now();
+      onWait(clock.now() - startedAt);
     }
 
     await clock.pause(5_000);

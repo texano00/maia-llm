@@ -20,6 +20,11 @@ produced "Timed out waiting for the GPU instance to start" on hosts that were
 simply slow. Progress is measured on `actual_status` **and** on `status_msg`, so
 "Pulling the container image…" → "loading" counts as movement.
 
+While a boot is quiet — the weight download, or vLLM loading the model before it
+binds its port — the wait still emits a progress line every minute with the
+elapsed time, and every line is mirrored to the diagnostics stream. Without that,
+a 27B boot looks frozen for ten minutes and the telemetry says nothing.
+
 ```bash
 MAIA_READY_TIMEOUT_MINUTES=40   # hard cap for the whole boot
 MAIA_READY_STALL_MINUTES=15     # host never started the container

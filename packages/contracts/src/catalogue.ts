@@ -52,6 +52,20 @@ export function isChatCapableModel(model: { pipelineTag: string | null }): boole
   return model.pipelineTag === null || CHAT_PIPELINE_TAGS.includes(model.pipelineTag);
 }
 
+/**
+ * True when a repository ships GGUF weights and nothing vLLM can load.
+ *
+ * GGUF is a llama.cpp format: `vllm serve <repo>` finds no `*.safetensors` and
+ * dies during startup, after the instance is already billing. Repositories that
+ * ship both formats stay runnable.
+ */
+export function isGgufOnlyRepository(artifacts: readonly { format: string }[]): boolean {
+  const hasGguf = artifacts.some((artifact) => artifact.format === "gguf");
+  const hasSafetensors = artifacts.some((artifact) => artifact.format === "safetensors");
+
+  return hasGguf && !hasSafetensors;
+}
+
 
 export const modelArtifactSchema = z.object({
   id: z.string(),

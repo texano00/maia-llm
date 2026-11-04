@@ -481,6 +481,49 @@ describe("vast.ai offer picking", () => {
     expect(clock).toBeGreaterThanOrEqual(40 * 60_000);
   });
 
+  it("reports progress while a quiet boot loads its weights", async () => {
+    // vLLM binds its port only after loading the weights: a 27B model looks
+    // dead for many minutes unless the wait keeps saying something.
+    let clock = 0;
+    const fake = {
+      async getInstance() {
+        return {
+          id: 12,
+          actual_status: "running",
+          public_ipaddr: "203.0.113.20",
+          ports: { "8000/tcp": [{ HostIp: "0.0.0.0", HostPort: "40300" }] }
+        };
+      }
+    } as unknown as VastAiClient;
+
+    const provider = createVastComputeProvider({
+      getApiKey: async () => "key",
+      getParameterCount: async () => 27e9,
+      clientFactory: () => fake,
+      fetchImpl: (async () => {
+        if (clock < 6 * 60_000) {
+          throw new Error("ECONNREFUSED");
+        }
+
+        return new Response(JSON.stringify({ data: [{ id: "m" }] }), { status: 200 });
+      }) as unknown as typeof fetch,
+      readyTimeoutMs: 40 * 60_000,
+      pollIntervalMs: 5_000,
+      progressIntervalMs: 60_000,
+      now: () => clock,
+      pause: async (ms: number) => {
+        clock += ms;
+      }
+    });
+
+    const reports: number[] = [];
+    await provider.waitUntilReady(12, 40 * 60_000, (update) => reports.push(update.elapsedMs));
+
+    // Several ticks over six quiet minutes, not one line at the start only.
+    expect(reports.length).toBeGreaterThanOrEqual(6);
+    expect(reports.some((elapsed) => elapsed >= 3 * 60_000)).toBe(true);
+  });
+
   it("fails fast when the host never starts the container", async () => {
     let clock = 0;
     const fake = {

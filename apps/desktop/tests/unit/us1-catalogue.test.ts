@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { isChatCapableModel } from "@maia/contracts";
+import { isChatCapableModel, isGgufOnlyRepository } from "@maia/contracts";
 import { closeDatabase, openDatabase, type DatabaseConnection } from "../../src/main/storage/db";
 import { CatalogueRepository } from "../../src/main/services/catalogue/repository";
 import { CatalogueService, filterAndSort, type CatalogueSource } from "../../src/main/services/catalogue/service";
@@ -67,6 +67,22 @@ describe("Hugging Face mapping", () => {
     expect(embedding.capabilities).not.toContain("chat");
     expect(isChatCapableModel(embedding)).toBe(false);
     expect(isChatCapableModel(mapHuggingFaceModel(payload, "2026-11-04T00:00:00.000Z"))).toBe(true);
+  });
+
+  it("recognises a GGUF-only repository as unservable by vLLM", () => {
+    const ggufOnly = mapArtifacts("a/gguf", "main", [
+      { type: "file", path: "model-Q4_K_M.gguf", lfs: { size: 15_000_000_000, sha256: "b".repeat(64) } },
+      { type: "file", path: "README.md", size: 100 }
+    ]);
+    const both = mapArtifacts("a/both", "main", [
+      { type: "file", path: "model.Q4_K_M.gguf", lfs: { size: 15_000_000_000, sha256: "c".repeat(64) } },
+      { type: "file", path: "model-00001-of-00002.safetensors", lfs: { size: 14_000_000_000, sha256: "d".repeat(64) } }
+    ]);
+
+    expect(isGgufOnlyRepository(ggufOnly)).toBe(true);
+    expect(isGgufOnlyRepository(both)).toBe(false);
+    // Nothing known yet: do not block the user.
+    expect(isGgufOnlyRepository([])).toBe(false);
   });
 
   it("maps artifact formats, quantisation, and LFS sizes", () => {

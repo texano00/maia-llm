@@ -1,7 +1,12 @@
 import { app, BrowserWindow, dialog, Menu } from "electron";
 import { join } from "node:path";
 import { z } from "zod";
-import { updateEventChannel, chatEventChannel, isChatCapableModel } from "@maia/contracts";
+import {
+  updateEventChannel,
+  chatEventChannel,
+  isChatCapableModel,
+  isGgufOnlyRepository
+} from "@maia/contracts";
 import { closeDatabase, openDatabase, type DatabaseConnection } from "../storage/db";
 import { HistoryRepository } from "../services/history/repository";
 import { CredentialVault } from "../services/credentials/vault";
@@ -233,11 +238,27 @@ async function bootstrap(): Promise<void> {
     idleTimeoutMinutes: config.idleTimeoutMinutes,
     readinessTimeoutMs: config.readinessTimeoutMinutes * 60_000,
     filters: () => settings.get().gpuFilters,
-    assertRunnable: (modelId) => {
+    assertRunnable: async (modelId) => {
       const model = catalogue.get(modelId);
       if (model && !isChatCapableModel(model)) {
         throw new Error(
           `"${model.id}" is a ${model.pipelineTag} model, not a chat model. Pick a text-generation model to start a chat session.`
+        );
+      }
+
+      // GGUF is a llama.cpp quantisation: host it and vLLM exits during startup,
+      // long after the instance started billing.
+      let artifacts = catalogueRepository.getArtifacts(modelId);
+      if (artifacts.length === 0) {
+        artifacts = await catalogue.detail(modelId).then(
+          (detail) => detail.artifacts,
+          () => []
+        );
+      }
+
+      if (isGgufOnlyRepository(artifacts)) {
+        throw new Error(
+          `"${modelId}" only ships GGUF weights, which vLLM cannot load. Pick a repository with .safetensors weights (publishers usually ship both).`
         );
       }
     },
