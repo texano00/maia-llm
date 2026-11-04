@@ -35,6 +35,11 @@ export interface ComputeProvider {
   /** Instances carrying one of our labels, used to reclaim machines after a crash. */
   listLabelledInstances?(prefix: string): Promise<Array<{ instanceId: number; label: string }>>;
   /**
+   * The container's own log, used to explain a failed boot. Optional: providers
+   * without log access simply report the status message.
+   */
+  getInstanceLogs?(instanceId: number): Promise<string | null>;
+  /**
    * True when the failure means "that machine is gone" rather than "this request is
    * wrong", so the session can be retried on another offer instead of failing.
    */
@@ -398,6 +403,38 @@ export class SessionOrchestrator {
   }
 
   /**
+   * Pulls the container's own output for the diagnostics stream.
+   *
+   * The interesting lines are almost always the last few (a traceback, a missing
+   * file, a CUDA error), so the tail is what travels: a short summary for the
+   * session log and the full tail for telemetry.
+   */
+  private async collectRemoteLogs(
+    instanceId: number
+  ): Promise<{ summary: string; tail: string } | null> {
+    if (!this.options.compute.getInstanceLogs) {
+      return null;
+    }
+
+    const raw = await this.options.compute.getInstanceLogs(instanceId).catch(() => null);
+    if (!raw) {
+      return null;
+    }
+
+    const lines = raw
+      .split("\n")
+      .map((line) => line.trimEnd())
+      .filter((line) => line.trim().length > 0);
+    const tail = lines.slice(-40).join("\n").slice(-4_000);
+
+    if (tail.length === 0) {
+      return null;
+    }
+
+    return { summary: lines.slice(-2).join(" | ").slice(0, 300), tail };
+  }
+
+  /**
    * Boots a booked instance until vLLM serves the model, moving to another host
    * when the machine cannot start the container at all. Runs in the background so
    * several models can provision at the same time.
@@ -484,6 +521,10 @@ export class SessionOrchestrator {
         const message = error instanceof Error ? error.message : String(error);
         const unrecoverable = this.options.compute.isUnrecoverable?.(error) === true;
 
+        // Ask the container what it actually said before it disappears with the
+        // instance: "the port never opened" is not a diagnosis.
+        const remoteLogs = await this.collectRemoteLogs(current.instanceId);
+
         this.options.logger?.warn("Provisioning attempt failed", {
           sessionId,
           modelId: estimate.modelId,
@@ -491,8 +532,13 @@ export class SessionOrchestrator {
           machineId: current.offer.machineId,
           attempt,
           unrecoverable,
-          message
+          message,
+          ...(remoteLogs ? { remoteLogs: remoteLogs.tail } : {})
         });
+
+        if (remoteLogs) {
+          append("error", `Container log: ${remoteLogs.summary}`);
+        }
 
         // The instance is unusable either way; release it before anything else.
         await this.options.compute.destroyInstance(current.instanceId).catch((teardownError: unknown) => {

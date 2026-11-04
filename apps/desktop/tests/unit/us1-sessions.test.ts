@@ -558,6 +558,63 @@ describe("SessionOrchestrator", () => {
     expect(log).toContain("Retrying on L40S");
   });
 
+  it("attaches the container log to a failed provisioning attempt", async () => {
+    const warnings: Array<Record<string, unknown> | undefined> = [];
+
+    const compute: ComputeProvider = {
+      async findOffer() {
+        return { ...offer, offerId: 41, machineId: 7001, simulated: false };
+      },
+      async createInstance() {
+        return { instanceId: 301 };
+      },
+      async waitUntilReady() {
+        throw new Error(
+          "Timed out waiting for the GPU instance to start (40 min). The GPU was released."
+        );
+      },
+      async destroyInstance() {
+        return undefined;
+      },
+      async getInstanceLogs(instanceId) {
+        expect(instanceId).toBe(301);
+        return [
+          "INFO 07-11 vllm.model_executor: loading weights",
+          "ValueError: no safetensors weights found in huihui-ai/model-GGUF",
+          ""
+        ].join("\n");
+      }
+    };
+
+    const orchestrator = new SessionOrchestrator({
+      store,
+      compute,
+      inference: createMockInference({ response: "ok" }),
+      idleTimeoutMinutes: 10,
+      delay: async () => undefined,
+      now: () => clock,
+      logger: {
+        info: () => undefined,
+        warn: (message, context) => {
+          if (message === "Provisioning attempt failed") {
+            warnings.push(context);
+          }
+        }
+      }
+    });
+
+    const estimate = await orchestrator.createEstimate("huihui-ai/model-GGUF");
+    const started = await orchestrator.start({ estimateId: estimate.id, confirmEstimate: true });
+    await orchestrator.awaitProvisioning(started.id);
+
+    // "The port never opened" on its own is not a diagnosis; the container log is.
+    expect(warnings[0]).toMatchObject({ instanceId: 301 });
+    expect(String(warnings[0]?.remoteLogs)).toContain("no safetensors weights found");
+
+    const log = store.eventsFor(started.id).map((event) => event.message).join("\n");
+    expect(log).toMatch(/Container log: .*no safetensors weights found/);
+  });
+
   it("gives up after the boot budget instead of renting machines forever", async () => {
     const compute: ComputeProvider = {
       async findOffer() {

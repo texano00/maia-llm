@@ -7,6 +7,20 @@ boot is abandoned.
 
 ## Booting a model
 
+### Weights format
+
+| Repository ships | How it is served |
+| --- | --- |
+| `*.safetensors` | `vllm serve <repo>` — nothing special |
+| GGUF only | `vllm serve <repo>:<QUANT> --tokenizer <base repo>`, plus a one-time `uv pip install vllm-gguf-plugin` in the container's `onstart`. The quantisation is picked from `Q4_K_M, Q5_K_M, Q4_K_S, …` by what the repository actually contains. GGUF support in vLLM is experimental: it trades speed for a smaller footprint. |
+| Both | safetensors, which is the faster path |
+
+The served model name is pinned with `--served-model-name <catalogue id>` in every
+case, so the chat client always addresses the model by the id the user picked
+rather than the path vLLM happened to load.
+
+### Timeouts
+
 | Situation                                             | What happens                                                                                                             |
 | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
 | Host never starts the container                       | Fails after `MAIA_READY_STALL_MINUTES` (15) without progress, so a stuck booking does not burn the full budget           |
@@ -87,6 +101,11 @@ vast.ai credential), so it is not part of the desktop app.
 
 - The session log shows `Releasing the GPU` and the reason (`app_exit`, `idle`,
   `user`, `failure`, `reconciled`).
+- A failed boot calls vast.ai's `request_logs` API and attaches the container's
+  last 40 lines: a short summary appears in the session log
+  (`Container log: …`) and the full tail travels with the telemetry event as
+  `remoteLogs`. `"the port never opened"` is not a diagnosis; the container's own
+  traceback is.
 - The guardian writes its report file; the app surfaces it on the next boot.
 - `GET /v1/gpus/:machineId/reports` on the shared service keeps the attempt
   history per machine.

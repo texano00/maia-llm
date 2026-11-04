@@ -7,6 +7,7 @@ import {
   isChatCapableModel,
   isGgufOnlyRepository
 } from "@maia/contracts";
+import { baseModelCandidate, planVllmModel } from "../services/inference/model-plan";
 import { closeDatabase, openDatabase, type DatabaseConnection } from "../storage/db";
 import { HistoryRepository } from "../services/history/repository";
 import { CredentialVault } from "../services/credentials/vault";
@@ -220,6 +221,29 @@ async function bootstrap(): Promise<void> {
         reportOutcome: (input) => reputation.report(input),
         readyTimeoutMs: config.readinessTimeoutMinutes * 60_000,
         stallTimeoutMs: config.readinessStallMinutes * 60_000,
+        // GGUF releases need the loader plugin and a `repo:QUANT` model
+        // reference; safetensors repositories need neither.
+        getModelPlan: async (modelId) => {
+          let artifacts = catalogueRepository.getArtifacts(modelId);
+          if (artifacts.length === 0) {
+            artifacts = await catalogue.detail(modelId).then(
+              (detail) => detail.artifacts,
+              () => []
+            );
+          }
+
+          // Only GGUF needs a tokenizer; vLLM's docs recommend the original
+          // repository over converting it out of the GGUF metadata.
+          const base = isGgufOnlyRepository(artifacts) ? baseModelCandidate(modelId) : null;
+          const tokenizer = base
+            ? await catalogue.detail(base).then(
+                (detail) => detail.model.id,
+                () => null
+              )
+            : null;
+
+          return planVllmModel({ modelId, artifacts, tokenizer });
+        },
         logger
       })
     : createMockComputeProvider({ provisionDelayMs: 400 });
@@ -243,22 +267,6 @@ async function bootstrap(): Promise<void> {
       if (model && !isChatCapableModel(model)) {
         throw new Error(
           `"${model.id}" is a ${model.pipelineTag} model, not a chat model. Pick a text-generation model to start a chat session.`
-        );
-      }
-
-      // GGUF is a llama.cpp quantisation: host it and vLLM exits during startup,
-      // long after the instance started billing.
-      let artifacts = catalogueRepository.getArtifacts(modelId);
-      if (artifacts.length === 0) {
-        artifacts = await catalogue.detail(modelId).then(
-          (detail) => detail.artifacts,
-          () => []
-        );
-      }
-
-      if (isGgufOnlyRepository(artifacts)) {
-        throw new Error(
-          `"${modelId}" only ships GGUF weights, which vLLM cannot load. Pick a repository with .safetensors weights (publishers usually ship both).`
         );
       }
     },

@@ -227,14 +227,16 @@ export function toComputeOffer(payload: VastAiOfferPayload): ComputeOffer | null
 
 export class VastAiClient {
   private readonly http: ProviderHttpClient;
+  private readonly fetchImpl: typeof fetch;
 
   constructor(
     private readonly apiKey: string,
-    options: { client?: ProviderHttpClient } = {}
+    options: { client?: ProviderHttpClient; fetchImpl?: typeof fetch } = {}
   ) {
     this.http =
       options.client ??
       new ProviderHttpClient({ baseUrl: VASTAI_BASE_URL, timeoutMs: 20_000, maxRetries: 2 });
+    this.fetchImpl = options.fetchImpl ?? ((...args) => fetch(...args));
   }
 
   async testConnection(): Promise<boolean> {
@@ -270,6 +272,8 @@ export class VastAiClient {
     label: string;
     env: Record<string, string>;
     args: string[];
+    /** Command run inside the container before the entrypoint (max 4048 chars). */
+    onstart?: string;
     /** Container port published on the host, e.g. 8000 for the vLLM server. */
     port?: number;
   }): Promise<number> {
@@ -293,7 +297,8 @@ export class VastAiClient {
         label: input.label,
         runtype: "args",
         args: input.args,
-        env: dockerFlags
+        env: dockerFlags,
+        ...(input.onstart ? { onstart: input.onstart.slice(0, 4_048) } : {})
       })
     });
 
@@ -303,6 +308,48 @@ export class VastAiClient {
     }
 
     return payload.new_contract;
+  }
+
+  /**
+   * Fetches the container log of an instance.
+   *
+   * vast.ai serves logs in two steps: `PUT /instances/request_logs/{id}/` queues
+   * a request and answers with a signed URL that is readable for a short while.
+   * Used only when a boot fails, where the container output is the difference
+   * between "the port never opened" and the real traceback.
+   */
+  async getInstanceLogs(instanceId: number, options: { tail?: number } = {}): Promise<string | null> {
+    try {
+      const response = await this.http.request(`/api/v0/instances/request_logs/${instanceId}/`, {
+        method: "PUT",
+        headers: { ...this.authHeaders(), "content-type": "application/json" },
+        body: JSON.stringify({ tail: String(options.tail ?? 200) })
+      });
+
+      const payload = (await response.json()) as { result_url?: unknown };
+      const resultUrl = typeof payload.result_url === "string" ? payload.result_url : null;
+      if (!resultUrl) {
+        return null;
+      }
+
+      // The URL is served by storage, not the API: no Authorization header.
+      for (let attempt = 0; attempt < 6; attempt += 1) {
+        const logs = await this.fetchImpl(resultUrl, { signal: AbortSignal.timeout(10_000) });
+        if (logs.ok) {
+          const text = await logs.text();
+          if (text.trim().length > 0) {
+            return text;
+          }
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+
+      return null;
+    } catch {
+      // Logs are a diagnostic aid: never let them fail the failure path.
+      return null;
+    }
   }
 
   /**

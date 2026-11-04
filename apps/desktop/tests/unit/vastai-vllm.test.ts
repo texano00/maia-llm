@@ -294,6 +294,63 @@ describe("vast.ai offer picking", () => {
     expect(input!.env.HF_HUB_ENABLE_HF_TRANSFER).toBe("1");
   });
 
+  it("pins the served model name and applies a GGUF launch plan", async () => {
+    let captured:
+      | { args: string[]; env: Record<string, string>; onstart?: string; port?: number }
+      | null = null;
+    const fake = {
+      async createInstance(input: {
+        args: string[];
+        env: Record<string, string>;
+        onstart?: string;
+        port?: number;
+      }) {
+        captured = input;
+        return 9002;
+      }
+    } as unknown as VastAiClient;
+
+    const provider = createVastComputeProvider({
+      getApiKey: async () => "key",
+      getParameterCount: async () => 27e9,
+      clientFactory: () => fake,
+      getModelPlan: async () => ({
+        modelArg: "org/model-GGUF:Q4_K_M",
+        extraArgs: ["--tokenizer", "org/model"],
+        env: {},
+        onstart: "uv pip install --system vllm-gguf-plugin",
+        gguf: true
+      })
+    });
+
+    await provider.createInstance(
+      {
+        offerId: 1,
+        gpuName: "RTX 4090",
+        gpuRamGb: 24,
+        hourlyRateMicroUsd: 120_000,
+        expectedWaitMinutes: 3,
+        simulated: false
+      },
+      { label: "maia:test", modelId: "org/model-GGUF" }
+    );
+
+    const input = captured as unknown as {
+      args: string[];
+      env: Record<string, string>;
+      onstart?: string;
+      port?: number;
+    };
+
+    // vLLM exposes the model as `repo:QUANT`; the chat client sends the
+    // catalogue id, so the name has to be pinned.
+    expect(input.args).toContain("--served-model-name");
+    expect(input.args[input.args.indexOf("--served-model-name") + 1]).toBe("org/model-GGUF");
+    expect(input.args[input.args.indexOf("--model") + 1]).toBe("org/model-GGUF:Q4_K_M");
+    expect(input.args).toContain("--tokenizer");
+    expect(input.onstart).toContain("vllm-gguf-plugin");
+  });
+
   it("sends the port mapping as a Docker flag, where vast.ai expects it", async () => {
     let body: Record<string, unknown> | null = null;
     const http = {
@@ -318,6 +375,46 @@ describe("vast.ai offer picking", () => {
     expect(body!.env).toBe("-e HF_HUB_ENABLE_HF_TRANSFER=1 -p 8000:8000");
     expect(body!.args).toEqual(["--model", "Qwen/Qwen2.5-7B-Instruct"]);
     expect(body!.runtype).toBe("args");
+  });
+
+  it("fetches instance logs through the signed result URL", async () => {
+    const requests: Array<{ path: string; body: unknown }> = [];
+    const http = {
+      async request(path: string, init: RequestInit) {
+        requests.push({ path, body: JSON.parse(String(init.body)) as unknown });
+        return new Response(JSON.stringify({ result_url: "https://storage.example/logs.txt" }), {
+          status: 200
+        });
+      }
+    };
+
+    const fetched: string[] = [];
+    const client = new VastAiClientImpl("key", {
+      client: http as never,
+      fetchImpl: (async (url: string) => {
+        fetched.push(url);
+        return new Response("Traceback: no safetensors weights found", { status: 200 });
+      }) as unknown as typeof fetch
+    });
+
+    const logs = await client.getInstanceLogs(1234);
+
+    expect(requests[0]?.path).toBe("/api/v0/instances/request_logs/1234/");
+    expect(requests[0]?.body).toEqual({ tail: "200" });
+    expect(fetched[0]).toBe("https://storage.example/logs.txt");
+    expect(logs).toContain("no safetensors weights found");
+  });
+
+  it("returns null instead of throwing when logs are unavailable", async () => {
+    const http = {
+      async request() {
+        return new Response(JSON.stringify({}), { status: 200 });
+      }
+    };
+
+    const client = new VastAiClientImpl("key", { client: http as never });
+
+    await expect(client.getInstanceLogs(1)).resolves.toBeNull();
   });
 
   it("reads the published port from every shape vast.ai has used", () => {

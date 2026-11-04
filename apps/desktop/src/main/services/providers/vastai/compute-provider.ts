@@ -1,5 +1,6 @@
 import type { GpuFilters } from "@maia/contracts";
 import type { ComputeOffer, ComputeProvider } from "../../sessions/orchestrator";
+import type { VllmModelPlan } from "../../inference/model-plan";
 import {
   buildSearchQuery,
   classifyOffer,
@@ -32,6 +33,11 @@ export interface VastComputeProviderOptions {
   containerImage?: string;
   /** Overrides the disk size derived from the model size. */
   diskGb?: number;
+  /**
+   * How the model should be launched (safetensors vs GGUF). Falls back to
+   * passing the model id straight to `--model`.
+   */
+  getModelPlan?: (modelId: string) => Promise<VllmModelPlan>;
   /**
    * Hard cap on the whole boot. Generous on purpose: pulling a multi-GB image
    * and then 10-25 GB of weights legitimately takes half an hour on a slow
@@ -208,6 +214,17 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
       const api = await client();
       const hfToken = await options.getHfToken?.();
       const parameterCount = await options.getParameterCount(context.modelId);
+      const plan = (await options.getModelPlan?.(context.modelId)) ?? {
+        modelArg: context.modelId,
+        extraArgs: [],
+        env: {},
+        gguf: false
+      };
+
+      // vLLM renames the served model to whatever it loaded (a GGUF repo is
+      // exposed as `repo:QUANT`), so pin it to the catalogue id: the chat client
+      // sends that id in every request.
+      const servedModelName = ["--served-model-name", context.modelId];
 
       const instanceId = await api.createInstance({
         offerId: offer.offerId,
@@ -219,25 +236,40 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
           // Hugging Face limits a single stream, so this is the difference
           // between minutes and tens of minutes on a fast host.
           HF_HUB_ENABLE_HF_TRANSFER: "1",
+          ...plan.env,
           ...(hfToken ? { HUGGING_FACE_HUB_TOKEN: hfToken } : {})
         },
         // Only vLLM arguments: the port mapping belongs to the Docker flags in
         // `env`, otherwise nothing is published and the model is unreachable.
         args: [
           "--model",
-          context.modelId,
+          plan.modelArg,
           "--port",
           "8000",
+          ...servedModelName,
+          ...plan.extraArgs,
           // Skip CUDA graph capture and per-request logging: both cost startup
           // time, and the graphs matter less than answering sooner.
           "--enforce-eager",
           "--disable-log-requests"
         ],
+        ...(plan.onstart ? { onstart: plan.onstart } : {}),
         port: 8000
       });
 
-      options.logger?.info("vast.ai instance requested", { instanceId, offerId: offer.offerId });
+      options.logger?.info("vast.ai instance requested", {
+        instanceId,
+        offerId: offer.offerId,
+        modelArg: plan.modelArg,
+        gguf: plan.gguf,
+        quantization: plan.quantization ?? null
+      });
       return { instanceId };
+    },
+
+    async getInstanceLogs(instanceId) {
+      const api = await client();
+      return api.getInstanceLogs(instanceId);
     },
 
     async waitUntilReady(instanceId, timeoutMs, onProgress) {
