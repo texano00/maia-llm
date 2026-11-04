@@ -11,6 +11,11 @@ const CataloguePage = lazy(() =>
 const ChatPage = lazy(() =>
   import("../features/chat/ChatPage").then((module) => ({ default: module.ChatPage }))
 );
+const IntegrationPage = lazy(() =>
+  import("../features/ide-integration/IntegrationPage").then((module) => ({
+    default: module.IntegrationPage
+  }))
+);
 const SettingsPage = lazy(() =>
   import("../features/settings/SettingsPage").then((module) => ({
     default: module.SettingsPage
@@ -24,6 +29,7 @@ export function AppRoutes() {
         <Route path="/" element={<Navigate to="/catalogue" replace />} />
         <Route path="/catalogue" element={<CataloguePage />} />
         <Route path="/chat" element={<ChatPage />} />
+        <Route path="/integrations" element={<IntegrationPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/catalogue" replace />} />
       </Routes>

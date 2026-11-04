@@ -38,6 +38,9 @@ import { IpcRegistry } from "../ipc/registry";
 import { registerUpdateHandlers } from "../ipc/updates";
 import { registerSettingsHandlers } from "../ipc/settings";
 import { registerWorkspaceHandlers } from "../ipc/workspace";
+import { registerIntegrationHandlers } from "../ipc/integration";
+import { LocalEndpointService } from "../services/local-endpoint/lifecycle";
+import { createTurnRecorder } from "../services/local-endpoint/recorder";
 import { loadConfig } from "./config";
 import { ensureAppDirectories, resolveAppPaths } from "./paths";
 import { enforceSingleInstance, registerLifecycleHooks } from "./lifecycle";
@@ -384,6 +387,64 @@ async function bootstrap(): Promise<void> {
       }
     }
   });
+  // The IDE endpoint re-exposes the running model on 127.0.0.1 so VS Code can use
+  // it; it binds only while the preference is on and a session is actually active.
+  const ideEndpoint = new LocalEndpointService({
+    appVersion: app.getVersion(),
+    session: () => {
+      const active = sessions.listSessions().find((session) => session.state === "active");
+
+      return active
+        ? {
+            id: active.id,
+            modelId: active.modelId,
+            state: active.state,
+            instanceId: active.instanceId
+          }
+        : null;
+    },
+    touch: (sessionId) => sessions.touchActivity(sessionId),
+    resolveUpstream: (session) => {
+      if (session.instanceId === null || !("resolveEndpoint" in compute)) {
+        return null;
+      }
+
+      return compute.resolveEndpoint(session.instanceId);
+    },
+    describe: (modelId) => {
+      const model = catalogueRepository.get(modelId);
+      const artifacts = catalogueRepository.getArtifacts(modelId);
+      const format: "gguf" | "safetensors" | "unknown" = artifacts.some(
+        (artifact) => artifact.format === "gguf"
+      )
+        ? "gguf"
+        : artifacts.length > 0
+          ? "safetensors"
+          : "unknown";
+
+      return {
+        parameterCount: model?.parameterCount ?? null,
+        contextWindow: model?.contextWindow ?? null,
+        license: model?.license ?? null,
+        architecture: null,
+        format
+      };
+    },
+    recordTurn: createTurnRecorder(repository),
+    preference: () => {
+      const current = settings.get();
+      return { enabled: current.ideEndpointEnabled, port: current.ideEndpointPort };
+    },
+    persist: (update) => {
+      settings.update({
+        ...(update.enabled !== undefined ? { ideEndpointEnabled: update.enabled } : {}),
+        ...(update.port !== undefined ? { ideEndpointPort: update.port } : {})
+      });
+    },
+    logger
+  });
+  registerIntegrationHandlers({ registry, endpoint: ideEndpoint });
+
   registerWorkspaceHandlers({
     registry,
     catalogue,
@@ -485,6 +546,7 @@ async function bootstrap(): Promise<void> {
 
       clearInterval(idleTimer);
       void guardian.dispose();
+      void ideEndpoint.dispose();
 
       updates?.dispose();
       updates = null;

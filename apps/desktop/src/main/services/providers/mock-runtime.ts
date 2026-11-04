@@ -161,7 +161,21 @@ export function createMockInference(options: MockInferenceOptions = {}): Inferen
     ].join("\n");
   const response =
     options.response ??
-    "This is a simulated reply from the mock runtime. Provisioning, streaming, token accounting, and teardown all run for real; only the GPU is replaced by a fixture.";
+    [
+      "## Simulated answer",
+      "",
+      "Provisioning, streaming, token accounting and teardown all run for real; only the GPU is replaced by a fixture.",
+      "",
+      "```sh",
+      "gcc hello_world.c -o hello_world",
+      "./hello_world",
+      "```",
+      "",
+      "| Step | Time |",
+      "| --- | --- |",
+      "| boot | ~90 s |",
+      "| reply | ~4 s |"
+    ].join("\n");
 
   return {
     async stream({ prompt, signal, onDelta }) {

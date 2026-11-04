@@ -11,7 +11,7 @@ interface ChatCompletionChunk {
     delta?: { content?: string | null; reasoning_content?: string | null; reasoning?: string | null };
     finish_reason?: string | null;
   }>;
-  usage?: { completion_tokens?: number };
+  usage?: { completion_tokens?: number; prompt_tokens?: number };
 }
 
 /**

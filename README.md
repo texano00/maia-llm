@@ -43,9 +43,13 @@ Three ideas shape everything in the app:
   records which machines actually start, so a broken host is skipped for every
   workspace instead of failing again — see
   [docs/gpu-reputation-api.md](docs/gpu-reputation-api.md).
-- **Chat like a modern LLM app**: streaming answers, live "thinking" output,
-  multiple models running in parallel, a model selector per conversation, and a
-  chat history sidebar you can rename and pin.
+- **Chat like a modern LLM app**: streaming answers rendered as Markdown —
+  highlighted code with a copy button, tables, lists and links — a collapsible
+  chat list, a transcript that does not yank you to the bottom while the model is
+  writing, live "thinking" output, and a **student mode** that reveals the
+  reasoning at a reading pace instead of dumping it. Multiple models can run in
+  parallel, each conversation has its own model selector, and the history sidebar
+  can rename and pin chats.
 - **Conversations that survive.** Stop a model and reopen the chat later — restart
   the same model or continue with another one, with a clear notice where the model
   changed.
@@ -69,7 +73,8 @@ Both are off until you turn them on.
   the active model on `127.0.0.1` through an **Ollama-compatible API**, so tools
   such as VS Code assistants, Continue, Cline or your own agents can call it like a
   local model. Loopback only (never reachable from the network), disabled by
-  default, and it shuts down when the session ends.
+  default, and it shuts down when the session ends — see
+  [docs/ide-endpoint.md](docs/ide-endpoint.md).
 
 ## Demo
 

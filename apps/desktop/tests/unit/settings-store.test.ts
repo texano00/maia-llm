@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   DEFAULT_DIAGNOSTICS_URL,
   DEFAULT_GPU_FILTERS,
-  DEFAULT_GPU_STARTUP_RETRIES
+  DEFAULT_GPU_STARTUP_RETRIES,
+  DEFAULT_IDE_ENDPOINT_PORT
 } from "@maia/contracts";
 import { closeDatabase, openDatabase, type DatabaseConnection } from "../../src/main/storage/db";
 import { SettingsStore } from "../../src/main/services/settings/store";
@@ -24,7 +25,9 @@ describe("SettingsStore", () => {
     expect(store.get()).toEqual({
       diagnosticsUrl: DEFAULT_DIAGNOSTICS_URL,
       gpuFilters: DEFAULT_GPU_FILTERS,
-      gpuStartupRetries: DEFAULT_GPU_STARTUP_RETRIES
+      gpuStartupRetries: DEFAULT_GPU_STARTUP_RETRIES,
+      ideEndpointEnabled: false,
+      ideEndpointPort: DEFAULT_IDE_ENDPOINT_PORT
     });
     expect(DEFAULT_DIAGNOSTICS_URL).toBe("http://localhost:8787");
     expect(DEFAULT_GPU_FILTERS).toEqual({
@@ -66,7 +69,9 @@ describe("SettingsStore", () => {
     expect(store.get()).toEqual({
       diagnosticsUrl: DEFAULT_DIAGNOSTICS_URL,
       gpuFilters: DEFAULT_GPU_FILTERS,
-      gpuStartupRetries: DEFAULT_GPU_STARTUP_RETRIES
+      gpuStartupRetries: DEFAULT_GPU_STARTUP_RETRIES,
+      ideEndpointEnabled: false,
+      ideEndpointPort: DEFAULT_IDE_ENDPOINT_PORT
     });
   });
 
@@ -78,7 +83,9 @@ describe("SettingsStore", () => {
     expect(store.get()).toEqual({
       diagnosticsUrl: DEFAULT_DIAGNOSTICS_URL,
       gpuFilters: DEFAULT_GPU_FILTERS,
-      gpuStartupRetries: DEFAULT_GPU_STARTUP_RETRIES
+      gpuStartupRetries: DEFAULT_GPU_STARTUP_RETRIES,
+      ideEndpointEnabled: false,
+      ideEndpointPort: DEFAULT_IDE_ENDPOINT_PORT
     });
   });
 

@@ -156,21 +156,21 @@ description: "Task list for Desktop LLM Suite implementation"
 
 ### Tests for User Story 3
 
-- [ ] T069 [P] [US3] Contract test `/api/version`, `/api/tags`, `/api/ps`, `/api/show`, `/api/chat`, `/api/generate`, `501`, and `503` responses in `apps/desktop/tests/contract/ollama-endpoint.test.ts`
-- [ ] T070 [P] [US3] Unit/integration test loopback binding, Host/Origin validation, port fallback, idle-timeout extension, and concurrency limit in `apps/desktop/tests/unit/local-endpoint.test.ts`
+- [x] T069 [P] [US3] Contract test `/api/version`, `/api/tags`, `/api/ps`, `/api/show`, `/api/chat`, `/api/generate`, `501`, and `503` responses in `apps/desktop/tests/contract/local-endpoint.test.ts`
+- [x] T070 [P] [US3] Unit/integration test loopback binding, Host/Origin validation, port fallback, idle-timeout extension, and concurrency limit in `apps/desktop/tests/contract/local-endpoint.test.ts` (idle extension asserted through the `touch` callback)
 - [ ] T071 [P] [US3] E2E enable endpoint, configure using displayed details within 2 minutes, send requests, disable, and verify port release in `apps/desktop/tests/e2e/ide-endpoint.spec.ts`
 
 ### Implementation for User Story 3
 
-- [ ] T072 [P] [US3] Implement the loopback HTTP server with `127.0.0.1` binding and Host/Origin validation in `apps/desktop/src/main/services/local-endpoint/server.ts`
-- [ ] T073 [P] [US3] Implement `/api/version`, `/api/tags`, `/api/ps`, and `/api/show` handlers in `apps/desktop/src/main/services/local-endpoint/handlers.ts`
-- [ ] T074 [P] [US3] Implement `/api/chat` and `/api/generate` NDJSON streaming and Ollama option mapping in `apps/desktop/src/main/services/local-endpoint/chat.ts` and `apps/desktop/src/main/services/local-endpoint/options.ts`
-- [ ] T075 [US3] Implement the `<author>/<name>:latest` model alias and the error model including `421`, `429`, `501`, and `503` in `apps/desktop/src/main/services/local-endpoint/model-info.ts` and `apps/desktop/src/main/services/local-endpoint/errors.ts`
-- [ ] T076 [US3] Integrate endpoint lifecycle with session start/end/disable and the 11434 → 11534 port fallback in `apps/desktop/src/main/services/local-endpoint/lifecycle.ts`
-- [ ] T077 [US3] Implement request accounting, idle-timer extension, concurrency limit 4, and queue/`429` behavior in `apps/desktop/src/main/services/local-endpoint/accounting.ts`
-- [ ] T078 [US3] Persist IDE-origin conversations and cost attribution per client in `apps/desktop/src/main/services/history/repository.ts` and `apps/desktop/src/main/services/cost/attribution.ts`
-- [ ] T079 [US3] Implement integration IPC handlers and endpoint preferences in `apps/desktop/src/main/ipc/integration.ts`
-- [ ] T080 [US3] Build IDE integration UI with copyable address/port/alias, status, and client guidance in `apps/desktop/src/renderer/features/ide-integration/IntegrationPage.tsx`
+- [x] T072 [P] [US3] Implement the loopback HTTP server with `127.0.0.1` binding and Host/Origin validation in `apps/desktop/src/main/services/local-endpoint/server.ts`
+- [x] T073 [P] [US3] Implement `/api/version`, `/api/tags`, `/api/ps`, and `/api/show` handlers in `apps/desktop/src/main/services/local-endpoint/server.ts`
+- [x] T074 [P] [US3] Implement `/api/chat` and `/api/generate` NDJSON streaming and Ollama option mapping in `apps/desktop/src/main/services/local-endpoint/chat.ts` and `apps/desktop/src/main/services/local-endpoint/options.ts`
+- [x] T075 [US3] Implement the `<author>/<name>:latest` model alias and the error model including `421`, `429`, `501`, and `503` in `apps/desktop/src/main/services/local-endpoint/model-info.ts` and `apps/desktop/src/main/services/local-endpoint/errors.ts`
+- [x] T076 [US3] Integrate endpoint lifecycle with session start/end/disable and the 11434 → 11534 port fallback in `apps/desktop/src/main/services/local-endpoint/lifecycle.ts`
+- [x] T077 [US3] Implement request accounting, idle-timer extension, concurrency limit 4, and `429` behavior in `apps/desktop/src/main/services/local-endpoint/server.ts` (no queue: clients retry)
+- [ ] T078 [US3] Persist IDE-origin conversations and cost attribution per client — history is done (`local-endpoint/recorder.ts`, `origin: "ide"`, `client_label`); per-client cost attribution still depends on the receipts work in Phase 6
+- [x] T079 [US3] Implement integration IPC handlers and endpoint preferences in `apps/desktop/src/main/ipc/integration.ts`
+- [x] T080 [US3] Build IDE integration UI with copyable address/port/alias, status, and client guidance in `apps/desktop/src/renderer/features/ide-integration/IntegrationPage.tsx`
 
 **Checkpoint**: User Story 3 works independently once a session exists.
 

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { releaseChannelSchema } from "./domain";
 import { gpuFiltersSchema } from "./sessions";
+import { DEFAULT_IDE_ENDPOINT_PORT } from "./integration";
 
 export const errorCodeSchema = z.enum([
   "VALIDATION_FAILED",
@@ -92,6 +93,9 @@ export const ipcChannels = [
   "conversation.switchModel",
   "chat.send",
   "chat.abort",
+  "integration.status",
+  "integration.enable",
+  "integration.disable",
   "update.status",
   "update.check",
   "update.download",
@@ -126,7 +130,13 @@ export const appSettingsSchema = z.object({
    * the host never reports in, the port never opens…). One more attempt follows
    * the first one, so the total is this value + 1.
    */
-  gpuStartupRetries: z.number().int().min(0).max(10).default(DEFAULT_GPU_STARTUP_RETRIES)
+  gpuStartupRetries: z.number().int().min(0).max(10).default(DEFAULT_GPU_STARTUP_RETRIES),
+  /**
+   * Expose the running model to local IDE assistants over a loopback Ollama API.
+   * Off by default: nothing listens on the user's machine unless asked.
+   */
+  ideEndpointEnabled: z.boolean().default(false),
+  ideEndpointPort: z.number().int().min(1024).max(65_535).default(DEFAULT_IDE_ENDPOINT_PORT)
 });
 
 export const settingsUpdateSchema = appSettingsSchema.partial();

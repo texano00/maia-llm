@@ -1278,6 +1278,349 @@ code {
   scrollbar-gutter: stable;
 }
 
+/* ---------------------------------------------------------------------------
+   Chat: collapsible history rail
+--------------------------------------------------------------------------- */
+
+.chat-layout.history-collapsed {
+  grid-template-columns: 3.5rem minmax(0, 1fr);
+}
+
+.chat-history.rail {
+  padding: 0.55rem 0.4rem;
+  overflow: visible;
+}
+
+.history-head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.history-rail-actions {
+  display: grid;
+  justify-items: center;
+  gap: 0.4rem;
+}
+
+.history-rail-actions .icon-mini {
+  width: 2rem;
+  height: 2rem;
+  font-size: 1rem;
+  border-color: rgb(255 255 255 / 8%);
+  background: rgb(255 255 255 / 3%);
+}
+
+/* ---------------------------------------------------------------------------
+   Chat: transcript anchor
+--------------------------------------------------------------------------- */
+
+.transcript-wrap {
+  position: relative;
+  display: grid;
+}
+
+.jump-latest {
+  position: absolute;
+  right: 1rem;
+  bottom: 0.85rem;
+  padding: 0.35rem 0.75rem;
+  border: 1px solid rgb(72 104 255 / 50%);
+  border-radius: 999px;
+  background: #182241;
+  color: #dbe4f7;
+  font-size: 0.78rem;
+  box-shadow: 0 8px 20px rgb(0 0 0 / 40%);
+}
+
+.jump-latest:hover {
+  background: rgb(72 104 255 / 28%);
+}
+
+/* ---------------------------------------------------------------------------
+   Chat: message bubbles and Markdown
+--------------------------------------------------------------------------- */
+
+.bubble-assistant {
+  background: rgb(255 255 255 / 3.5%);
+}
+
+.bubble-user {
+  justify-self: end;
+  max-width: min(100%, 46rem);
+}
+
+.message-content {
+  display: grid;
+  gap: 0.55rem;
+  line-height: 1.6;
+}
+
+.message-content > * {
+  margin: 0;
+}
+
+.message-content p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.md-heading {
+  font-size: 0.98rem;
+  line-height: 1.35;
+  letter-spacing: 0.01em;
+}
+
+h1.md-heading {
+  font-size: 1.15rem;
+}
+
+h2.md-heading {
+  font-size: 1.06rem;
+}
+
+.md-list {
+  display: grid;
+  gap: 0.3rem;
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+.md-list li::marker {
+  color: #8fa3c8;
+}
+
+.md-quote {
+  margin: 0;
+  padding: 0.4rem 0.8rem;
+  border-left: 3px solid rgb(72 104 255 / 45%);
+  border-radius: 0 0.5rem 0.5rem 0;
+  background: rgb(72 104 255 / 7%);
+  color: #c9d6ea;
+}
+
+.md-rule {
+  border: 0;
+  border-top: 1px solid rgb(255 255 255 / 12%);
+}
+
+.md-table-wrap {
+  overflow-x: auto;
+}
+
+.md-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.md-table th,
+.md-table td {
+  padding: 0.35rem 0.6rem;
+  border: 1px solid rgb(255 255 255 / 12%);
+  text-align: left;
+  vertical-align: top;
+}
+
+.md-table th {
+  background: rgb(255 255 255 / 6%);
+  font-weight: 600;
+}
+
+.md-inline-code {
+  padding: 0.08rem 0.32rem;
+  border-radius: 0.35rem;
+  background: rgb(255 255 255 / 9%);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85em;
+}
+
+.message-content a {
+  color: #8fb2ff;
+}
+
+.message-caret {
+  display: inline-block;
+  width: 0.45rem;
+  height: 0.9rem;
+  background: #8fa3c8;
+  animation: reasoning-blink 1s steps(2, start) infinite;
+}
+
+/* ---------------------------------------------------------------------------
+   Code blocks + syntax tokens
+--------------------------------------------------------------------------- */
+
+.code-block {
+  margin: 0;
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 0.65rem;
+  background: #0b1020;
+  overflow: hidden;
+}
+
+.code-block figcaption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.3rem 0.65rem;
+  border-bottom: 1px solid rgb(255 255 255 / 8%);
+  background: rgb(255 255 255 / 4%);
+  color: #8fa3c8;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.code-copy {
+  padding: 0.15rem 0.55rem;
+  border: 1px solid rgb(255 255 255 / 16%);
+  border-radius: 0.45rem;
+  background: transparent;
+  color: #c8d4e6;
+  font-size: 0.72rem;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.code-copy:hover {
+  background: rgb(255 255 255 / 8%);
+  color: #e7ecf5;
+}
+
+.code-copy.copied {
+  border-color: rgb(96 200 140 / 60%);
+  color: #9be6b8;
+}
+
+.code-body {
+  margin: 0;
+  padding: 0.75rem 0.9rem;
+  overflow-x: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+  line-height: 1.55;
+  tab-size: 2;
+}
+
+.code-body code {
+  white-space: pre;
+}
+
+.tok-comment {
+  color: #7d8aa6;
+  font-style: italic;
+}
+
+.tok-string {
+  color: #a5d6a7;
+}
+
+.tok-number {
+  color: #f0b67f;
+}
+
+.tok-keyword {
+  color: #8fb2ff;
+}
+
+.tok-builtin {
+  color: #c792ea;
+}
+
+.tok-type {
+  color: #7fd3c8;
+}
+
+.tok-function {
+  color: #ffd479;
+}
+
+.tok-operator {
+  color: #c8d4e6;
+}
+
+.tok-punctuation {
+  color: #8fa3c8;
+}
+
+.tok-property {
+  color: #82c7ff;
+}
+
+.tok-variable {
+  color: #f2a8c8;
+}
+
+.tok-added {
+  color: #9be6b8;
+  background: rgb(60 200 120 / 10%);
+}
+
+.tok-removed {
+  color: #ffb3b3;
+  background: rgb(255 100 100 / 10%);
+}
+
+.reasoning-hint {
+  margin-left: 0.5rem;
+  color: #7f8fb0;
+  font-size: 0.64rem;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* ---------------------------------------------------------------------------
+   IDE integration page
+--------------------------------------------------------------------------- */
+
+.integration-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1.25rem;
+  align-items: start;
+}
+
+@media (max-width: 1100px) {
+  .integration-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.endpoint-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.endpoint-value {
+  flex: 1 1 14rem;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 0.5rem;
+  background: rgb(5 8 14 / 70%);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+
+.step-list {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0;
+  padding-left: 1.2rem;
+  color: #c3cfe2;
+  font-size: 0.86rem;
+}
+
+.metric-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
 .model-name-row {
   flex-wrap: wrap;
 }

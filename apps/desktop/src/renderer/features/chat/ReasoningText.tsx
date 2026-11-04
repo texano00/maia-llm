@@ -1,5 +1,6 @@
-import { Fragment, memo, useState, type ReactElement } from "react";
+import { Fragment, memo, type ReactElement } from "react";
 import { parseInline, splitReasoning, type ReasoningBlock } from "./reasoning-format";
+import { CodeBlock } from "./CodeBlock";
 
 interface ReasoningTextProps {
   text: string;
@@ -29,7 +30,7 @@ export const ReasoningText = memo(function ReasoningText({
 
 function renderBlock(block: ReasoningBlock): ReactElement {
   if (block.kind === "code") {
-    return <CodePanel code={block.code} language={block.language} />;
+    return <CodeBlock code={block.code} language={block.language} />;
   }
 
   if (block.kind === "list") {
@@ -61,32 +62,4 @@ function renderInline(text: string): ReactElement[] {
 
     return <Fragment key={index}>{token.value}</Fragment>;
   });
-}
-
-function CodePanel({ code, language }: { code: string; language: string | null }) {
-  const [copied, setCopied] = useState(false);
-
-  async function copy(): Promise<void> {
-    try {
-      await navigator.clipboard?.writeText(code);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // Clipboard access can be refused; the snippet stays selectable.
-    }
-  }
-
-  return (
-    <div className="reasoning-code">
-      <div className="reasoning-code-head">
-        <span>{language ?? "code"}</span>
-        <button type="button" className="icon-mini" onClick={() => void copy()}>
-          {copied ? "Copied" : "Copy"}
-        </button>
-      </div>
-      <pre>
-        <code>{code}</code>
-      </pre>
-    </div>
-  );
 }

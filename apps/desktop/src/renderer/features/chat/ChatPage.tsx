@@ -8,7 +8,8 @@ import type {
 } from "@maia/contracts";
 import { useWorkspace } from "../../shared/session/WorkspaceProvider";
 import { accruedMicroUsd, formatElapsed, formatUsd } from "../../shared/format";
-import { ReasoningText } from "./ReasoningText";
+import { MessageContent } from "./MessageContent";
+import { ReasoningPanel } from "./ReasoningPanel";
 
 interface StreamingBubble {
   reasoning: string;
@@ -29,15 +30,23 @@ export function ChatPage() {
   const [detail, setDetail] = useState<ConversationDetail | null>(null);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [streaming, setStreaming] = useState<StreamingBubble | null>(null);
+  // First turn of a new chat: the transcript does not exist yet, so the user's
+  // own message is echoed from here until the stored conversation loads.
+  const [pendingUser, setPendingUser] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [creating, setCreating] = useState(false);
-  const [showReasoning, setShowReasoning] = useState(readShowReasoning);
+  const [studentMode, setStudentMode] = useState(readStudentMode);
+  const [historyOpen, setHistoryOpen] = useState(readHistoryOpen);
+  const [atBottom, setAtBottom] = useState(true);
   const [now, setNow] = useState(() => Date.now());
   const transcriptRef = useRef<HTMLDivElement>(null);
+  // Streaming must not yank the transcript back to the bottom: scrolling up to
+  // re-read an earlier step has to stay possible until the user returns.
+  const stickToBottomRef = useRef(true);
   // Event transports can deliver the last deltas after the send resolves; those
   // must not paint a second bubble over the stored transcript.
   const inFlightRef = useRef(false);
@@ -74,11 +83,18 @@ export function ChatPage() {
         setDetail(result.data);
         const match = sessions.find((session) => session.modelId === result.data.conversation.modelId);
         setActiveSessionId(match?.id ?? null);
+      } else if (result.error.code === "NOT_FOUND") {
+        // The remembered chat was deleted, or belonged to a different install:
+        // forget it quietly instead of alerting on every visit to the page.
+        rememberConversation(null);
+        setActiveConversationId(null);
+        setDetail(null);
+        void loadConversations();
       } else {
         setError(result.error.message);
       }
     },
-    [sessions]
+    [loadConversations, sessions]
   );
 
   useEffect(() => {
@@ -170,8 +186,33 @@ export function ChatPage() {
   }, [activeConversationId, loadConversations]);
 
   useEffect(() => {
-    transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight, behavior: "smooth" });
-  }, [detail?.messages.length, streaming?.content, streaming?.reasoning, showReasoning]);
+    if (!stickToBottomRef.current) {
+      return;
+    }
+
+    const element = transcriptRef.current;
+    // `auto` rather than `smooth`: a smooth scroll restarted on every delta makes
+    // the transcript stutter while the model is talking.
+    element?.scrollTo({ top: element.scrollHeight });
+  }, [detail?.messages.length, streaming?.content, streaming?.reasoning, studentMode]);
+
+  // Reasoning opens, paced text grows, code blocks mount: content changes that no
+  // dependency above notices. While the reader is at the bottom, follow it.
+  useEffect(() => {
+    const element = transcriptRef.current;
+    if (!element || typeof MutationObserver === "undefined") {
+      return;
+    }
+
+    const observer = new MutationObserver(() => {
+      if (stickToBottomRef.current) {
+        element.scrollTo({ top: element.scrollHeight });
+      }
+    });
+    observer.observe(element, { childList: true, subtree: true, characterData: true });
+
+    return () => observer.disconnect();
+  }, []);
 
   async function togglePinned(conversation: ConversationSummary): Promise<void> {
     const bridge = window.maia;
@@ -220,8 +261,35 @@ export function ChatPage() {
     rememberConversation(null);
     setDetail(null);
     setStreaming(null);
+    setPendingUser(null);
     setActiveSessionId(sessions[0]?.id ?? null);
     setDraft("");
+  }
+
+  function toggleHistory(): void {
+    const next = !historyOpen;
+    setHistoryOpen(next);
+    writeHistoryOpen(next);
+  }
+
+  function handleTranscriptScroll(): void {
+    const element = transcriptRef.current;
+    if (!element) {
+      return;
+    }
+
+    // 48 px of slack: a reader who scrolled a line up still counts as "at the
+    // bottom", otherwise one wheel notch would stop the follow for good.
+    const stuck = element.scrollHeight - element.scrollTop - element.clientHeight < 48;
+    stickToBottomRef.current = stuck;
+    setAtBottom((current) => (current === stuck ? current : stuck));
+  }
+
+  function jumpToLatest(): void {
+    const element = transcriptRef.current;
+    stickToBottomRef.current = true;
+    setAtBottom(true);
+    element?.scrollTo({ top: element.scrollHeight, behavior: "smooth" });
   }
 
   async function send(): Promise<void> {
@@ -235,6 +303,7 @@ export function ChatPage() {
     setBusy(true);
     inFlightRef.current = true;
     setError(null);
+    setPendingUser(activeConversationId ? null : content);
     setDetail((existing) =>
       existing
         ? {
@@ -283,6 +352,7 @@ export function ChatPage() {
     if (loaded.ok) {
       setDetail(loaded.data);
       setStreaming(null);
+      setPendingUser(null);
     }
 
     inFlightRef.current = false;
@@ -363,15 +433,29 @@ export function ChatPage() {
   const showError = error ?? workspaceError;
 
   return (
-    <section className="chat-layout">
-      <aside className="chat-history" aria-label="Chat history">
-        <div className="chat-history-head">
-          <strong>Chats</strong>
-          <button type="button" className="ghost-button" onClick={startNewChat}>
-            New
-          </button>
-        </div>
-        <ul>
+    <section className={historyOpen ? "chat-layout" : "chat-layout history-collapsed"}>
+      <aside className={historyOpen ? "chat-history" : "chat-history rail"} aria-label="Chat history">
+        {historyOpen ? (
+          <>
+            <div className="chat-history-head">
+              <strong>Chats</strong>
+              <div className="history-head-actions">
+                <button type="button" className="ghost-button" onClick={startNewChat}>
+                  New
+                </button>
+                <button
+                  type="button"
+                  className="icon-mini"
+                  title="Collapse chats"
+                  aria-label="Collapse chats"
+                  aria-expanded={true}
+                  onClick={toggleHistory}
+                >
+                  «
+                </button>
+              </div>
+            </div>
+            <ul>
           {conversations.length === 0 ? <li className="muted small">No conversations yet.</li> : null}
           {conversations.map((conversation) => (
             <li key={conversation.id} className="history-row">
@@ -446,7 +530,31 @@ export function ChatPage() {
               )}
             </li>
           ))}
-        </ul>
+            </ul>
+          </>
+        ) : (
+          <div className="history-rail-actions">
+            <button
+              type="button"
+              className="icon-mini"
+              title="Show chats"
+              aria-label="Show chats"
+              aria-expanded={false}
+              onClick={toggleHistory}
+            >
+              ☰
+            </button>
+            <button
+              type="button"
+              className="icon-mini"
+              title="New chat"
+              aria-label="New chat"
+              onClick={startNewChat}
+            >
+              ＋
+            </button>
+          </div>
+        )}
       </aside>
 
       <div className="chat-main">
@@ -476,17 +584,17 @@ export function ChatPage() {
             </select>
           </label>
 
-          <label className="inline-field reasoning-toggle">
+          <label className="inline-field reasoning-toggle" title="Show the model's thinking, revealed at a reading pace">
             <input
               type="checkbox"
-              checked={showReasoning}
+              checked={studentMode}
               onChange={(event) => {
                 const next = event.target.checked;
-                setShowReasoning(next);
-                writeShowReasoning(next);
+                setStudentMode(next);
+                writeStudentMode(next);
               }}
             />
-            <span>Show reasoning</span>
+            <span>Student mode</span>
           </label>
 
           {activeSession ? (
@@ -591,7 +699,8 @@ export function ChatPage() {
           </div>
         ) : null}
 
-        <div className="transcript" ref={transcriptRef}>
+        <div className="transcript-wrap">
+          <div className="transcript" ref={transcriptRef} onScroll={handleTranscriptScroll}>
           {creating && detail === null ? (
             <div className="new-chat">
               <h3>Start a new conversation</h3>
@@ -614,7 +723,7 @@ export function ChatPage() {
             </div>
           ) : null}
 
-          {detail === null && !creating ? (
+          {detail === null && !creating && !busy ? (
             <p className="muted">Pick a chat on the left, or start one with New.</p>
           ) : null}
           {detail?.messages.map((message) => (
@@ -623,28 +732,40 @@ export function ChatPage() {
               role={message.role}
               content={message.content}
               reasoning={message.reasoning}
-              showReasoning={showReasoning}
+              studentMode={studentMode}
             />
           ))}
+          {detail === null && pendingUser ? (
+            <article className="bubble bubble-user">
+              <header>You</header>
+              <p>{pendingUser}</p>
+            </article>
+          ) : null}
           {streaming ? (
             <>
-              {showReasoning && streaming.reasoning ? (
-                <details className="bubble bubble-reasoning" open>
-                  <summary>Thinking…</summary>
-                  <ReasoningText text={streaming.reasoning} streaming />
-                </details>
+              {streaming.reasoning ? (
+                <ReasoningPanel
+                  text={streaming.reasoning}
+                  streaming
+                  studentMode={studentMode}
+                  variant="bubble"
+                />
               ) : null}
               <article className="bubble bubble-assistant">
                 <header>Model</header>
                 {streaming.content ? (
-                  <p>{streaming.content}</p>
-                ) : showReasoning && streaming.reasoning ? null : (
-                  <p className="muted">
-                    {streaming.reasoning ? "Thinking…" : "…"}
-                  </p>
+                  <MessageContent text={streaming.content} streaming />
+                ) : (
+                  <p className="muted">{streaming.reasoning ? "Thinking…" : "…"}</p>
                 )}
               </article>
             </>
+          ) : null}
+          </div>
+          {!atBottom ? (
+            <button type="button" className="jump-latest" onClick={jumpToLatest}>
+              Jump to latest ↓
+            </button>
           ) : null}
         </div>
 
@@ -761,47 +882,70 @@ const MessageBubble = memo(function MessageBubble({
   role,
   content,
   reasoning,
-  showReasoning
+  studentMode
 }: {
   role: string;
   content: string;
   reasoning?: string | null;
-  showReasoning: boolean;
+  studentMode: boolean;
 }) {
   return (
     <article className={`bubble bubble-${role}`}>
       <header>{roleLabel(role)}</header>
-      {showReasoning && reasoning ? (
-        <details className="bubble-reasoning-inline">
-          <summary>Reasoning</summary>
-          <ReasoningText text={reasoning} />
-        </details>
+      {reasoning ? (
+        <ReasoningPanel text={reasoning} streaming={false} studentMode={studentMode} variant="inline" />
       ) : null}
-      <p>{content}</p>
+      <MessageContent text={content} />
     </article>
   );
 });
 
 const LAST_CONVERSATION_KEY = "maia:last-conversation";
-const SHOW_REASONING_KEY = "maia:show-reasoning";
+const STUDENT_MODE_KEY = "maia:student-mode";
+const LEGACY_REASONING_KEY = "maia:show-reasoning";
+const HISTORY_OPEN_KEY = "maia:history-open";
 
 /**
- * Whether the reasoning stream is shown. Hidden by default: the thinking of a
- * reasoning model is long, and most answers do not need it.
+ * Student mode: open the reasoning panel and reveal it at a human reading pace.
+ * Off by default — the thinking of a reasoning model is long, and most answers do
+ * not need it.
  */
-function readShowReasoning(): boolean {
+function readStudentMode(): boolean {
   try {
-    return window.localStorage.getItem(SHOW_REASONING_KEY) === "true";
+    const stored = window.localStorage.getItem(STUDENT_MODE_KEY);
+    if (stored !== null) {
+      return stored === "true";
+    }
+
+    // Carries over the previous "Show reasoning" preference.
+    return window.localStorage.getItem(LEGACY_REASONING_KEY) === "true";
   } catch {
     return false;
   }
 }
 
-function writeShowReasoning(value: boolean): void {
+function writeStudentMode(value: boolean): void {
   try {
-    window.localStorage.setItem(SHOW_REASONING_KEY, value ? "true" : "false");
+    window.localStorage.setItem(STUDENT_MODE_KEY, value ? "true" : "false");
   } catch {
     // Storage can be unavailable; the toggle still works for this session.
+  }
+}
+
+/** The chat list is open by default; on a narrow window it can be collapsed. */
+function readHistoryOpen(): boolean {
+  try {
+    return window.localStorage.getItem(HISTORY_OPEN_KEY) !== "false";
+  } catch {
+    return true;
+  }
+}
+
+function writeHistoryOpen(value: boolean): void {
+  try {
+    window.localStorage.setItem(HISTORY_OPEN_KEY, value ? "true" : "false");
+  } catch {
+    // Storage can be unavailable; collapsing still works for this session.
   }
 }
 

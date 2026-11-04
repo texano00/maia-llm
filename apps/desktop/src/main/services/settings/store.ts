@@ -3,6 +3,7 @@ import {
   DEFAULT_DIAGNOSTICS_URL,
   DEFAULT_GPU_FILTERS,
   DEFAULT_GPU_STARTUP_RETRIES,
+  DEFAULT_IDE_ENDPOINT_PORT,
   type AppSettings,
   type SettingsUpdate
 } from "@maia/contracts";
@@ -13,7 +14,9 @@ const SETTINGS_KEY = "app_settings";
 export const defaultAppSettings: AppSettings = {
   diagnosticsUrl: DEFAULT_DIAGNOSTICS_URL,
   gpuFilters: DEFAULT_GPU_FILTERS,
-  gpuStartupRetries: DEFAULT_GPU_STARTUP_RETRIES
+  gpuStartupRetries: DEFAULT_GPU_STARTUP_RETRIES,
+  ideEndpointEnabled: false,
+  ideEndpointPort: DEFAULT_IDE_ENDPOINT_PORT
 };
 
 /**
