@@ -149,7 +149,16 @@ export interface MockInferenceOptions {
 export function createMockInference(options: MockInferenceOptions = {}): InferenceRuntime {
   const reasoning =
     options.reasoning ??
-    "Considering the request, checking the available context, and planning a concise answer.";
+    [
+      "Considering the request, checking the available context, and planning a concise answer.",
+      "",
+      "- keep the reply short;",
+      "- stream it word by word.",
+      "",
+      "```python",
+      "reply = simulated(prompt) if mock else call_gpu(prompt)",
+      "```"
+    ].join("\n");
   const response =
     options.response ??
     "This is a simulated reply from the mock runtime. Provisioning, streaming, token accounting, and teardown all run for real; only the GPU is replaced by a fixture.";

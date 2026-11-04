@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { isChatCapableModel, isGgufOnlyRepository } from "@maia/contracts";
+import { describeGatedAccess, huggingFaceModelUrl, isChatCapableModel, isGgufOnlyRepository } from "@maia/contracts";
 import { closeDatabase, openDatabase, type DatabaseConnection } from "../../src/main/storage/db";
 import { CatalogueRepository } from "../../src/main/services/catalogue/repository";
 import { CatalogueService, filterAndSort, type CatalogueSource } from "../../src/main/services/catalogue/service";
@@ -90,6 +90,15 @@ describe("Hugging Face mapping", () => {
     expect(isGgufOnlyRepository(both)).toBe(false);
     // Nothing known yet: do not block the user.
     expect(isGgufOnlyRepository([])).toBe(false);
+
+    // Safetensors parked in a subfolder are invisible to `vllm serve <repo>`,
+    // so a GGUF release that also ships a nested quant stays GGUF-only.
+    const nestedSafetensors = mapArtifacts("a/mixed", "main", [
+      { type: "file", path: "model-Q4_K_M.gguf", lfs: { size: 15_000_000_000, sha256: "e".repeat(64) } },
+      { type: "file", path: "GSQ-3bit/model-00001-of-00065.safetensors", lfs: { size: 1_000_000, sha256: "f".repeat(64) } }
+    ]);
+
+    expect(isGgufOnlyRepository(nestedSafetensors)).toBe(true);
   });
 
   it("maps artifact formats, quantisation, and LFS sizes", () => {
@@ -208,6 +217,38 @@ describe("chat template detection", () => {
   });
 });
 
+describe("gated access wording", () => {
+  it("explains what accepting the terms means for each gating kind", () => {
+    expect(describeGatedAccess("none")).toBeNull();
+
+    // `auto`: the user accepts the terms and the Hub grants access immediately.
+    expect(describeGatedAccess("auto")).toMatchObject({
+      label: "gated",
+      requiresApproval: false
+    });
+    expect(describeGatedAccess("auto")?.description).toMatch(/accept its terms once/i);
+
+    // `manual`: the repository owner has to approve the request.
+    expect(describeGatedAccess("manual")).toMatchObject({
+      label: "gated · approval",
+      requiresApproval: true
+    });
+    expect(describeGatedAccess("manual")?.description).toMatch(/owner must approve access/i);
+
+    // Either way the download needs the user's token, so say it.
+    expect(describeGatedAccess("auto")?.description).toMatch(/Hugging Face token/);
+    expect(describeGatedAccess("manual")?.description).toMatch(/Hugging Face token/);
+  });
+
+  it("links to the public model page where access is granted", () => {
+    expect(huggingFaceModelUrl("meta-llama/Llama-3.1-8B-Instruct")).toBe(
+      "https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct"
+    );
+    // Ids come from the Hub, but never let a stray character break the path.
+    expect(huggingFaceModelUrl("org/model name")).toBe("https://huggingface.co/org/model%20name");
+  });
+});
+
 describe("repository assessment", () => {
   const file = (path: string) => ({ type: "file" as const, path, size: 1 });
 
@@ -236,6 +277,30 @@ describe("repository assessment", () => {
       loadable: true,
       problem: null
     });
+  });
+
+  it("refuses weights that only live in a subfolder", () => {
+    // The reported field case: everything under GSQ-3bit/, no weights at the
+    // root, so vLLM reports "Invalid repository ID or local directory".
+    const verdict = assessRepository({ library_name: "transformers" }, [
+      file("GSQ-3bit/config.json"),
+      file("GSQ-3bit/model-00001-of-00065.safetensors"),
+      file("README.md")
+    ]);
+
+    expect(verdict.loadable).toBe(false);
+    expect(verdict.problem).toMatch(/subfolders/);
+  });
+
+  it("accepts a GGUF release that also carries a nested safetensors quant", () => {
+    expect(
+      assessRepository({ library_name: "transformers" }, [
+        file("Qwen3.8-27B-Heretic-Q4_K_M.gguf"),
+        file("GSQ-3bit/config.json"),
+        file("GSQ-3bit/model-00001-of-00065.safetensors"),
+        file("chat_template.jinja")
+      ])
+    ).toEqual({ loadable: true, problem: null });
   });
 
   it("accepts a transformers repository and refuses one without weights", () => {

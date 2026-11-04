@@ -8,6 +8,7 @@ import type {
 } from "@maia/contracts";
 import { useWorkspace } from "../../shared/session/WorkspaceProvider";
 import { accruedMicroUsd, formatElapsed, formatUsd } from "../../shared/format";
+import { ReasoningText } from "./ReasoningText";
 
 interface StreamingBubble {
   reasoning: string;
@@ -34,6 +35,7 @@ export function ChatPage() {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [creating, setCreating] = useState(false);
+  const [showReasoning, setShowReasoning] = useState(readShowReasoning);
   const [now, setNow] = useState(() => Date.now());
   const transcriptRef = useRef<HTMLDivElement>(null);
   // Event transports can deliver the last deltas after the send resolves; those
@@ -143,6 +145,7 @@ export function ChatPage() {
                         id: `assistant-${Date.now()}`,
                         role: "assistant",
                         content: current.content,
+                        reasoning: current.reasoning.length > 0 ? current.reasoning : null,
                         createdAt: new Date().toISOString()
                       }
                     ]
@@ -168,7 +171,7 @@ export function ChatPage() {
 
   useEffect(() => {
     transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight, behavior: "smooth" });
-  }, [detail?.messages.length, streaming?.content]);
+  }, [detail?.messages.length, streaming?.content, streaming?.reasoning, showReasoning]);
 
   async function togglePinned(conversation: ConversationSummary): Promise<void> {
     const bridge = window.maia;
@@ -242,6 +245,7 @@ export function ChatPage() {
                 id: `user-${Date.now()}`,
                 role: "user",
                 content,
+                reasoning: null,
                 createdAt: new Date().toISOString()
               }
             ]
@@ -472,6 +476,19 @@ export function ChatPage() {
             </select>
           </label>
 
+          <label className="inline-field reasoning-toggle">
+            <input
+              type="checkbox"
+              checked={showReasoning}
+              onChange={(event) => {
+                const next = event.target.checked;
+                setShowReasoning(next);
+                writeShowReasoning(next);
+              }}
+            />
+            <span>Show reasoning</span>
+          </label>
+
           {activeSession ? (
             <>
               <span className={stateClass(activeSession.state)}>{stateLabel(activeSession.state)}</span>
@@ -601,19 +618,31 @@ export function ChatPage() {
             <p className="muted">Pick a chat on the left, or start one with New.</p>
           ) : null}
           {detail?.messages.map((message) => (
-            <MessageBubble key={message.id} role={message.role} content={message.content} />
+            <MessageBubble
+              key={message.id}
+              role={message.role}
+              content={message.content}
+              reasoning={message.reasoning}
+              showReasoning={showReasoning}
+            />
           ))}
           {streaming ? (
             <>
-              {streaming.reasoning ? (
+              {showReasoning && streaming.reasoning ? (
                 <details className="bubble bubble-reasoning" open>
                   <summary>Thinking…</summary>
-                  <p>{streaming.reasoning}</p>
+                  <ReasoningText text={streaming.reasoning} streaming />
                 </details>
               ) : null}
               <article className="bubble bubble-assistant">
                 <header>Model</header>
-                <p>{streaming.content || "…"}</p>
+                {streaming.content ? (
+                  <p>{streaming.content}</p>
+                ) : showReasoning && streaming.reasoning ? null : (
+                  <p className="muted">
+                    {streaming.reasoning ? "Thinking…" : "…"}
+                  </p>
+                )}
               </article>
             </>
           ) : null}
@@ -730,20 +759,51 @@ function roleLabel(role: string): string {
 /** Memoised so the one-second clock tick does not re-render every old message. */
 const MessageBubble = memo(function MessageBubble({
   role,
-  content
+  content,
+  reasoning,
+  showReasoning
 }: {
   role: string;
   content: string;
+  reasoning?: string | null;
+  showReasoning: boolean;
 }) {
   return (
     <article className={`bubble bubble-${role}`}>
       <header>{roleLabel(role)}</header>
+      {showReasoning && reasoning ? (
+        <details className="bubble-reasoning-inline">
+          <summary>Reasoning</summary>
+          <ReasoningText text={reasoning} />
+        </details>
+      ) : null}
       <p>{content}</p>
     </article>
   );
 });
 
 const LAST_CONVERSATION_KEY = "maia:last-conversation";
+const SHOW_REASONING_KEY = "maia:show-reasoning";
+
+/**
+ * Whether the reasoning stream is shown. Hidden by default: the thinking of a
+ * reasoning model is long, and most answers do not need it.
+ */
+function readShowReasoning(): boolean {
+  try {
+    return window.localStorage.getItem(SHOW_REASONING_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function writeShowReasoning(value: boolean): void {
+  try {
+    window.localStorage.setItem(SHOW_REASONING_KEY, value ? "true" : "false");
+  } catch {
+    // Storage can be unavailable; the toggle still works for this session.
+  }
+}
 
 function rememberConversation(id: string | null): void {
   try {

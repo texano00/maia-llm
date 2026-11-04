@@ -6,6 +6,7 @@ import backupsSql from "./0004_backups.sql?raw";
 import settingsSql from "./0005_settings_telemetry.sql?raw";
 import parallelSessionsSql from "./0007_parallel_sessions.sql?raw";
 import pinnedConversationsSql from "./0008_pinned_conversations.sql?raw";
+import messageReasoningSql from "./0009_message_reasoning.sql?raw";
 
 export interface Migration {
   version: number;
@@ -21,5 +22,6 @@ export const migrations: Migration[] = [
   { version: 5, name: "backups", sql: backupsSql },
   { version: 6, name: "settings_telemetry", sql: settingsSql },
   { version: 7, name: "parallel_sessions", sql: parallelSessionsSql },
-  { version: 8, name: "pinned_conversations", sql: pinnedConversationsSql }
+  { version: 8, name: "pinned_conversations", sql: pinnedConversationsSql },
+  { version: 9, name: "message_reasoning", sql: messageReasoningSql }
 ];

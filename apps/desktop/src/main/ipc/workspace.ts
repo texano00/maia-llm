@@ -147,6 +147,7 @@ export function registerWorkspaceHandlers(options: WorkspaceHandlersOptions): vo
         id: message.id,
         role: message.role,
         content: message.content,
+        reasoning: message.reasoning,
         createdAt: message.createdAt
       })),
       frozen:
@@ -209,9 +210,14 @@ export function registerWorkspaceHandlers(options: WorkspaceHandlersOptions): vo
     });
 
     let text = "";
+    // Reasoning models stream their thinking first; it is stored next to the
+    // answer so the chat can show it on demand once the turn has finished.
+    let reasoning = "";
     const result = await sessions.send(session.id, payload.content, (kind, delta) => {
       if (kind === "content") {
         text += delta;
+      } else {
+        reasoning += delta;
       }
       broadcastChat({
         sessionId: session.id,
@@ -226,6 +232,7 @@ export function registerWorkspaceHandlers(options: WorkspaceHandlersOptions): vo
       conversationId,
       role: "assistant",
       content: text,
+      reasoning: reasoning.length > 0 ? reasoning : null,
       completionTokens: result.tokens
     });
 
@@ -271,6 +278,7 @@ function registryResult(
       id: message.id,
       role: message.role,
       content: message.content,
+      reasoning: message.reasoning,
       createdAt: message.createdAt
     })),
     frozen: found.conversation.modelId !== null && !running.has(found.conversation.modelId)

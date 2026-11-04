@@ -75,20 +75,25 @@ const FILES: Record<string, HuggingFaceTreeEntry[]> = {
   "Qwen/Qwen2.5-7B-Instruct": [
     { type: "file", path: "model-0001-of-0004.safetensors", size: 3_951_176_704, lfs: { size: 3_951_176_704 } },
     { type: "file", path: "model-0002-of-0004.safetensors", size: 3_951_176_704, lfs: { size: 3_951_176_704 } },
+    { type: "file", path: "config.json", size: 1_120 },
+    { type: "file", path: "tokenizer_config.json", size: 7_120 },
     { type: "file", path: "tokenizer.json", size: 7_031_645 },
     { type: "file", path: "README.md", size: 6_120 }
   ],
   "meta-llama/Llama-3.1-8B-Instruct": [
     { type: "file", path: "model-00001-of-00004.safetensors", size: 4_976_279_552, lfs: { size: 4_976_279_552 } },
+    { type: "file", path: "config.json", size: 1_040 },
     { type: "file", path: "tokenizer.json", size: 9_081_120 },
     { type: "file", path: "README.md", size: 8_400 }
   ],
   "mistralai/Mistral-7B-Instruct-v0.3": [
     { type: "file", path: "model-00001-of-00003.safetensors", size: 4_952_930_304, lfs: { size: 4_952_930_304 } },
+    { type: "file", path: "config.json", size: 960 },
     { type: "file", path: "tokenizer.model", size: 493_443 }
   ],
   "openai-community/gpt2": [
     { type: "file", path: "model.safetensors", size: 548_105_192, lfs: { size: 548_105_192 } },
+    { type: "file", path: "config.json", size: 720 },
     { type: "file", path: "tokenizer.json", size: 1_357_256 },
     { type: "file", path: "README.md", size: 12_040 }
   ],

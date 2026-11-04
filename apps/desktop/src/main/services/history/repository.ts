@@ -21,6 +21,7 @@ interface MessageRow {
   sequence: number;
   role: MessageRole;
   content: string;
+  reasoning: string | null;
   prompt_tokens: number | null;
   completion_tokens: number | null;
   interrupted: number;
@@ -47,6 +48,8 @@ export interface Message {
   sequence: number;
   role: MessageRole;
   content: string;
+  /** Reasoning stream of an assistant turn; kept so the chat can reveal it later. */
+  reasoning: string | null;
   promptTokens: number | null;
   completionTokens: number | null;
   interrupted: boolean;
@@ -78,6 +81,8 @@ export interface AppendMessageInput {
   conversationId: string;
   role: MessageRole;
   content: string;
+  /** Reasoning stream of an assistant turn, stored for the optional view. */
+  reasoning?: string | null;
   promptTokens?: number | null;
   completionTokens?: number | null;
   interrupted?: boolean;
@@ -145,9 +150,9 @@ export class HistoryRepository {
       this.db
         .prepare(
           `INSERT INTO messages
-            (id, conversation_id, sequence, role, content, prompt_tokens, completion_tokens, interrupted, error_code, created_at)
+            (id, conversation_id, sequence, role, content, reasoning, prompt_tokens, completion_tokens, interrupted, error_code, created_at)
            VALUES
-            (@id, @conversationId, @sequence, @role, @content, @promptTokens, @completionTokens, @interrupted, @errorCode, @now)`
+            (@id, @conversationId, @sequence, @role, @content, @reasoning, @promptTokens, @completionTokens, @interrupted, @errorCode, @now)`
         )
         .run({
           id,
@@ -155,6 +160,7 @@ export class HistoryRepository {
           sequence,
           role: input.role,
           content: input.content,
+          reasoning: input.reasoning ?? null,
           promptTokens: input.promptTokens ?? null,
           completionTokens: input.completionTokens ?? null,
           interrupted: interrupted ? 1 : 0,
@@ -177,6 +183,7 @@ export class HistoryRepository {
       sequence,
       role: input.role,
       content: input.content,
+      reasoning: input.reasoning ?? null,
       promptTokens: input.promptTokens ?? null,
       completionTokens: input.completionTokens ?? null,
       interrupted,
@@ -360,6 +367,7 @@ function mapMessage(row: MessageRow): Message {
     sequence: row.sequence,
     role: row.role,
     content: row.content,
+    reasoning: row.reasoning ?? null,
     promptTokens: row.prompt_tokens,
     completionTokens: row.completion_tokens,
     interrupted: row.interrupted === 1,

@@ -17,6 +17,7 @@ export const errorCodeSchema = z.enum([
   "TELEMETRY_DISABLED",
   "NOT_FOUND",
   "ESTIMATE_REQUIRED",
+  "GATED_ACCESS_REQUIRED",
   "INTERNAL"
 ]);
 

@@ -88,6 +88,7 @@ export interface InferenceRuntime {
 
 export type SessionErrorCode =
   | "ESTIMATE_REQUIRED"
+  | "GATED_ACCESS_REQUIRED"
   | "SESSION_CONFLICT"
   | "MODEL_NOT_READY"
   | "PROVIDER_UNAVAILABLE"
@@ -127,6 +128,8 @@ export interface SessionOrchestratorOptions {
    * to know that it may throw (or reject).
    */
   assertRunnable?: (modelId: string) => void | Promise<void>;
+  /** Returns true when the catalogue marks a model as gated. */
+  isGatedModel?: (modelId: string) => boolean;
 }
 
 interface SessionRuntime {
@@ -223,6 +226,13 @@ export class SessionOrchestrator {
     // An embedding or reranking model boots happily and then answers every
     // message with 404, so refuse it before a single minute is billed.
     await this.options.assertRunnable?.(estimate.modelId);
+
+    if (this.options.isGatedModel?.(estimate.modelId) && input.confirmGatedAccess !== true) {
+      throw new SessionError(
+        "GATED_ACCESS_REQUIRED",
+        "Confirm that you have accepted the model terms, have Hugging Face access, and approve running it remotely."
+      );
+    }
 
     const filters = this.options.filters?.();
     let offer = await this.options.compute.findOffer({ modelId: estimate.modelId, filters });

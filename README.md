@@ -120,6 +120,9 @@ removes the warning entirely is described in
    Restart Maia LLM so it picks up the key. Without a key the app stays in
    simulation mode: the whole flow works, but no real GPU is rented.
 2. **Settings → Hugging Face token** (optional) — needed only for gated models.
+   For a gated model, open its Hugging Face page and accept the terms or request
+   access before starting. Sign in there with the same account as the token saved
+   in Maia; manual access requests must be approved by the repository owner.
 3. **Settings → GPU preferences** (optional) — limit offers to countries,
    machines, a reliability floor or a price ceiling. The startup gates
    (1000 Mbps down, 200 Mbps up, 500 MB/s disk) are on by default: a cold start

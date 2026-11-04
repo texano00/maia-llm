@@ -41,7 +41,7 @@ interface WorkspaceValue {
   error: string | null;
   clearError(): void;
   prepareEstimate(modelId: string): Promise<void>;
-  startSession(modelId: string): Promise<Session | null>;
+  startSession(modelId: string, confirmGatedAccess?: boolean): Promise<Session | null>;
   reloadSessions(): Promise<void>;
 }
 
@@ -192,7 +192,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const startSession = useCallback(
-    async (modelId: string) => {
+    async (modelId: string, confirmGatedAccess = false) => {
       const bridge = window.maia;
       const estimate = estimates[modelId];
       if (!bridge || !estimate) {
@@ -213,7 +213,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       setStartingIds((current) => (current.includes(modelId) ? current : [...current, modelId]));
       const result = await bridge.invoke<Session>("session.start", {
         estimateId: estimate.id,
-        confirmEstimate: true
+        confirmEstimate: true,
+        confirmGatedAccess
       });
       setStartingIds((current) => current.filter((id) => id !== modelId));
 

@@ -560,6 +560,31 @@ nav {
   font-size: 0.95rem;
 }
 
+.gated-access-confirmation {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.8rem;
+  border: 1px solid rgb(255 190 90 / 30%);
+  border-radius: 0.65rem;
+  background: rgb(255 190 90 / 5%);
+}
+
+.gated-access-confirmation p {
+  margin: 0;
+}
+
+.gated-access-consent {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  font-size: 0.82rem;
+}
+
+.gated-access-consent input {
+  flex: 0 0 auto;
+  margin-top: 0.2rem;
+}
+
 .pill {
   display: inline-flex;
   align-items: center;
@@ -579,6 +604,35 @@ nav {
 .pill-warning {
   border-color: rgb(255 196 120 / 45%);
   color: #ffd8a1;
+}
+
+/*
+ * Pills such as "gated" explain themselves on hover. The bubble is fixed
+ * position (set from the pill's viewport rect) so the scrolling catalogue list
+ * cannot clip it.
+ */
+.tooltip-source {
+  cursor: help;
+}
+
+.tooltip-bubble {
+  position: fixed;
+  z-index: 60;
+  width: max-content;
+  max-width: min(20rem, 60vw);
+  padding: 0.5rem 0.65rem;
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: 0.55rem;
+  background: #0d1728;
+  color: #dbe4f2;
+  font-size: 0.72rem;
+  font-weight: 400;
+  line-height: 1.45;
+  letter-spacing: 0;
+  text-align: left;
+  white-space: normal;
+  box-shadow: 0 12px 28px rgb(0 0 0 / 45%);
+  pointer-events: none;
 }
 
 .muted {
@@ -778,6 +832,107 @@ nav {
   cursor: pointer;
   color: #8fa3c8;
   font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.reasoning-toggle input {
+  accent-color: #4868ff;
+}
+
+.reasoning-toggle {
+  color: #c8d4e6;
+}
+
+.reasoning-body {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.4rem;
+  color: #c3cfe2;
+  font-size: 0.86rem;
+}
+
+.reasoning-paragraph {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.6;
+}
+
+.reasoning-list {
+  display: grid;
+  gap: 0.2rem;
+  margin: 0;
+  padding-left: 1.1rem;
+  line-height: 1.55;
+}
+
+.reasoning-inline-code {
+  padding: 0.05rem 0.3rem;
+  border-radius: 0.3rem;
+  background: rgb(255 255 255 / 9%);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.82em;
+}
+
+.reasoning-code {
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 0.6rem;
+  background: rgb(5 8 14 / 80%);
+  overflow: hidden;
+}
+
+.reasoning-code-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.25rem 0.5rem;
+  background: rgb(255 255 255 / 4%);
+  color: #8fa3c8;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.reasoning-code pre {
+  margin: 0;
+  padding: 0.6rem 0.75rem;
+  overflow-x: auto;
+}
+
+.reasoning-code code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  white-space: pre;
+}
+
+.reasoning-caret {
+  display: inline-block;
+  width: 0.45rem;
+  height: 0.85rem;
+  margin-left: 0.15rem;
+  vertical-align: text-bottom;
+  background: #8fa3c8;
+  animation: reasoning-blink 1s steps(2, start) infinite;
+}
+
+@keyframes reasoning-blink {
+  to {
+    visibility: hidden;
+  }
+}
+
+.bubble-reasoning-inline {
+  margin-bottom: 0.5rem;
+  padding-left: 0.6rem;
+  border-left: 2px solid rgb(255 255 255 / 12%);
+}
+
+.bubble-reasoning-inline summary {
+  cursor: pointer;
+  margin-bottom: 0.3rem;
+  color: #8fa3c8;
+  font-size: 0.7rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }

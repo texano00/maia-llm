@@ -88,6 +88,43 @@ describe("vLLM model planning", () => {
     expect(plan.onstart).toBeUndefined();
   });
 
+  it("ignores safetensors that vLLM cannot reach in a subfolder", () => {
+    // 0bserverx/Qwen3.8-27B-Heretic-Abliterated-Uncensored-GGUF: the only
+    // config.json and shards live under GSQ-3bit/, so `vllm serve <repo>` must
+    // use the GGUF plugin instead of a plain transformers load.
+    const plan = planVllmModel({
+      modelId: "0bserverx/Qwen3.8-27B-Heretic-Abliterated-Uncensored-GGUF",
+      artifacts: [
+        artifact({ path: "RVN-Q4_K_M.gguf", format: "gguf", quantization: "Q4_K_M" }),
+        artifact({ path: "GSQ-3bit/model-00001-of-00065.safetensors" })
+      ],
+      tokenizer: "0bserverx/Qwen3.8-27B-Heretic-Abliterated-Uncensored"
+    });
+
+    expect(plan.gguf).toBe(true);
+    expect(plan.modelArg).toBe(
+      "0bserverx/Qwen3.8-27B-Heretic-Abliterated-Uncensored-GGUF:Q4_K_M"
+    );
+    expect(plan.extraArgs).toEqual([
+      "--tokenizer",
+      "0bserverx/Qwen3.8-27B-Heretic-Abliterated-Uncensored"
+    ]);
+  });
+
+  it("skips MTP draft heads and vision projectors when picking a quant", () => {
+    const plan = planVllmModel({
+      modelId: "org/model-GGUF",
+      artifacts: [
+        artifact({ path: "RVN-Q4_K_M-mtp.gguf", format: "gguf", quantization: "Q4_K_M" }),
+        artifact({ path: "mmproj-model-f16.gguf", format: "gguf", quantization: null }),
+        artifact({ path: "RVN-Q4_K_M-vision.gguf", format: "gguf", quantization: "Q4_K_M" }),
+        artifact({ path: "RVN-Q5_K_M.gguf", format: "gguf", quantization: "Q5_K_M" })
+      ]
+    });
+
+    expect(plan.modelArg).toBe("org/model-GGUF:Q5_K_M");
+  });
+
   it("finds the base repository behind a GGUF release", () => {
     expect(baseModelCandidate("huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF")).toBe(
       "huihui-ai/Huihui-Qwen3.8-27B-abliterated"

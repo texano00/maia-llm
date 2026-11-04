@@ -104,6 +104,33 @@ describe("SessionOrchestrator", () => {
     ).rejects.toMatchObject({ code: "ESTIMATE_REQUIRED" });
   });
 
+  it("requires explicit access confirmation before starting a gated model", async () => {
+    const compute = createMockComputeProvider({ offer });
+    const orchestrator = new SessionOrchestrator({
+      store,
+      compute,
+      inference: createMockInference({ response: "" }),
+      idleTimeoutMinutes: 10,
+      now: () => clock,
+      isGatedModel: () => true
+    });
+    const estimate = await orchestrator.createEstimate("Qwen/Qwen2.5-7B-Instruct");
+
+    await expect(
+      orchestrator.start({ estimateId: estimate.id, confirmEstimate: true })
+    ).rejects.toMatchObject({ code: "GATED_ACCESS_REQUIRED" });
+    expect(store.getActive()).toHaveLength(0);
+
+    const started = await orchestrator.start({
+      estimateId: estimate.id,
+      confirmEstimate: true,
+      confirmGatedAccess: true
+    });
+    await orchestrator.awaitProvisioning(started.id);
+    expect(orchestrator.getSession(started.id)?.state).toBe("active");
+    await orchestrator.end(started.id, "user");
+  });
+
   it("refuses a model the runtime cannot serve before renting anything", async () => {
     const compute = createMockComputeProvider({ offer });
     const orchestrator = new SessionOrchestrator({

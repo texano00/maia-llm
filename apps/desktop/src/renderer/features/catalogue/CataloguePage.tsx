@@ -1,7 +1,7 @@
-import { memo } from "react";
-import { useNavigate } from "react-router-dom";
+import { memo, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import type { CatalogueModel, ModelArtifact, Session } from "@maia/contracts";
-import { isChatCapableModel } from "@maia/contracts";
+import { describeGatedAccess, huggingFaceModelUrl, isChatCapableModel } from "@maia/contracts";
 import { useWorkspace } from "../../shared/session/WorkspaceProvider";
 import { formatParameters, formatContext, formatBytes, formatUsd } from "../../shared/format";
 export function CataloguePage() {
@@ -28,6 +28,7 @@ export function CataloguePage() {
     clearError
   } = useWorkspace();
   const navigate = useNavigate();
+  const [gatedConsentModelId, setGatedConsentModelId] = useState<string | null>(null);
 
   // Every model keeps its own estimate and its own start request, so a model that
   // is still loading never blocks a different one from being prepared.
@@ -40,6 +41,7 @@ export function CataloguePage() {
       selected.chatTemplate !== false &&
       selected.runnable !== false
     : false;
+  const access = selected ? describeGatedAccess(selected.model.gated) : null;
   const starting = selected ? startingIds.includes(selected.model.id) : false;
   const existingSession = selected
     ? (sessions.find(
@@ -141,6 +143,12 @@ export function CataloguePage() {
                   <dt>License</dt>
                   <dd>{selected.model.license ?? "unknown"}</dd>
                 </div>
+                {access ? (
+                  <div className="info-row">
+                    <dt>Access</dt>
+                    <dd>{access.label}</dd>
+                  </div>
+                ) : null}
                 <div className="info-row">
                   <dt>Parameters</dt>
                   <dd>
@@ -170,6 +178,10 @@ export function CataloguePage() {
                   <dd>{describeWeights(selected.artifacts)}</dd>
                 </div>
               </dl>
+
+              {access ? (
+                <GatedAccessNotice modelId={selected.model.id} description={access.description} />
+              ) : null}
 
               {selected.runnable === false ? (
                 <p className="pill pill-warning" role="note">
@@ -263,12 +275,34 @@ export function CataloguePage() {
                       <li key={assumption}>{assumption}</li>
                     ))}
                   </ul>
+                  {access ? (
+                    <label className="gated-access-consent">
+                      <input
+                        type="checkbox"
+                        checked={gatedConsentModelId === selected.model.id}
+                        onChange={(event) =>
+                          setGatedConsentModelId(event.target.checked ? selected.model.id : null)
+                        }
+                      />
+                      <span>
+                        I accepted this model’s terms on Hugging Face, my token has access, and I
+                        approve running it on a remote GPU.
+                      </span>
+                    </label>
+                  ) : null}
                   <button
                     type="button"
-                    disabled={starting || !chatReady}
+                    disabled={
+                      starting ||
+                      !chatReady ||
+                      (access !== null && gatedConsentModelId !== selected.model.id)
+                    }
                     onClick={() => {
                       navigate("/chat");
-                      void startSession(selected.model.id);
+                      void startSession(
+                        selected.model.id,
+                        access !== null && gatedConsentModelId === selected.model.id
+                      );
                     }}
                   >
                     {starting
@@ -292,6 +326,30 @@ export function CataloguePage() {
 }
 
 /**
+ * Gated repositories only download with a token that has access, and access is
+ * granted to a Hugging Face account, not to the app. The notice puts the two
+ * steps the user has to take — open the model page and sign in with the token's
+ * account — next to the model, before any GPU is rented.
+ */
+function GatedAccessNotice({ modelId, description }: { modelId: string; description: string }) {
+  return (
+    <div className="gated-access-confirmation" role="note">
+      <p>{description}</p>
+      <p>
+        <a href={huggingFaceModelUrl(modelId)} target="_blank" rel="noopener noreferrer">
+          Open {modelId} on Hugging Face
+        </a>
+      </p>
+      <p className="muted small">
+        Sign in to Hugging Face with the same account as the token saved in{" "}
+        <Link to="/settings">Settings → Hugging Face token</Link>, then accept the model’s terms or
+        request access. Without a matching token the remote download fails.
+      </p>
+    </div>
+  );
+}
+
+/**
  * One row of the catalogue. Memoised: the list holds up to a hundred entries and
  * the shared workspace provider updates on every poll.
  */
@@ -304,6 +362,20 @@ const ModelRow = memo(function ModelRow({
   selected: boolean;
   onSelect(modelId: string): Promise<void>;
 }) {
+  const access = describeGatedAccess(model.gated);
+  // The list scrolls (overflow-y: auto), which clips absolutely positioned
+  // children, so the bubble is fixed-positioned from the pill's viewport rect.
+  const [tip, setTip] = useState<{ text: string; left: number; top: number } | null>(null);
+
+  const showTip = (text: string, target: HTMLElement): void => {
+    const rect = target.getBoundingClientRect();
+    setTip({
+      text,
+      left: Math.max(8, Math.min(rect.left, window.innerWidth - 340)),
+      top: rect.bottom + 6
+    });
+  };
+
   return (
     <li>
       <button
@@ -313,9 +385,29 @@ const ModelRow = memo(function ModelRow({
       >
         <span className="model-name-row">
           <span className="model-name">{model.id}</span>
-          {model.gated !== "none" ? <span className="pill pill-warning">gated</span> : null}
+          {access ? (
+            <span
+              className="tooltip-source"
+              aria-label={access.description}
+              onMouseEnter={(event) => showTip(access.description, event.currentTarget)}
+              onMouseLeave={() => setTip(null)}
+            >
+              <span className="pill pill-warning">{access.label}</span>
+            </span>
+          ) : null}
           {isChatCapableModel(model) ? null : (
-            <span className="pill pill-warning">not a chat model</span>
+            <span
+              className="tooltip-source"
+              onMouseEnter={(event) =>
+                showTip(
+                  "This model's task is not text generation, so it cannot answer chat requests and cannot be started.",
+                  event.currentTarget
+                )
+              }
+              onMouseLeave={() => setTip(null)}
+            >
+              <span className="pill pill-warning">not a chat model</span>
+            </span>
           )}
         </span>
         <span className="model-meta">
@@ -332,6 +424,11 @@ const ModelRow = memo(function ModelRow({
           {model.license ? <span className="stat">{model.license}</span> : null}
         </span>
       </button>
+      {tip ? (
+        <span className="tooltip-bubble" role="tooltip" style={{ left: tip.left, top: tip.top }}>
+          {tip.text}
+        </span>
+      ) : null}
     </li>
   );
 });

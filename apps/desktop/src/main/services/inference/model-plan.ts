@@ -55,9 +55,37 @@ export function baseModelCandidate(modelId: string): string | null {
   return stripped !== modelId && stripped.includes("/") ? stripped : null;
 }
 
+/**
+ * vLLM loads the repository root: `vllm serve org/model` resolves `config.json`
+ * and the weight index there, never inside `subfolder/`.
+ */
+export function isRootLevelPath(path: string): boolean {
+  return !path.includes("/");
+}
+
+/**
+ * GGUF files that sit next to a checkpoint without being one: MTP draft heads
+ * (`RVN-Q4_K_M-mtp.gguf`), vision projectors (`mmproj-*.gguf`) and multimodal
+ * variants. Serving them produces a broken model even though the file parses.
+ */
+export function isAuxiliaryGguf(path: string): boolean {
+  const name = path.split("/").at(-1)?.toLowerCase() ?? "";
+
+  return (
+    name.startsWith("mmproj-") ||
+    name.endsWith("-mtp.gguf") ||
+    name.endsWith("-vision.gguf")
+  );
+}
+
 function pickGgufArtifact(artifacts: readonly ModelArtifact[]): ModelArtifact | null {
   const gguf = artifacts.filter(
-    (artifact) => artifact.format === "gguf" && artifact.sizeBytes > 0 && artifact.runnable !== false
+    (artifact) =>
+      artifact.format === "gguf" &&
+      artifact.sizeBytes > 0 &&
+      artifact.runnable !== false &&
+      isRootLevelPath(artifact.path) &&
+      !isAuxiliaryGguf(artifact.path)
   );
 
   if (gguf.length === 0) {
@@ -98,7 +126,11 @@ export interface PlanVllmModelInput {
  * recommend that over converting the tokenizer out of the GGUF metadata.
  */
 export function planVllmModel(input: PlanVllmModelInput): VllmModelPlan {
-  const safetensors = input.artifacts.some((artifact) => artifact.format === "safetensors");
+  // Shards in a subfolder do not make the repository a transformers checkpoint:
+  // `vllm serve <repo>` would find no config.json or index at the root.
+  const safetensors = input.artifacts.some(
+    (artifact) => artifact.format === "safetensors" && isRootLevelPath(artifact.path)
+  );
   const gguf = safetensors ? null : pickGgufArtifact(input.artifacts);
 
   if (!gguf) {

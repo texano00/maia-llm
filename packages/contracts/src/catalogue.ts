@@ -53,15 +53,23 @@ export function isChatCapableModel(model: { pipelineTag: string | null }): boole
 }
 
 /**
- * True when a repository ships GGUF weights and nothing vLLM can load.
+ * True when a repository ships GGUF weights and nothing vLLM can load directly.
  *
  * GGUF is a llama.cpp format: `vllm serve <repo>` finds no `*.safetensors` and
  * dies during startup, after the instance is already billing. Repositories that
  * ship both formats stay runnable.
+ *
+ * Only root-level weights count. vLLM always loads the repository root, so
+ * shards parked in a subfolder (`GSQ-3bit/model-00001-of-00065.safetensors`, …)
+ * are invisible to it and must not make a GGUF release look like a transformers
+ * checkpoint.
  */
-export function isGgufOnlyRepository(artifacts: readonly { format: string }[]): boolean {
-  const hasGguf = artifacts.some((artifact) => artifact.format === "gguf");
-  const hasSafetensors = artifacts.some((artifact) => artifact.format === "safetensors");
+export function isGgufOnlyRepository(
+  artifacts: readonly { format: string; path?: string }[]
+): boolean {
+  const root = artifacts.filter((artifact) => !(artifact.path ?? "").includes("/"));
+  const hasGguf = root.some((artifact) => artifact.format === "gguf");
+  const hasSafetensors = root.some((artifact) => artifact.format === "safetensors");
 
   return hasGguf && !hasSafetensors;
 }
@@ -125,3 +133,54 @@ export type ModelArtifact = z.infer<typeof modelArtifactSchema>;
 export type CatalogueQuery = z.infer<typeof catalogueQuerySchema>;
 export type CatalogueResult = z.infer<typeof catalogueResultSchema>;
 export type ModelDetail = z.infer<typeof modelDetailSchema>;
+
+export interface GatedAccessInfo {
+  /** Short badge text next to the model name. */
+  label: string;
+  /** One sentence for the tooltip and the detail panel. */
+  description: string;
+  /** True when a human has to approve the request before downloads work. */
+  requiresApproval: boolean;
+}
+
+/**
+ * What "gated" means for a model.
+ *
+ * Hugging Face gates some repositories behind a licence that has to be accepted
+ * before the files can be downloaded. `auto` approves the request instantly,
+ * `manual` waits for the repository owner, and either way the download only
+ * works with a Hugging Face token that has access to the repository.
+ */
+export function describeGatedAccess(gated: CatalogueModel["gated"]): GatedAccessInfo | null {
+  switch (gated) {
+    case "auto":
+      return {
+        label: "gated",
+        description:
+          "Gated model: accept its terms once on huggingface.co — approval is automatic — and Maia downloads it with your Hugging Face token.",
+        requiresApproval: false
+      };
+    case "manual":
+      return {
+        label: "gated · approval",
+        description:
+          "Gated model: the repository owner must approve access. Request it on huggingface.co; once approved, Maia downloads it with your Hugging Face token.",
+        requiresApproval: true
+      };
+    default:
+      return null;
+  }
+}
+
+/**
+ * Public Hugging Face page for a repository id (`owner/name`).
+ *
+ * This is where the user accepts a gated model's terms or requests access, so
+ * the link has to survive ids with unusual characters without breaking the path.
+ */
+export function huggingFaceModelUrl(modelId: string): string {
+  return `https://huggingface.co/${modelId
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/")}`;
+}

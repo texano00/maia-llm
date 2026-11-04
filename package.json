@@ -1,6 +1,6 @@
 {
   "name": "maia-llm",
-  "version": "0.6.7",
+  "version": "0.6.8",
   "private": true,
   "type": "module",
   "description": "Desktop LLM suite with on-demand remote GPU and model archival",
@@ -32,11 +32,11 @@
     "eslint": "9.39.5",
     "globals": "16.4.0",
     "prettier": "3.9.10",
+    "sharp": "^0.35.5",
     "tsx": "4.23.15",
     "typescript": "5.9.3",
     "typescript-eslint": "8.72.1",
-    "vitest": "4.1.12",
-    "sharp": "^0.35.5"
+    "vitest": "4.1.12"
   },
   "allowScripts": {
     "esbuild@0.28.2": true,

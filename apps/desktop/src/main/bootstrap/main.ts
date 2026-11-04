@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, Menu } from "electron";
+import { app, BrowserWindow, dialog, Menu, shell } from "electron";
 import { join } from "node:path";
 import { z } from "zod";
 import {
@@ -126,6 +126,25 @@ function createWindow(quit: QuitCoordinator): void {
         }
       })
       .catch(() => logBridgeMissing("unavailable"));
+  });
+
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    try {
+      const destination = new URL(url);
+      if (destination.protocol === "https:" && destination.hostname === "huggingface.co") {
+        void shell.openExternal(destination.toString()).catch((error: unknown) => {
+          appLogger?.error("Could not open the Hugging Face model page", {
+            reason: error instanceof Error ? error.message : String(error)
+          });
+        });
+      }
+    } catch (error) {
+      appLogger?.warn("Blocked an invalid external link", {
+        reason: error instanceof Error ? error.message : String(error)
+      });
+    }
+
+    return { action: "deny" };
   });
 
   const rendererUrl = process.env.ELECTRON_RENDERER_URL;
@@ -268,6 +287,7 @@ async function bootstrap(): Promise<void> {
       // (no chat template) before the user pays for a boot.
       await assertChatRunnable(catalogue, modelId);
     },
+    isGatedModel: (modelId) => catalogueRepository.get(modelId)?.gated !== "none",
     logger
   });
 

@@ -360,7 +360,9 @@ export function SettingsPage() {
           <h2>Hugging Face access token</h2>
           <p className="lede">
             Stored with the operating-system credential vault and used for gated models and live
-            catalogue refreshes. The public catalogue works without a token.
+            catalogue refreshes. The public catalogue works without a token. Gated models only
+            download when this token belongs to the Hugging Face account that accepted the model’s
+            terms.
           </p>
           <label className="field">
             <span>Token</span>

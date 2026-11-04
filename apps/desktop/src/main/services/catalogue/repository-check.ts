@@ -45,20 +45,32 @@ export function assessRepository(
     return { loadable: false, problem: `is ${nonLlm}` };
   }
 
-  const hasSafetensors = paths.some((path) => path.toLowerCase().endsWith(".safetensors"));
-  const hasGguf = paths.some((path) => path.toLowerCase().endsWith(".gguf"));
+  // `vllm serve <repo>` reads the repository root — config.json, the weight
+  // index and the GGUF files. Shards nested in a subfolder are invisible, so a
+  // repository that keeps everything under `GSQ-3bit/` looks empty to vLLM.
+  const rootPaths = paths.filter((path) => !path.includes("/"));
+  const hasRootIndex = rootPaths.includes("model.safetensors.index.json");
+  const hasRootSafetensors =
+    hasRootIndex || rootPaths.some((path) => path.toLowerCase().endsWith(".safetensors"));
+  const hasRootGguf = rootPaths.some((path) => path.toLowerCase().endsWith(".gguf"));
+  const hasNestedWeights = paths.some((path) => {
+    const lower = path.toLowerCase();
+    return lower.endsWith(".safetensors") || lower.endsWith(".gguf");
+  });
 
-  if (!hasSafetensors && !hasGguf) {
+  if (!hasRootSafetensors && !hasRootGguf) {
     return {
       loadable: false,
-      problem: "ships neither .safetensors nor .gguf weights"
+      problem: hasNestedWeights
+        ? "keeps its weights in subfolders, so vLLM finds nothing at the repository root"
+        : "ships neither .safetensors nor .gguf weights"
     };
   }
 
   // GGUF repositories regularly omit config.json (the loader reads the GGUF
   // metadata), but a safetensors repository without one has no architecture for
   // vLLM to build a ModelConfig from — exactly the MiniMax-H3 failure.
-  if (hasSafetensors && !paths.includes("config.json")) {
+  if (hasRootSafetensors && !rootPaths.includes("config.json")) {
     return {
       loadable: false,
       problem: "has no config.json, so vLLM cannot determine its architecture"

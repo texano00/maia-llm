@@ -60,6 +60,8 @@ export const sessionStartSchema = z.object({
   estimateId: z.string().min(1),
   /** Provisioning is refused unless the caller confirms the shown estimate. */
   confirmEstimate: z.literal(true),
+  /** Gated models require explicit confirmation before Maia provisions a GPU. */
+  confirmGatedAccess: z.boolean().optional(),
   generation: z
     .object({
       temperature: z.number().min(0).max(2).optional(),
@@ -154,6 +156,8 @@ export const conversationMessageSchema = z.object({
   id: z.string().min(1),
   role: z.enum(["system", "user", "assistant", "tool"]),
   content: z.string(),
+  /** Reasoning tokens the model streamed before the answer, when it exposed any. */
+  reasoning: z.string().nullable(),
   createdAt: z.string()
 });
 
