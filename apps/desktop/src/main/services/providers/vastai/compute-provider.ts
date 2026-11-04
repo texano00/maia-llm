@@ -37,7 +37,7 @@ export interface VastComputeProviderOptions {
    * How the model should be launched (safetensors vs GGUF). Falls back to
    * passing the model id straight to `--model`.
    */
-  getModelPlan?: (modelId: string) => Promise<VllmModelPlan>;
+  getModelPlan?: (modelId: string, offer: ComputeOffer) => Promise<VllmModelPlan>;
   /**
    * Hard cap on the whole boot. Generous on purpose: pulling a multi-GB image
    * and then 10-25 GB of weights legitimately takes half an hour on a slow
@@ -233,7 +233,7 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
       const api = await client();
       const hfToken = await options.getHfToken?.();
       const parameterCount = await options.getParameterCount(context.modelId);
-      const plan = (await options.getModelPlan?.(context.modelId)) ?? {
+      const plan = (await options.getModelPlan?.(context.modelId, offer)) ?? {
         modelArg: context.modelId,
         extraArgs: [],
         env: {},

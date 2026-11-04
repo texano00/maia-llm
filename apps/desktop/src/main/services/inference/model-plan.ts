@@ -33,6 +33,129 @@ export interface VllmModelPlan {
   gguf: boolean;
   /** Quantisation chosen for a GGUF repository, for logs. */
   quantization?: string;
+  /** Memory-aware limits derived from the chosen GPU, for logs. */
+  limits?: LaunchLimits;
+}
+
+/** Context/parallelism the launch is allowed to use on the chosen card. */
+export interface LaunchLimits {
+  maxModelLen: number;
+  gpuMemoryUtilization: number;
+  maxNumSeqs: number;
+}
+
+const DEFAULT_CONTEXT_LIMIT = 32_768;
+const MIN_CONTEXT_LIMIT = 4_096;
+/** CUDA context, activations and the loader need room that is not KV cache. */
+const RESERVE_GB = 1.5;
+const GPU_MEMORY_UTILIZATION = 0.9;
+const MAX_NUM_SEQS = 4;
+/**
+ * KV cache growth per parameter per token, in GB.
+ *
+ * Derived from dense GQA models (~96 KB/token at 8B parameters) and kept on the
+ * generous side: an over-estimate shortens the context, an under-estimate makes
+ * the engine core die at startup.
+ */
+const KV_GB_PER_PARAMETER_TOKEN = 1.2e-14;
+
+/** Bytes each weight occupies, from the quantisation in the file name. */
+export function bytesPerParameter(quantization: string | null | undefined): number {
+  if (!quantization) {
+    // Safetensors checkpoints are served in their stored dtype, usually BF16.
+    return 2;
+  }
+
+  const quant = quantization.toUpperCase();
+  if (quant.startsWith("IQ1") || quant.startsWith("Q1")) {
+    return 0.25;
+  }
+  if (quant.startsWith("IQ2") || quant.startsWith("Q2")) {
+    return 0.35;
+  }
+  if (quant.startsWith("IQ3") || quant.startsWith("Q3")) {
+    return 0.45;
+  }
+  if (quant.startsWith("IQ4") || quant.startsWith("Q4")) {
+    return 0.55;
+  }
+  if (quant.startsWith("Q5")) {
+    return 0.7;
+  }
+  if (quant.startsWith("Q6")) {
+    return 0.8;
+  }
+  if (quant.startsWith("Q8") || quant.startsWith("IQ8")) {
+    return 1;
+  }
+  if (quant.startsWith("F32")) {
+    return 4;
+  }
+  if (quant.startsWith("F16") || quant.startsWith("BF16")) {
+    return 2;
+  }
+
+  return 0.6;
+}
+
+/**
+ * Decides how much context vLLM may reserve on this card.
+ *
+ * vLLM defaults `--max-model-len` to the model's advertised context. A 27B GGUF
+ * that claims 262 144 tokens therefore asks for a KV cache of dozens of GB on a
+ * 24 GB card, and the *engine core process* is killed while initialising — the
+ * launcher only reports `Engine core initialization failed`, with the real
+ * `OutOfMemoryError` above it in a log nobody reads. Sizing the request to the
+ * GPU up front is what makes that boot succeed.
+ */
+export function planLaunchLimits(input: {
+  vramGb: number;
+  parameterCount?: number | null;
+  quantization?: string | null;
+  contextWindow?: number | null;
+}): LaunchLimits {
+  const advertised =
+    input.contextWindow && input.contextWindow > 0 ? input.contextWindow : DEFAULT_CONTEXT_LIMIT;
+  // Never ask for more than 32k: past that, KV cache dominates and the model
+  // answers no better for the price. Smaller advertised windows are respected.
+  const desired = Math.max(MIN_CONTEXT_LIMIT, Math.min(advertised, DEFAULT_CONTEXT_LIMIT));
+
+  const parameters = input.parameterCount && input.parameterCount > 0 ? input.parameterCount : null;
+  const weightsGb = parameters
+    ? (parameters * bytesPerParameter(input.quantization)) / 1e9
+    : input.vramGb * 0.5;
+  const availableGb = Math.max(
+    0,
+    input.vramGb * GPU_MEMORY_UTILIZATION - weightsGb - RESERVE_GB
+  );
+
+  const kvPerTokenGb = parameters ? parameters * KV_GB_PER_PARAMETER_TOKEN : null;
+  const fitting = kvPerTokenGb ? Math.floor(availableGb / kvPerTokenGb / 1_024) * 1_024 : 0;
+
+  const maxModelLen =
+    fitting > 0 ? Math.min(desired, Math.max(MIN_CONTEXT_LIMIT, fitting)) : desired;
+
+  return {
+    maxModelLen,
+    gpuMemoryUtilization: GPU_MEMORY_UTILIZATION,
+    maxNumSeqs: MAX_NUM_SEQS
+  };
+}
+
+/** The vLLM flags that carry a `LaunchLimits` object. */
+export function launchLimitArgs(limits: LaunchLimits | null): string[] {
+  if (!limits) {
+    return [];
+  }
+
+  return [
+    "--max-model-len",
+    String(limits.maxModelLen),
+    "--gpu-memory-utilization",
+    limits.gpuMemoryUtilization.toFixed(2),
+    "--max-num-seqs",
+    String(limits.maxNumSeqs)
+  ];
 }
 
 /**
@@ -119,6 +242,10 @@ export interface PlanVllmModelInput {
    * repositories without a `-GGUF` sibling, and for safetensors models.
    */
   tokenizer?: string | null | undefined;
+  /** VRAM of the GPU the offer was made for; enables memory-aware limits. */
+  vramGb?: number | null;
+  parameterCount?: number | null;
+  contextWindow?: number | null;
 }
 
 /**
@@ -136,17 +263,29 @@ export function planVllmModel(input: PlanVllmModelInput): VllmModelPlan {
     (artifact) => artifact.format === "safetensors" && isRootLevelPath(artifact.path)
   );
   const gguf = safetensors ? null : pickGgufArtifact(input.artifacts);
+  const quantization = gguf ? gguf.quantization ?? quantizationFromPath(gguf.path) : null;
+
+  const limits =
+    input.vramGb && input.vramGb > 0
+      ? planLaunchLimits({
+          vramGb: input.vramGb,
+          parameterCount: input.parameterCount ?? null,
+          quantization,
+          contextWindow: input.contextWindow ?? null
+        })
+      : null;
+  const limitArgs = launchLimitArgs(limits);
 
   if (!gguf) {
     return {
       modelArg: input.modelId,
-      extraArgs: [],
+      extraArgs: limitArgs,
       env: {},
-      gguf: false
+      gguf: false,
+      ...(limits ? { limits } : {})
     };
   }
 
-  const quantization = gguf.quantization ?? quantizationFromPath(gguf.path);
   // The plugin's documented form is `repo:QUANT` plus a tokenizer; it derives
   // the quantisation from the suffix, so no `--quantization` flag is passed.
   const extraArgs: string[] = [];
@@ -154,6 +293,7 @@ export function planVllmModel(input: PlanVllmModelInput): VllmModelPlan {
   if (input.tokenizer) {
     extraArgs.push("--tokenizer", input.tokenizer);
   }
+  extraArgs.push(...limitArgs);
 
   return {
     modelArg: quantization ? `${input.modelId}:${quantization}` : input.modelId,
@@ -162,7 +302,8 @@ export function planVllmModel(input: PlanVllmModelInput): VllmModelPlan {
     env: {},
     onstart: GGUF_PLUGIN_INSTALL,
     gguf: true,
-    ...(quantization ? { quantization } : {})
+    ...(quantization ? { quantization } : {}),
+    ...(limits ? { limits } : {})
   };
 }
 

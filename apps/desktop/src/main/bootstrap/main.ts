@@ -1,12 +1,8 @@
 import { app, BrowserWindow, dialog, Menu, shell } from "electron";
 import { join } from "node:path";
 import { z } from "zod";
-import {
-  updateEventChannel,
-  chatEventChannel,
-  isGgufOnlyRepository
-} from "@maia/contracts";
-import { baseModelCandidate, planVllmModel } from "../services/inference/model-plan";
+import { updateEventChannel, chatEventChannel } from "@maia/contracts";
+import { createModelPlanResolver } from "../services/inference/model-plan-resolver";
 import { closeDatabase, openDatabase, type DatabaseConnection } from "../storage/db";
 import { HistoryRepository } from "../services/history/repository";
 import { CredentialVault } from "../services/credentials/vault";
@@ -244,28 +240,12 @@ async function bootstrap(): Promise<void> {
         readyTimeoutMs: config.readinessTimeoutMinutes * 60_000,
         stallTimeoutMs: config.readinessStallMinutes * 60_000,
         // GGUF releases need the loader plugin and a `repo:QUANT` model
-        // reference; safetensors repositories need neither.
-        getModelPlan: async (modelId) => {
-          let artifacts = catalogueRepository.getArtifacts(modelId);
-          if (artifacts.length === 0) {
-            artifacts = await catalogue.detail(modelId).then(
-              (detail) => detail.artifacts,
-              () => []
-            );
-          }
-
-          // Only GGUF needs a tokenizer; vLLM's docs recommend the original
-          // repository over converting it out of the GGUF metadata.
-          const base = isGgufOnlyRepository(artifacts) ? baseModelCandidate(modelId) : null;
-          const tokenizer = base
-            ? await catalogue.detail(base).then(
-                (detail) => detail.model.id,
-                () => null
-              )
-            : null;
-
-          return planVllmModel({ modelId, artifacts, tokenizer });
-        },
+        // reference; the plan also sizes `--max-model-len` to this GPU.
+        getModelPlan: createModelPlanResolver({
+          artifacts: (modelId) => catalogueRepository.getArtifacts(modelId),
+          loadDetail: (modelId) => catalogue.detail(modelId),
+          get: (modelId) => catalogueRepository.get(modelId)
+        }),
         logger
       })
     : createMockComputeProvider({ provisionDelayMs: 400 });

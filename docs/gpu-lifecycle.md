@@ -30,11 +30,42 @@ For GGUF the startup script is:
 ```sh
 uv pip install --system vllm-gguf-plugin || python3 -m pip install vllm-gguf-plugin;
 exec python3 -m vllm.entrypoints.openai.api_server --model repo:QUANT --port 8000 \
-  --served-model-name <catalogue id> --tokenizer <base repo> --enforce-eager --disable-log-requests
+  --served-model-name <catalogue id> --tokenizer <base repo> \
+  --max-model-len <fits this GPU> --gpu-memory-utilization 0.90 --max-num-seqs 4 \
+  --enforce-eager --disable-log-requests
 ```
 
 The port still comes from the Docker flags in `env` (`-p 8000:8000`), never from
 the entrypoint arguments.
+
+### Launch limits (`--max-model-len`)
+
+vLLM defaults `--max-model-len` to what the model card advertises. A 27B GGUF
+that claims 262 144 tokens then asks for a KV cache of tens of gigabytes, and on a
+24 GB card the **engine core subprocess is killed while initialising**: the server
+only prints `RuntimeError: Engine core initialization failed. See root cause
+above.` and the real `torch.OutOfMemoryError` sits higher in the container log.
+
+`planLaunchLimits` (`src/main/services/inference/model-plan.ts`) sizes the request
+before the instance is created:
+
+| Input | Effect |
+| --- | --- |
+| GPU VRAM (`offer.gpuRamGb`) | budget: `0.90 × VRAM − weights − 1.5 GB` |
+| parameter count (catalogue / GGUF metadata) | weights from the quantisation (F16 2 B/param, Q8 1 B, Q4 0.55 B, IQ3 0.45 B, Q2 0.35 B …) |
+| advertised context | KV growth per parameter per token, `1.2e-14` GB (conservative, GQA-derived) |
+
+`--max-model-len` becomes the smaller of the advertised window and what that
+budget can hold, floored at 4 096 and capped at 32 768 (past that the KV cache
+dominates the bill and adds little). `--gpu-memory-utilization 0.90` leaves room for
+the CUDA context and activations; `--max-num-seqs 4` matches the concurrency the
+local IDE endpoint allows.
+
+When a boot does fail, the orchestrator reads the **whole** container log, not just
+the tail: `extractRootCause` pulls the deepest error line (OOM, KV-cache sizing,
+`ValueError`, …) into the session log and into the final failure message, and
+`describeMemoryFailure` labels memory arithmetic as such so it is retried instead
+of being blamed on the model.
 
 
 ### Model checks before renting

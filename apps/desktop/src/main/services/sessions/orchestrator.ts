@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { DEFAULT_GPU_STARTUP_RETRIES, type Estimate, type GpuFilters, type Session, type SessionStart } from "@maia/contracts";
 import { buildEstimate } from "../cost/estimator";
-import { describeModelFailure } from "./failure";
+import { describeMemoryFailure, describeModelFailure, extractRootCause } from "./failure";
 import type { SessionStore } from "./store";
 
 export type StreamKind = "content" | "reasoning";
@@ -432,7 +432,14 @@ export class SessionOrchestrator {
    */
   private async collectRemoteLogs(
     instanceId: number
-  ): Promise<{ summary: string; tail: string } | null> {
+  ): Promise<{
+    summary: string;
+    tail: string;
+    /** Deepest error line, searched in the whole log. */
+    fullLog: string;
+    rootCause: string | null;
+    memoryNote: string | null;
+  } | null> {
     if (!this.options.compute.getInstanceLogs) {
       return null;
     }
@@ -452,7 +459,17 @@ export class SessionOrchestrator {
       return null;
     }
 
-    return { summary: lines.slice(-2).join(" | ").slice(0, 300), tail };
+    // The real cause is usually *above* the launcher's traceback, often far
+    // outside the tail, so it is searched in the whole log.
+    return {
+      summary: lines.slice(-2).join(" | ").slice(0, 300),
+      tail,
+      // A gated-repository or missing-config error is logged at download time,
+      // long before the traceback that ends the log.
+      fullLog: raw.slice(-40_000),
+      rootCause: extractRootCause(raw),
+      memoryNote: describeMemoryFailure(raw)
+    };
   }
 
   /**
@@ -549,13 +566,16 @@ export class SessionOrchestrator {
         // Ask the container what it actually said before it disappears with the
         // instance: "the port never opened" is not a diagnosis.
         const remoteLogs = await this.collectRemoteLogs(current.instanceId);
+        const rootCause = remoteLogs?.rootCause ?? null;
+        // "Engine core initialization failed" is a symptom; this says what died.
+        const diagnosis = rootCause ? `${message} — ${rootCause}` : message;
 
         // A model vLLM cannot load fails identically on every machine. The
         // container log is the only place that says so, so it has to be read
         // before the retry decision — otherwise a bad repository rents six GPUs.
         const modelFailure = describeModelFailure({
           message,
-          logs: remoteLogs?.tail ?? null
+          logs: remoteLogs?.fullLog ?? null
         });
 
         // "The host never reported in" is not a broken request: retrying on
@@ -582,11 +602,18 @@ export class SessionOrchestrator {
         // attempt it belongs to — never folded into a "trying another GPU" note.
         append(
           "error",
-          `${current.offer.gpuName} startup failed on ${host} (attempt ${attempt} of ${totalAttempts}): ${message}`
+          `${current.offer.gpuName} startup failed on ${host} (attempt ${attempt} of ${totalAttempts}): ${diagnosis}`
         );
 
         if (remoteLogs) {
           append("error", `Container log: ${remoteLogs.summary}`);
+        }
+
+        if (remoteLogs?.memoryNote) {
+          append(
+            "warn",
+            `The container ran out of GPU memory: ${remoteLogs.memoryNote}. Retries size --max-model-len to the card, so a smaller context should boot.`
+          );
         }
 
         if (modelFailure) {
@@ -627,7 +654,7 @@ export class SessionOrchestrator {
         if (canRetryOnAnotherHost) {
           append(
             "warn",
-            `${current.offer.gpuName} did not come up (${message}). ${
+            `${current.offer.gpuName} did not come up (${diagnosis}). ${
               unrecoverable ? `Marking ${host} as unstable and ` : ""
             }trying another GPU (retry ${attempt} of ${startupRetries})…`
           );
@@ -679,12 +706,12 @@ export class SessionOrchestrator {
           const reason = modelFailure
             ? `This model cannot be served: ${modelFailure}.`
             : attempt > 1
-              ? `Gave up after ${attempt} of ${totalAttempts} GPU attempts. Last error: ${message}${
+              ? `Gave up after ${attempt} of ${totalAttempts} GPU attempts. Last error: ${diagnosis}${
                   attempt < totalAttempts
                     ? " No further GPU offers matched your preferences — relax the GPU filters or raise the price cap in Settings."
                     : ` Raise "GPU startup retries" in Settings to try more hosts.`
                 }`
-              : message;
+              : diagnosis;
           this.options.store.appendEvent(sessionId, "error", reason, new Date(this.now()));
           this.options.store.transition(sessionId, "failed", {
             endedAt: new Date(this.now()).toISOString(),

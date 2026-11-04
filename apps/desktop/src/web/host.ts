@@ -19,6 +19,7 @@ import { createMockComputeProvider, createMockInference } from "../main/services
 import { createVastComputeProvider } from "../main/services/providers/vastai/compute-provider";
 import { VastAiClient } from "../main/services/providers/vastai/client";
 import { createVllmRuntime } from "../main/services/inference/vllm";
+import { createModelPlanResolver } from "../main/services/inference/model-plan-resolver";
 import { GpuReputationClient } from "../main/services/gpu/reputation";
 import { IpcRegistry } from "../main/ipc/registry";
 import { registerSettingsHandlers } from "../main/ipc/settings";
@@ -102,6 +103,13 @@ export async function createWebHost(options: WebHostOptions): Promise<WebHost> {
         getFilters: () => settings.get().gpuFilters,
         getReputations: () => reputation.snapshot(),
         reportOutcome: (input) => reputation.report(input),
+        // Same launch plan as the desktop build: the GGUF plugin, its tokenizer,
+        // and a `--max-model-len` that fits the card the offer is for.
+        getModelPlan: createModelPlanResolver({
+          artifacts: (modelId) => catalogueRepository.getArtifacts(modelId),
+          loadDetail: (modelId) => catalogue.detail(modelId),
+          get: (modelId) => catalogueRepository.get(modelId)
+        }),
         readyTimeoutMs: (options.readinessTimeoutMinutes ?? 20) * 60_000,
         logger
       })
