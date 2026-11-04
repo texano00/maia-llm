@@ -1,6 +1,6 @@
 import { memo } from "react";
 import { useNavigate } from "react-router-dom";
-import type { CatalogueModel, Session } from "@maia/contracts";
+import type { CatalogueModel, ModelArtifact, Session } from "@maia/contracts";
 import { isChatCapableModel } from "@maia/contracts";
 import { useWorkspace } from "../../shared/session/WorkspaceProvider";
 import { formatParameters, formatContext, formatBytes, formatUsd } from "../../shared/format";
@@ -157,14 +157,11 @@ export function CataloguePage() {
                   <dt>Artifacts</dt>
                   <dd>{selected.artifacts.length}</dd>
                 </div>
+                <div className="info-row">
+                  <dt>Weights</dt>
+                  <dd>{describeWeights(selected.artifacts)}</dd>
+                </div>
               </dl>
-
-              {selected.artifacts.some((artifact) => artifact.format === "gguf") &&
-              !selected.artifacts.some((artifact) => artifact.format === "safetensors") ? (
-                <p className="pill pill-warning">
-                  GGUF-only repository — the current vLLM runtime may not load it
-                </p>
-              ) : null}
 
               {selected.artifacts.length > 0 ? (
                 <ul className="artifact-list">
@@ -232,7 +229,7 @@ export function CataloguePage() {
                       </dd>
                     </div>
                   </dl>
-                  {estimate.simulated ? <p className="pill pill-warning">Simulated GPU</p> : null}
+                  {estimate.simulated ? <span className="pill pill-warning">Simulated GPU</span> : null}
                   <ul className="muted small">
                     {estimate.assumptions.map((assumption) => (
                       <li key={assumption}>{assumption}</li>
@@ -338,6 +335,26 @@ function describeSessionState(session: Session): string {
     default:
       return `Session ${session.state}`;
   }
+}
+
+/**
+ * How this repository will be served. GGUF is supported through vLLM's GGUF
+ * plugin (experimental upstream), so the panel states the fact instead of
+ * warning that the runtime "may not load it".
+ */
+function describeWeights(artifacts: readonly ModelArtifact[]): string {
+  const safetensors = artifacts.some((artifact) => artifact.format === "safetensors");
+  if (safetensors) {
+    return "safetensors";
+  }
+
+  const gguf = artifacts.filter((artifact) => artifact.format === "gguf");
+  if (gguf.length === 0) {
+    return "unknown";
+  }
+
+  const quants = [...new Set(gguf.map((artifact) => artifact.quantization).filter(Boolean))];
+  return quants.length > 0 ? `GGUF · ${quants.slice(0, 3).join(", ")}` : "GGUF";
 }
 
 function formatCount(value: number): string {
