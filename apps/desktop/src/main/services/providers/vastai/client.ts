@@ -320,22 +320,39 @@ export class VastAiClient {
     return Array.isArray(instances) ? instances : instances ? Object.values(instances) : [];
   }
 
+  /**
+   * Releasing a GPU has to be idempotent: an instance can disappear on its own
+   * (host failure, failed start), and a 404 then means "already gone", not an
+   * error worth surfacing.
+   */
   async destroyInstance(instanceId: number): Promise<void> {
-    try {
-      await this.http.request(`/api/v0/instances/${instanceId}/`, {
+    const attempt = async (version: "v0" | "v1"): Promise<void> => {
+      await this.http.request(`/api/${version}/instances/${instanceId}/`, {
         method: "DELETE",
         headers: this.authHeaders()
       });
-    } catch (error) {
+    };
+
+    const gone = (error: unknown): boolean => {
       const status = (error as { status?: number }).status;
-      if (status !== 404 && status !== 410) {
+      return status === 404 || status === 410;
+    };
+
+    try {
+      await attempt("v0");
+      return;
+    } catch (error) {
+      if (!gone(error)) {
         throw error;
       }
+    }
 
-      await this.http.request(`/api/v1/instances/${instanceId}/`, {
-        method: "DELETE",
-        headers: this.authHeaders()
-      });
+    try {
+      await attempt("v1");
+    } catch (error) {
+      if (!gone(error)) {
+        throw error;
+      }
     }
   }
 
