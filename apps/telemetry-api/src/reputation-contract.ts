@@ -19,25 +19,25 @@ export const gpuReputationSchema = z.object({
   lastSuccessAt: z.string().nullable(),
   lastFailureAt: z.string().nullable(),
   lastError: z.string().max(600).nullable(),
-  updatedAt: z.string()
+  updatedAt: z.string(),
 });
 
 export const gpuReportSchema = z.object({
   outcome: gpuOutcomeSchema,
   gpuName: z.string().max(120),
   offerId: z.number().int().positive().optional(),
-  error: z.string().max(600).optional()
+  error: z.string().max(600).optional(),
 });
 
 export const gpuListSchema = z.object({
   gpus: z.array(gpuReputationSchema),
-  serverTime: z.string()
+  serverTime: z.string(),
 });
 
 export const gpuUpsertSchema = z.object({
   gpuName: z.string().max(120),
   status: gpuStatusSchema,
-  note: z.string().max(600).optional()
+  note: z.string().max(600).optional(),
 });
 
 export type GpuStatus = z.infer<typeof gpuStatusSchema>;

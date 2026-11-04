@@ -6,15 +6,19 @@ a host that cannot start a container costs one failure **in total**, not one per
 workspace and not a full boot window.
 
 It runs beside the telemetry API (same Fastify app), so one process serves both.
+Verdicts and the underlying attempt history are stored in a local SQLite
+database; see [data-storage.md](data-storage.md) for the schema, the retention
+rules and how to move the service to PostgreSQL or MySQL later.
 
 ```bash
 npm run -w @maia/telemetry-api dev       # http://localhost:8787
 ```
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `MAIA_REPUTATION_FILE` | `./var/gpu-reputation.json` | Where verdicts are persisted |
-| `MAIA_UNSTABLE_TTL_HOURS` | `6` | How long a failure keeps a machine out of circulation |
+| Variable                  | Default             | Purpose                                                      |
+| ------------------------- | ------------------- | ------------------------------------------------------------ |
+| `MAIA_DATABASE_FILE`      | `./var/maia.sqlite` | Database holding verdicts and telemetry                      |
+| `MAIA_UNSTABLE_TTL_HOURS` | `6`                 | How long a failure keeps a machine out of circulation        |
+| `MAIA_REPUTATION_FILE`    | unset               | Legacy JSON file: imported once on first boot, then archived |
 
 ## Why machine ids, not offer ids
 
@@ -51,11 +55,11 @@ Query: `?status=good|unstable|unknown`, `?limit=1..1000` (default 200).
 
 `status` is computed on read:
 
-| Value | Meaning |
-| --- | --- |
-| `good` | Started and served a model at least once |
-| `unstable` | Failed to start, and the verdict is still fresh |
-| `unknown` | No history, **or** the failure is older than the TTL |
+| Value      | Meaning                                              |
+| ---------- | ---------------------------------------------------- |
+| `good`     | Started and served a model at least once             |
+| `unstable` | Failed to start, and the verdict is still fresh      |
+| `unknown`  | No history, **or** the failure is older than the TTL |
 
 Only `unstable` removes a machine from circulation, so a host that was fixed by its
 owner is retried automatically once the verdict lapses. History is kept.
@@ -69,13 +73,43 @@ The record, or `404` when nothing is known about that machine.
 Records the outcome of one provisioning attempt.
 
 ```json
-{ "outcome": "failure", "gpuName": "RTX 3090", "offerId": 59138348, "error": "failed to inject CDI devices…" }
+{
+  "outcome": "failure",
+  "gpuName": "RTX 3090",
+  "offerId": 59138348,
+  "error": "failed to inject CDI devices…"
+}
 ```
 
 - `success` → `status: "good"`, `failures` reset to 0, `lastSuccessAt` set.
 - `failure` → `status: "unstable"`, `failures + 1`, `lastError` stored.
 
-Returns `202` with the stored record.
+Returns `202` with the stored record. Every attempt is also appended to a
+history table, so the raw evidence survives a counter reset.
+
+### `GET /v1/gpus/:machineId/reports`
+
+Provisioning attempts seen for one machine, newest first (`?limit=1..1000`,
+default 50). Useful when deciding whether a host deserves a second chance, and as
+the raw material for tuning the unstable-verdict policy.
+
+```json
+{
+  "machineId": 154662,
+  "reports": [
+    {
+      "id": 12,
+      "machineId": 154662,
+      "outcome": "failure",
+      "gpuName": "RTX 3090",
+      "offerId": 59138348,
+      "error": "failed to inject CDI devices: unresolvable CDI devices",
+      "reportedAt": "2026-11-04T17:37:21.000Z"
+    }
+  ],
+  "serverTime": "2026-11-04T17:47:27.907Z"
+}
+```
 
 ### `PUT /v1/gpus/:machineId`
 
@@ -87,7 +121,8 @@ Manual override, for example to clear a machine flagged by mistake.
 
 ### `DELETE /v1/gpus/:machineId`
 
-Forgets a machine. `204` when removed, `404` when it was unknown.
+Forgets a machine, including its attempt history. `204` when removed, `404` when
+it was unknown.
 
 ```bash
 # flag a host by hand

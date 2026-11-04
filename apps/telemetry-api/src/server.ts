@@ -1,31 +1,46 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import { pathToFileURL } from "node:url";
-import { resolve } from "node:path";
+import { loadConfig, type ServerConfig } from "./config.js";
+import { createAppContext, type AppContext } from "./context.js";
 import { registerDiagnosticsRoutes } from "./diagnostics.js";
 import { registerReputationRoutes } from "./reputation.js";
-import { GpuReputationStore } from "./reputation-store.js";
 
 export interface BuildServerOptions {
-  /** Where GPU reputation is persisted; defaults to `MAIA_REPUTATION_FILE`. */
-  reputationFile?: string;
-  reputationStore?: GpuReputationStore;
+  /** Pre-built context (tests); the server will not close it. */
+  context?: AppContext;
+  /** Config for the context this call creates. */
+  config?: ServerConfig;
+  /** Test clock used by the services. */
+  now?: () => number;
 }
 
-export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
+/**
+ * Builds the HTTP surface: telemetry ingestion plus the public GPU reputation
+ * API. Storage comes from the context, so swapping SQLite for another database
+ * never touches this file.
+ */
+export async function buildServer(options: BuildServerOptions = {}): Promise<FastifyInstance> {
+  const ownsContext = options.context === undefined;
+  const context =
+    options.context ??
+    (await createAppContext({
+      config: options.config ?? loadConfig(),
+      ...(options.now ? { now: options.now } : {}),
+    }));
+
   const app = Fastify({ logger: process.env.NODE_ENV !== "test" });
 
-  app.get("/health", async () => ({ status: "ok" }));
-  registerDiagnosticsRoutes(app);
+  app.get("/health", async () => ({ status: "ok", storage: context.db.dialect }));
 
-  const store =
-    options.reputationStore ??
-    new GpuReputationStore({
-      filePath:
-        options.reputationFile ??
-        process.env.MAIA_REPUTATION_FILE ??
-        resolve(process.cwd(), "var/gpu-reputation.json")
+  registerDiagnosticsRoutes(app, context.telemetry);
+  registerReputationRoutes(app, context.gpus);
+
+  if (ownsContext) {
+    // Only close what this call opened.
+    app.addHook("onClose", async () => {
+      await context.close();
     });
-  registerReputationRoutes(app, store);
+  }
 
   return app;
 }
@@ -34,9 +49,23 @@ const isMain =
   process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
 
 if (isMain) {
-  const app = buildServer();
+  const context = await createAppContext({ config: loadConfig() });
+  const app = await buildServer({ context });
   const port = Number(process.env.TELEMETRY_PORT ?? 8787);
   const host = process.env.TELEMETRY_HOST ?? "127.0.0.1";
 
   await app.listen({ port, host });
+  app.log.info(
+    { storage: context.db.dialect, file: context.config.databaseFile },
+    "telemetry API ready",
+  );
+
+  const shutdown = async (): Promise<void> => {
+    await app.close();
+    await context.close();
+    process.exit(0);
+  };
+
+  process.once("SIGINT", () => void shutdown());
+  process.once("SIGTERM", () => void shutdown());
 }

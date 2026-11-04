@@ -33,6 +33,12 @@ The service also stores which GPU machines start reliably; the desktop app reads
 and writes it to skip broken hosts. See
 [docs/gpu-reputation-api.md](gpu-reputation-api.md) for the endpoints.
 
+Both telemetry and GPU verdicts live in one SQLite database
+(`MAIA_DATABASE_FILE`, default `./var/maia.sqlite`). The storage layer is split
+into a driver-free port, dialect-free repositories and a single SQLite adapter, so
+moving to PostgreSQL or MySQL later means writing one adapter — see
+[docs/data-storage.md](data-storage.md).
+
 `npm run -w @maia/desktop dev` rebuilds `better-sqlite3` for the Electron ABI
 before starting. Node-based unit tests expect the Node ABI; after running the
 desktop app, restore it with `npm rebuild better-sqlite3` before running
