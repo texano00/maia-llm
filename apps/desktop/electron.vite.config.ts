@@ -35,8 +35,24 @@ export default defineConfig({
     root: `${rootDir}/src/renderer`,
     resolve: { alias },
     build: {
+      // Electron loads from disk, so aggressive minification and no source maps
+      // keep the parse cost (and therefore the first paint) down.
+      minify: "esbuild",
+      sourcemap: false,
+      chunkSizeWarningLimit: 600,
       rollupOptions: {
-        input: `${rootDir}/src/renderer/index.html`
+        input: `${rootDir}/src/renderer/index.html`,
+        output: {
+          // React and the router rarely change: keep them in a cached chunk so a
+          // renderer update does not have to re-download the framework.
+          manualChunks(id: string) {
+            if (!id.includes("node_modules")) {
+              return undefined;
+            }
+
+            return /react(-dom|-router)?[/\\]/.test(id) ? "react" : "vendor";
+          }
+        }
       }
     },
     plugins: [react()]

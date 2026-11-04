@@ -71,7 +71,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
     const result = await bridge.invoke<Session[]>("session.list");
     if (result.ok) {
-      setSessions(result.data);
+      // Returning the previous array keeps the provider value stable, so the
+      // whole tree does not re-render every polling tick.
+      setSessions((current) => (sameSessions(current, result.data) ? current : result.data));
     }
   }, []);
 
@@ -113,8 +115,26 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     void reloadSessions();
-    const timer = setInterval(() => void reloadSessions(), 5_000);
-    return () => clearInterval(timer);
+    const timer = setInterval(() => {
+      // A hidden window has nothing to update; wake up on the next visibility change.
+      if (typeof document !== "undefined" && document.hidden) {
+        return;
+      }
+
+      void reloadSessions();
+    }, 5_000);
+
+    const onVisible = (): void => {
+      if (!document.hidden) {
+        void reloadSessions();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [reloadSessions]);
 
   const refreshCatalogue = useCallback(async () => {
@@ -276,4 +296,27 @@ export function useWorkspace(): WorkspaceValue {
   }
 
   return value;
+}
+
+/** Session lists are small; comparing them is cheaper than a full re-render. */
+function sameSessions(left: Session[], right: Session[]): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  for (let index = 0; index < left.length; index += 1) {
+    const a = left[index]!;
+    const b = right[index]!;
+    if (
+      a.id !== b.id ||
+      a.state !== b.state ||
+      a.events.length !== b.events.length ||
+      a.readyAt !== b.readyAt ||
+      a.instanceId !== b.instanceId
+    ) {
+      return false;
+    }
+  }
+
+  return true;
 }

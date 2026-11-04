@@ -42,7 +42,8 @@ let registry: IpcRegistry | null = null;
 let updates: UpdateService | null = null;
 let updateTimer: NodeJS.Timeout | null = null;
 let diagnostics: DiagnosticForwarder | null = null;
-let appLogger: ReturnType<typeof createLogger> | null = null;
+let appLogger: ReturnType<typeof createLogger>["logger"] | null = null;
+let logFlush: (() => void) | null = null;
 
 app.setName("Maia LLM");
 app.setAppUserModelId("com.texano00.maiallm");
@@ -117,7 +118,7 @@ function createWindow(): void {
   }
 }
 
-function toUpdateLogger(logger: ReturnType<typeof createLogger>): UpdateLogger {
+function toUpdateLogger(logger: ReturnType<typeof createLogger>["logger"]): UpdateLogger {
   return {
     info: (message, context) => logger.info(context ?? {}, message),
     warn: (message, context) => logger.warn(context ?? {}, message),
@@ -166,8 +167,9 @@ async function bootstrap(): Promise<void> {
       })
     : null;
 
-  const logger = createLogger(paths, { diagnostics: diagnostics ?? undefined });
+  const { logger, flush: flushLogs } = createLogger(paths, { diagnostics: diagnostics ?? undefined });
   appLogger = logger;
+  logFlush = flushLogs;
 
   const repository = new HistoryRepository(database);
   const vault = new CredentialVault(paths.vaultDir);
@@ -215,10 +217,20 @@ async function bootstrap(): Promise<void> {
     logger
   });
 
-  const reconciled = await sessions.reconcile();
-  if (reconciled > 0) {
-    logger.warn({ reconciled }, "Released sessions left behind by a previous run");
-  }
+  // Reclaiming instances talks to vast.ai; it must not delay the first paint.
+  const reconcileTask = sessions
+    .reconcile()
+    .then((reconciled) => {
+      if (reconciled > 0) {
+        logger.warn({ reconciled }, "Released sessions left behind by a previous run");
+      }
+    })
+    .catch((error: unknown) => {
+      logger.warn(
+        { reason: error instanceof Error ? error.message : String(error) },
+        "Could not reconcile sessions on startup"
+      );
+    });
 
   const idleTimer = setInterval(() => {
     void sessions.reapIdle();
@@ -348,9 +360,15 @@ async function bootstrap(): Promise<void> {
       closeDatabase(database);
       database = null;
     }
+
+    // The file destination is asynchronous now, so the tail must be written out.
+    logFlush?.();
   });
 
+  // The window comes first: services that touch the network (reconcile, update
+  // checks) finish in the background instead of delaying the first paint.
   createWindow();
+  void reconcileTask;
   scheduleUpdateChecks(updates, config.updateCheckIntervalHours);
 
   app.on("activate", () => {

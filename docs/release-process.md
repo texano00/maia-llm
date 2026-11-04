@@ -60,6 +60,46 @@ Without the secret the build still succeeds and prints
   unsigned build cannot run; either switch it to evaluation/off (Windows requires a
   reinstall of the OS for that setting) or use a signed build.
 
+### Smart App Control, precisely
+
+Smart App Control (SAC) is stricter than SmartScreen: it blocks anything Microsoft
+cannot vouch for through its own reputation service, so *even a self-signed binary is
+blocked*. Two facts follow:
+
+- Turning SAC **off** is one-way: Windows will not let you turn it back on without
+  resetting the OS. It is the only way to run an unsigned build on a machine where it
+  is enabled.
+- The durable fix is a code-signing certificate issued to a verified organisation
+  (OV or EV). Once `CSC_LINK_BASE64` and `CSC_KEY_PASSWORD` exist in the repository,
+  every workflow build is signed automatically and the `Get-AuthenticodeSignature`
+  gate refuses to publish an unsigned artifact.
+
+### Signing a build locally
+
+Signing on your own machine proves the pipeline end to end before a certificate is
+purchased; it does **not** lift SAC, and Windows shows "Unknown publisher" until the
+certificate is trusted.
+
+```powershell
+$env:CSC_LINK = "C:\certs\maia.pfx"
+$env:CSC_KEY_PASSWORD = "..."
+npm run -w @maia/desktop dist:win
+Get-AuthenticodeSignature .\apps\desktop\release\*.exe | Format-Table -AutoSize
+```
+
+A self-made certificate (PowerShell, elevated) can stand in for a few tests:
+
+```powershell
+$cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=Maia LLM Test" `
+  -CertStoreLocation Cert:\CurrentUser\My -KeyUsage DigitalSignature `
+  -NotAfter (Get-Date).AddYears(1)
+Export-PfxCertificate -Cert $cert -FilePath C:\certs\maia-test.pfx -Password (Read-Host -AsSecureString)
+```
+
+To let *your* machine trust it: import the certificate into **Trusted Root
+Certification Authorities** and **Trusted Publishers**. Other machines will still
+warn — that is the reputation gap only a real certificate closes.
+
 ## Update feeds
 
 `latest.yml` published next to each installer is what the in-app updater reads.

@@ -1,5 +1,6 @@
+import { memo } from "react";
 import { useNavigate } from "react-router-dom";
-import type { Session } from "@maia/contracts";
+import type { CatalogueModel, Session } from "@maia/contracts";
 import { useWorkspace } from "../../shared/session/WorkspaceProvider";
 import { formatParameters, formatContext, formatBytes, formatUsd } from "../../shared/format";
 export function CataloguePage() {
@@ -113,31 +114,12 @@ export function CataloguePage() {
             <li className="muted">No models match this search.</li>
           ) : null}
           {models.map((model) => (
-            <li key={model.id}>
-              <button
-                type="button"
-                className={selected?.model.id === model.id ? "model-row selected" : "model-row"}
-                onClick={() => void selectModel(model.id)}
-              >
-                <span className="model-name-row">
-                  <span className="model-name">{model.id}</span>
-                  {model.gated !== "none" ? <span className="pill pill-warning">gated</span> : null}
-                </span>
-                <span className="model-meta">
-                  {model.pipelineTag ?? "unknown task"}
-                  {model.parameterCount ? ` · ${formatParameters(model.parameterCount)}` : ""}
-                  {model.contextWindow ? ` · ${formatContext(model.contextWindow)} ctx` : ""}
-                </span>
-                <span className="model-stats">
-                  {model.lastModifiedAt
-                    ? `Updated ${formatRelative(model.lastModifiedAt)}`
-                    : "Update date unknown"}
-                  <span className="stat">⤓ {formatCount(model.downloads)}</span>
-                  <span className="stat">♥ {formatCount(model.likes)}</span>
-                  {model.license ? <span className="stat">{model.license}</span> : null}
-                </span>
-              </button>
-            </li>
+            <ModelRow
+              key={model.id}
+              model={model}
+              selected={selected?.model.id === model.id}
+              onSelect={selectModel}
+            />
           ))}
         </ul>
 
@@ -276,6 +258,48 @@ export function CataloguePage() {
     </section>
   );
 }
+
+/**
+ * One row of the catalogue. Memoised: the list holds up to a hundred entries and
+ * the shared workspace provider updates on every poll.
+ */
+const ModelRow = memo(function ModelRow({
+  model,
+  selected,
+  onSelect
+}: {
+  model: CatalogueModel;
+  selected: boolean;
+  onSelect(modelId: string): Promise<void>;
+}) {
+  return (
+    <li>
+      <button
+        type="button"
+        className={selected ? "model-row selected" : "model-row"}
+        onClick={() => void onSelect(model.id)}
+      >
+        <span className="model-name-row">
+          <span className="model-name">{model.id}</span>
+          {model.gated !== "none" ? <span className="pill pill-warning">gated</span> : null}
+        </span>
+        <span className="model-meta">
+          {model.pipelineTag ?? "unknown task"}
+          {model.parameterCount ? ` · ${formatParameters(model.parameterCount)}` : ""}
+          {model.contextWindow ? ` · ${formatContext(model.contextWindow)} ctx` : ""}
+        </span>
+        <span className="model-stats">
+          {model.lastModifiedAt
+            ? `Updated ${formatRelative(model.lastModifiedAt)}`
+            : "Update date unknown"}
+          <span className="stat">⤓ {formatCount(model.downloads)}</span>
+          <span className="stat">♥ {formatCount(model.likes)}</span>
+          {model.license ? <span className="stat">{model.license}</span> : null}
+        </span>
+      </button>
+    </li>
+  );
+});
 
 /** "2 running · 1 provisioning" — models boot independently, so say which is which. */
 function describeSessions(sessions: Session[]): string {

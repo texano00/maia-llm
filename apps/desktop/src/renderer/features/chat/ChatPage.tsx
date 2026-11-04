@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type {
   ConversationDetail,
@@ -64,6 +64,7 @@ export function ChatPage() {
       }
 
       setActiveConversationId(id);
+      rememberConversation(id);
       setStreaming(null);
       const result = await bridge.invoke<ConversationDetail>("conversation.get", { id });
 
@@ -82,6 +83,15 @@ export function ChatPage() {
     void loadConversations();
   }, [loadConversations]);
 
+  // Routes are lazily loaded, so coming back to the chat remounts this component.
+  // Runs once on mount: afterwards the user's own navigation wins.
+  useEffect(() => {
+    const last = recallConversation();
+    if (last) {
+      void openConversation(last);
+    }
+  }, []);
+
   // Starting a model from the catalogue lands here: select that session so the
   // composer is usable straight away instead of asking for a new chat.
   useEffect(() => {
@@ -96,9 +106,18 @@ export function ChatPage() {
   }, [clearFocusSession, focusSessionId, sessions]);
 
   useEffect(() => {
+    // The elapsed/cost clock only matters while a session is running. Ticking
+    // otherwise re-rendered the whole transcript every second for nothing.
+    const live = sessions.some(
+      (session) => session.state === "active" || session.state === "provisioning"
+    );
+    if (!live) {
+      return;
+    }
+
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
-  }, []);
+  }, [sessions]);
 
   useEffect(() => {
     const bridge = window.maia;
@@ -195,6 +214,7 @@ export function ChatPage() {
   function startNewChat(): void {
     setCreating(true);
     setActiveConversationId(null);
+    rememberConversation(null);
     setDetail(null);
     setStreaming(null);
     setActiveSessionId(sessions[0]?.id ?? null);
@@ -246,6 +266,7 @@ export function ChatPage() {
 
     if (!activeConversationId) {
       setActiveConversationId(result.data.conversationId);
+      rememberConversation(result.data.conversationId);
       setCreating(false);
       await loadConversations();
     }
@@ -580,10 +601,7 @@ export function ChatPage() {
             <p className="muted">Pick a chat on the left, or start one with New.</p>
           ) : null}
           {detail?.messages.map((message) => (
-            <article key={message.id} className={`bubble bubble-${message.role}`}>
-              <header>{roleLabel(message.role)}</header>
-              <p>{message.content}</p>
-            </article>
+            <MessageBubble key={message.id} role={message.role} content={message.content} />
           ))}
           {streaming ? (
             <>
@@ -706,5 +724,44 @@ function roleLabel(role: string): string {
       return "Notice";
     default:
       return role;
+  }
+}
+
+/** Memoised so the one-second clock tick does not re-render every old message. */
+const MessageBubble = memo(function MessageBubble({
+  role,
+  content
+}: {
+  role: string;
+  content: string;
+}) {
+  return (
+    <article className={`bubble bubble-${role}`}>
+      <header>{roleLabel(role)}</header>
+      <p>{content}</p>
+    </article>
+  );
+});
+
+const LAST_CONVERSATION_KEY = "maia:last-conversation";
+
+function rememberConversation(id: string | null): void {
+  try {
+    if (id === null) {
+      window.localStorage.removeItem(LAST_CONVERSATION_KEY);
+      return;
+    }
+
+    window.localStorage.setItem(LAST_CONVERSATION_KEY, id);
+  } catch {
+    // Storage can be unavailable; reopening the chat is a convenience only.
+  }
+}
+
+function recallConversation(): string | null {
+  try {
+    return window.localStorage.getItem(LAST_CONVERSATION_KEY);
+  } catch {
+    return null;
   }
 }

@@ -12,12 +12,21 @@ export interface LoggerOptions {
   diagnostics?: DiagnosticForwarder | undefined;
 }
 
-export function createLogger(paths: AppPaths, options: LoggerOptions = {}): Logger {
+export interface AppLogger {
+  logger: Logger;
+  /** Persists everything already written before the process exits. */
+  flush(): void;
+}
+
+export function createLogger(paths: AppPaths, options: LoggerOptions = {}): AppLogger {
   mkdirSync(paths.logsDir, { recursive: true });
 
+  // Asynchronous writes: a synchronous destination blocks the main thread on
+  // every log line, which is felt as a laggy window while a model boots.
   const destination = pino.destination({
     dest: join(paths.logsDir, "maia.log"),
-    sync: true
+    sync: false,
+    mkdir: true
   });
 
   const streams: pino.StreamEntry[] = [{ level: "trace", stream: destination }];
@@ -26,7 +35,7 @@ export function createLogger(paths: AppPaths, options: LoggerOptions = {}): Logg
     streams.push({ level: "trace", stream: options.diagnostics });
   }
 
-  return pino(
+  const logger = pino(
     {
       level: options.level ?? process.env.LOG_LEVEL ?? "info",
       redact: {
@@ -43,4 +52,15 @@ export function createLogger(paths: AppPaths, options: LoggerOptions = {}): Logg
     },
     pino.multistream(streams)
   );
+
+  return {
+    logger,
+    flush: () => {
+      try {
+        destination.flushSync();
+      } catch {
+        // Nothing left to flush.
+      }
+    }
+  };
 }
