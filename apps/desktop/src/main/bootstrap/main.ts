@@ -120,17 +120,16 @@ function createWindow(): void {
 
 function toUpdateLogger(logger: ReturnType<typeof createLogger>["logger"]): UpdateLogger {
   return {
-    info: (message, context) => logger.info(context ?? {}, message),
-    warn: (message, context) => logger.warn(context ?? {}, message),
-    error: (message, context) => logger.error(context ?? {}, message)
+    info: (message, context) => logger.info(message, context),
+    warn: (message, context) => logger.warn(message, context),
+    error: (message, context) => logger.error(message, context)
   };
 }
 
 function logBridgeMissing(bridgeType: unknown): void {
-  appLogger?.error(
-    { bridgeType },
-    "Preload bridge missing: IPC is unavailable in this renderer"
-  );
+  appLogger?.error("Preload bridge missing: IPC is unavailable in this renderer", {
+    bridgeType
+  });
 }
 
 function scheduleUpdateChecks(service: UpdateService, intervalHours: number): void {
@@ -222,14 +221,14 @@ async function bootstrap(): Promise<void> {
     .reconcile()
     .then((reconciled) => {
       if (reconciled > 0) {
-        logger.warn({ reconciled }, "Released sessions left behind by a previous run");
+        logger.warn("Released sessions left behind by a previous run", { reconciled });
       }
     })
     .catch((error: unknown) => {
       logger.warn(
-        { reason: error instanceof Error ? error.message : String(error) },
-        "Could not reconcile sessions on startup"
-      );
+          "Could not reconcile sessions on startup",
+          { reason: error instanceof Error ? error.message : String(error) }
+        );
     });
 
   const idleTimer = setInterval(() => {
@@ -257,14 +256,11 @@ async function bootstrap(): Promise<void> {
 
   registry = new IpcRegistry({
     onError: (channel, error) => {
-      logger.error(
-        {
-          channel,
-          reason: error instanceof Error ? error.message : String(error),
-          code: error !== null && typeof error === "object" && "code" in error ? error.code : undefined
-        },
-        "IPC handler failed"
-      );
+      logger.error("IPC handler failed", {
+        channel,
+        reason: error instanceof Error ? error.message : String(error),
+        code: error !== null && typeof error === "object" && "code" in error ? error.code : undefined
+      });
     }
   });
   registry.register("app.info", z.unknown(), () => ({
@@ -324,19 +320,16 @@ async function bootstrap(): Promise<void> {
   });
   registry.install();
 
-  logger.info(
-    {
-      providerMode: config.providerMode,
-      releaseChannel: config.releaseChannel,
-      database: paths.database,
-      conversations: repository.listConversations(1).length,
-      vaultDirectory: paths.vaultDir,
-      updateCheckIntervalHours: config.updateCheckIntervalHours,
-      diagnosticsEndpoint: diagnostics?.getUrl() ?? null,
-      credentials: credentials.status()
-    },
-    "Application services initialized"
-  );
+  logger.info("Application services initialized", {
+    providerMode: config.providerMode,
+    releaseChannel: config.releaseChannel,
+    database: paths.database,
+    conversations: repository.listConversations(1).length,
+    vaultDirectory: paths.vaultDir,
+    updateCheckIntervalHours: config.updateCheckIntervalHours,
+    diagnosticsEndpoint: diagnostics?.getUrl() ?? null,
+    credentials: credentials.status()
+  });
 
   void vault;
 

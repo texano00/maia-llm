@@ -12,8 +12,42 @@ export interface LoggerOptions {
   diagnostics?: DiagnosticForwarder | undefined;
 }
 
+/**
+ * The app logs `(message, context)` throughout; pino expects them the other way
+ * round and silently drops the object otherwise, which is why diagnostics once
+ * arrived without any of their values.
+ */
+export interface AppLoggerLike {
+  trace(message: string, context?: Record<string, unknown>): void;
+  debug(message: string, context?: Record<string, unknown>): void;
+  info(message: string, context?: Record<string, unknown>): void;
+  warn(message: string, context?: Record<string, unknown>): void;
+  error(message: string, context?: Record<string, unknown>): void;
+}
+
+export function toAppLogger(instance: Logger): AppLoggerLike {
+  const emit =
+    (level: "trace" | "debug" | "info" | "warn" | "error") =>
+    (message: string, context?: Record<string, unknown>): void => {
+      if (context && Object.keys(context).length > 0) {
+        instance[level](context, message);
+        return;
+      }
+
+      instance[level](message);
+    };
+
+  return {
+    trace: emit("trace"),
+    debug: emit("debug"),
+    info: emit("info"),
+    warn: emit("warn"),
+    error: emit("error")
+  };
+}
+
 export interface AppLogger {
-  logger: Logger;
+  logger: AppLoggerLike;
   /** Persists everything already written before the process exits. */
   flush(): void;
 }
@@ -54,7 +88,7 @@ export function createLogger(paths: AppPaths, options: LoggerOptions = {}): AppL
   );
 
   return {
-    logger,
+    logger: toAppLogger(logger),
     flush: () => {
       try {
         destination.flushSync();
