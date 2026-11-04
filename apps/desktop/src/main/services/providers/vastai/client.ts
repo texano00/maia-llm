@@ -21,6 +21,14 @@ export interface VastAiOfferPayload {
   machine_id?: number;
   datacenter?: string | boolean;
   verified?: boolean;
+  /** `false` means the machine cannot be booked right now, yet it stays listed. */
+  rentable?: boolean;
+  rented?: boolean;
+  compute_cap?: number;
+  verification?: string;
+  inet_down?: number;
+  disk_bw?: number;
+  disk_space?: number;
 }
 
 export interface VastAiInstancePayload {
@@ -43,6 +51,40 @@ export interface VastAiSearchQuery {
   minDiskGb?: number | undefined;
 }
 
+/**
+ * vLLM requires compute capability 7.5 or newer (T4, RTX 20xx, A100, L40S,
+ * H100…). Cheaper Volta cards (V100, 7.0) are still listed on vast.ai but the
+ * image cannot run on them, so booking one only wastes the whole boot window.
+ */
+export const MIN_COMPUTE_CAPABILITY = 7.5;
+
+/**
+ * vast.ai keeps listing asks whose machine is not available (`rentable:false`),
+ * and booking one answers `400 no_such_ask`. Only ~1 in 4 offers is rentable at
+ * any moment, so this filter is what makes a booking attempt succeed.
+ */
+export function isRentableOffer(payload: Pick<VastAiOfferPayload, "rentable">): boolean {
+  return payload.rentable !== false;
+}
+
+/** Offers the app may actually try to book: rentable and supported by vLLM. */
+export function isBookableOffer(payload: VastAiOfferPayload): boolean {
+  if (!isRentableOffer(payload)) {
+    return false;
+  }
+
+  const capability = payload.compute_cap;
+  if (typeof capability === "number" && capability > 0) {
+    // vast.ai reports hundredths (700 = 7.0, 860 = 8.6).
+    const normalised = capability >= 100 ? capability / 100 : capability;
+    if (normalised < MIN_COMPUTE_CAPABILITY) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 export function buildSearchQuery(input: VastAiSearchQuery): Record<string, unknown> {
   const q: Record<string, unknown> = {
     num_gpus: { eq: 1 },
@@ -55,6 +97,9 @@ export function buildSearchQuery(input: VastAiSearchQuery): Record<string, unkno
   if (input.minDiskGb !== undefined && input.minDiskGb > 0) {
     q.disk_space = { gte: input.minDiskGb };
   }
+  // Sending `rentable: {eq: true}` is accepted but ignored by the bundle search,
+  // so ghosts are filtered client-side via `isBookableOffer`.
+  q.compute_cap = { gte: MIN_COMPUTE_CAPABILITY };
   if (input.filters?.minReliability !== null && input.filters?.minReliability !== undefined) {
     q.reliability2 = { gte: input.filters.minReliability };
   }

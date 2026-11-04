@@ -971,6 +971,16 @@ button:hover {
   padding-top: 1.25rem;
 }
 
+.session-state {
+  display: grid;
+  gap: 0.75rem;
+  justify-items: start;
+}
+
+.session-state .pill {
+  margin: 0;
+}
+
 .estimate-card ul {
   margin: 0;
   padding-left: 1.1rem;

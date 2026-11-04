@@ -29,14 +29,16 @@ interface WorkspaceValue {
   refreshCatalogue(): Promise<void>;
   selectModel(id: string): Promise<void>;
   selected: ModelDetail | null;
-  estimate: Estimate | null;
+  /** Estimates are kept per model, so several models can be prepared at once. */
+  estimates: Record<string, Estimate>;
   preparing: boolean;
   sessions: Session[];
-  starting: boolean;
+  /** Model ids with a start request in flight (not the same as "provisioning"). */
+  startingIds: string[];
   error: string | null;
   clearError(): void;
   prepareEstimate(modelId: string): Promise<void>;
-  startSession(): Promise<Session | null>;
+  startSession(modelId: string): Promise<Session | null>;
   reloadSessions(): Promise<void>;
 }
 
@@ -51,10 +53,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [sort, setSort] = useState<CatalogueSort>("downloads");
   const [capability, setCapability] = useState("");
   const [selected, setSelected] = useState<ModelDetail | null>(null);
-  const [estimate, setEstimate] = useState<Estimate | null>(null);
+  const [estimates, setEstimates] = useState<Record<string, Estimate>>({});
   const [preparing, setPreparing] = useState(false);
   const [sessions, setSessions] = useState<Session[]>([]);
-  const [starting, setStarting] = useState(false);
+  const [startingIds, setStartingIds] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const reloadSessions = useCallback(async () => {
@@ -135,7 +137,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }
 
     setSelected(null);
-    setEstimate(null);
     const result = await bridge.invoke<ModelDetail>("catalogue.detail", { id });
 
     if (result.ok) {
@@ -159,36 +160,57 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setPreparing(false);
 
     if (result.ok) {
-      setEstimate(result.data);
+      setEstimates((current) => ({ ...current, [modelId]: result.data }));
       setError(null);
     } else {
       setError(result.error.message);
     }
   }, []);
 
-  const startSession = useCallback(async () => {
-    const bridge = window.maia;
-    if (!bridge || !estimate) {
+  const startSession = useCallback(
+    async (modelId: string) => {
+      const bridge = window.maia;
+      const estimate = estimates[modelId];
+      if (!bridge || !estimate) {
+        return null;
+      }
+
+      if (
+        sessions.some(
+          (session) =>
+            session.modelId === modelId &&
+            (session.state === "provisioning" || session.state === "ready" || session.state === "active")
+        )
+      ) {
+        setError(`${modelId} already has a running session. Open it from the chat list instead.`);
+        return null;
+      }
+
+      setStartingIds((current) => (current.includes(modelId) ? current : [...current, modelId]));
+      const result = await bridge.invoke<Session>("session.start", {
+        estimateId: estimate.id,
+        confirmEstimate: true
+      });
+      setStartingIds((current) => current.filter((id) => id !== modelId));
+
+      if (result.ok) {
+        // The estimate is consumed by the booking, and the session keeps booting
+        // in the background while other models can be started.
+        setEstimates((current) => {
+          const next = { ...current };
+          delete next[modelId];
+          return next;
+        });
+        setError(null);
+        await reloadSessions();
+        return result.data;
+      }
+
+      setError(result.error.message);
       return null;
-    }
-
-    setStarting(true);
-    const result = await bridge.invoke<Session>("session.start", {
-      estimateId: estimate.id,
-      confirmEstimate: true
-    });
-    setStarting(false);
-
-    if (result.ok) {
-      setEstimate(null);
-      setError(null);
-      await reloadSessions();
-      return result.data;
-    }
-
-    setError(result.error.message);
-    return null;
-  }, [estimate, reloadSessions]);
+    },
+    [estimates, reloadSessions, sessions]
+  );
 
   const value = useMemo<WorkspaceValue>(
     () => ({
@@ -204,10 +226,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       refreshCatalogue,
       selectModel,
       selected,
-      estimate,
+      estimates,
       preparing,
       sessions,
-      starting,
+      startingIds,
       error,
       clearError: () => setError(null),
       prepareEstimate,
@@ -217,7 +239,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [
       capability,
       error,
-      estimate,
+      estimates,
       loadingCatalogue,
       models,
       prepareEstimate,
@@ -230,7 +252,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       sessions,
       sort,
       startSession,
-      starting,
+      startingIds,
       stale
     ]
   );

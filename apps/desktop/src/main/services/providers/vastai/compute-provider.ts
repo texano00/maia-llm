@@ -4,6 +4,7 @@ import {
   buildSearchQuery,
   estimateDiskGb,
   estimateGpuRamGb,
+  isBookableOffer,
   isOfferUnavailableError,
   readMappedPort,
   readPublicHost,
@@ -22,6 +23,8 @@ export interface VastComputeProviderOptions {
   readyTimeoutMs?: number;
   pollIntervalMs?: number;
   fetchImpl?: typeof fetch;
+  /** Injectable for tests; defaults to a live client built from the stored key. */
+  clientFactory?: (apiKey: string) => VastAiClient;
   logger?: { info(message: string, context?: Record<string, unknown>): void; warn(message: string, context?: Record<string, unknown>): void } | undefined;
 }
 
@@ -45,7 +48,7 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
       throw new Error("Add your vast.ai API key in Settings before renting a GPU.");
     }
 
-    return new VastAiClient(key);
+    return options.clientFactory ? options.clientFactory(key) : new VastAiClient(key);
   }
 
   return {
@@ -74,17 +77,27 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
         })
       );
 
-      const mapped = offers
+      // Offers whose machine is not rentable stay listed but cannot be booked;
+      // asking for one answers `400 no_such_ask`, so they are dropped here.
+      const bookable = offers.filter(isBookableOffer);
+      const reliability = new Map(bookable.map((offer) => [offer.id, offer.reliability2 ?? 0]));
+      const mapped = bookable
         .map(toComputeOffer)
         .filter((offer): offer is ComputeOffer => offer !== null)
         .filter((offer) => !excluded.has(offer.offerId))
-        .sort((left, right) => left.hourlyRateMicroUsd - right.hourlyRateMicroUsd);
+        .sort(
+          (left, right) =>
+            left.hourlyRateMicroUsd - right.hourlyRateMicroUsd ||
+            (reliability.get(right.offerId) ?? 0) - (reliability.get(left.offerId) ?? 0)
+        );
 
       const [best] = mapped;
       options.logger?.info("vast.ai offer search finished", {
         modelId,
         gpuRamGb,
         diskGb,
+        listed: offers.length,
+        bookable: bookable.length,
         excluded: excluded.size,
         candidates: mapped.length
       });

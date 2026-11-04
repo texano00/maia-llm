@@ -1,4 +1,5 @@
 import { useNavigate } from "react-router-dom";
+import type { Session } from "@maia/contracts";
 import { useWorkspace } from "../../shared/session/WorkspaceProvider";
 import { formatParameters, formatContext, formatBytes, formatUsd } from "../../shared/format";
 export function CataloguePage() {
@@ -15,16 +16,30 @@ export function CataloguePage() {
     refreshCatalogue,
     selectModel,
     selected,
-    estimate,
+    estimates,
     preparing,
     prepareEstimate,
     startSession,
-    starting,
+    startingIds,
     sessions,
     error,
     clearError
   } = useWorkspace();
   const navigate = useNavigate();
+
+  // Every model keeps its own estimate and its own start request, so a model that
+  // is still loading never blocks a different one from being prepared.
+  const estimate = selected ? (estimates[selected.model.id] ?? null) : null;
+  const starting = selected ? startingIds.includes(selected.model.id) : false;
+  const existingSession = selected
+    ? (sessions.find(
+        (session) =>
+          session.modelId === selected.model.id &&
+          (session.state === "provisioning" ||
+            session.state === "ready" ||
+            session.state === "active")
+      ) ?? null)
+    : null;
 
   return (
     <section>
@@ -62,7 +77,7 @@ export function CataloguePage() {
         </button>
         {stale ? <span className="pill pill-warning">Offline snapshot</span> : null}
         {sessions.length > 0 ? (
-          <span className="pill pill-ok">{sessions.length} model(s) running</span>
+          <span className="pill pill-ok">{describeSessions(sessions)}</span>
         ) : null}
       </div>
 
@@ -179,7 +194,16 @@ export function CataloguePage() {
                 </ul>
               ) : null}
 
-              {!estimate ? (
+              {existingSession ? (
+                <div className="session-state">
+                  <p className={existingSession.state === "active" ? "pill pill-ok" : "pill pill-warning"}>
+                    {describeSessionState(existingSession)}
+                  </p>
+                  <button type="button" onClick={() => navigate("/chat")}>
+                    Open chat
+                  </button>
+                </div>
+              ) : !estimate ? (
                 <button
                   type="button"
                   disabled={preparing}
@@ -236,11 +260,12 @@ export function CataloguePage() {
                     disabled={starting}
                     onClick={() => {
                       navigate("/chat");
-                      void startSession();
+                      void startSession(selected.model.id);
                     }}
                   >
-                    {starting ? "Provisioning…" : "Confirm and start session"}
-                  </button>                </div>
+                    {starting ? "Booking a GPU…" : "Confirm and start session"}
+                  </button>
+                </div>
               )}
             </>
           ) : (
@@ -250,6 +275,37 @@ export function CataloguePage() {
       </div>
     </section>
   );
+}
+
+/** "2 running · 1 provisioning" — models boot independently, so say which is which. */
+function describeSessions(sessions: Session[]): string {
+  const provisioning = sessions.filter(
+    (session) => session.state === "provisioning" || session.state === "ready"
+  ).length;
+  const running = sessions.length - provisioning;
+  const parts: string[] = [];
+
+  if (running > 0) {
+    parts.push(`${running} running`);
+  }
+  if (provisioning > 0) {
+    parts.push(`${provisioning} provisioning`);
+  }
+
+  return parts.join(" · ") || `${sessions.length} active`;
+}
+
+function describeSessionState(session: Session): string {
+  switch (session.state) {
+    case "provisioning":
+      return "This model is provisioning — chat opens as soon as it is ready";
+    case "ready":
+      return "This model is almost ready";
+    case "active":
+      return "This model is running";
+    default:
+      return `Session ${session.state}`;
+  }
 }
 
 function formatCount(value: number): string {

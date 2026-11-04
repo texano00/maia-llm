@@ -67,8 +67,13 @@ describe("SessionOrchestrator", () => {
     closeDatabase(db);
   });
 
-  function createOrchestrator(options: { idleTimeoutMinutes?: number } = {}) {
-    const compute = createMockComputeProvider({ offer });
+  function createOrchestrator(
+    options: { idleTimeoutMinutes?: number; provisionDelayMs?: number } = {}
+  ) {
+    const compute = createMockComputeProvider({
+      offer,
+      ...(options.provisionDelayMs === undefined ? {} : { provisionDelayMs: options.provisionDelayMs })
+    });
     const orchestrator = new SessionOrchestrator({
       store,
       compute,
@@ -103,14 +108,21 @@ describe("SessionOrchestrator", () => {
     const { orchestrator, compute } = createOrchestrator();
     const estimate = await orchestrator.createEstimate("Qwen/Qwen2.5-7B-Instruct");
 
-    const session = await orchestrator.start({ estimateId: estimate.id, confirmEstimate: true });
+    const started = await orchestrator.start({ estimateId: estimate.id, confirmEstimate: true });
 
-    expect(session.state).toBe("active");
-    expect(session.instanceId).not.toBeNull();
+    // Booking returns as soon as the instance exists; the boot continues in the
+    // background so other models can be started meanwhile.
+    expect(started.state).toBe("provisioning");
+
+    await orchestrator.awaitProvisioning(started.id);
+    const session = orchestrator.getSession(started.id);
+
+    expect(session?.state).toBe("active");
+    expect(session?.instanceId).not.toBeNull();
     expect(store.getActive()).toHaveLength(1);
 
     const chunks: string[] = [];
-    const result = await orchestrator.send(session.id, "hi", (kind, delta) => {
+    const result = await orchestrator.send(session!.id, "hi", (kind, delta) => {
       if (kind === "content") {
         chunks.push(delta);
       }
@@ -120,13 +132,37 @@ describe("SessionOrchestrator", () => {
     expect(chunks.join("")).toBe("hello from the mock runtime");
     expect(result.tokens).toBeGreaterThan(0);
 
-    const ended = await orchestrator.end(session.id, "user");
+    const ended = await orchestrator.end(session!.id, "user");
 
     expect(ended?.state).toBe("ended");
     expect(ended?.endReason).toBe("user");
-    expect(compute.destroyed).toEqual([session.instanceId]);
+    expect(compute.destroyed).toEqual([session!.instanceId]);
     expect(store.getActive()).toHaveLength(0);
     expect(orchestrator.getStatus()).toBeNull();
+  });
+
+  it("boots two models at the same time", async () => {
+    const { orchestrator } = createOrchestrator({ provisionDelayMs: 40 });
+
+    const firstEstimate = await orchestrator.createEstimate("Qwen/Qwen2.5-7B-Instruct");
+    const first = await orchestrator.start({ estimateId: firstEstimate.id, confirmEstimate: true });
+
+    const secondEstimate = await orchestrator.createEstimate("mistralai/Mistral-7B-Instruct-v0.3");
+    const second = await orchestrator.start({ estimateId: secondEstimate.id, confirmEstimate: true });
+
+    // Neither call waited for the model to load, so both are provisioning.
+    expect(first.state).toBe("provisioning");
+    expect(second.state).toBe("provisioning");
+    expect(orchestrator.listSessions().filter((entry) => entry.state === "provisioning")).toHaveLength(2);
+
+    await Promise.all([
+      orchestrator.awaitProvisioning(first.id),
+      orchestrator.awaitProvisioning(second.id)
+    ]);
+
+    expect(orchestrator.getSession(first.id)?.state).toBe("active");
+    expect(orchestrator.getSession(second.id)?.state).toBe("active");
+    expect(store.getActive()).toHaveLength(2);
   });
 
   it("runs several sessions in parallel, one per model conversation", async () => {
@@ -194,17 +230,116 @@ describe("SessionOrchestrator", () => {
     });
 
     const estimate = await orchestrator.createEstimate("Qwen/Qwen2.5-7B-Instruct");
-    const session = await orchestrator.start({ estimateId: estimate.id, confirmEstimate: true });
+    const started = await orchestrator.start({ estimateId: estimate.id, confirmEstimate: true });
+    await orchestrator.awaitProvisioning(started.id);
+    const session = orchestrator.getSession(started.id);
 
-    expect(session.state).toBe("active");
-    expect(session.gpuName).toBe("L40S");
-    expect(session.instanceId).toBe(555);
+    expect(session?.state).toBe("active");
+    expect(session?.gpuName).toBe("L40S");
+    expect(session?.instanceId).toBe(555);
     // estimate search, start search, then one retry that excludes the taken offer
     expect(searches).toEqual([[], [], [11]]);
 
-    const messages = store.eventsFor(session.id).map((event) => event.message);
+    const messages = store.eventsFor(started.id).map((event) => event.message);
     expect(messages.some((message) => message.includes("was taken before it could be booked"))).toBe(true);
     expect(messages.some((message) => message.includes("Trying L40S"))).toBe(true);
+  });
+
+  it("keeps a failed boot visible with its log, and lets the model be retried", async () => {
+    let failNext = true;
+    const destroyed: number[] = [];
+
+    const compute: ComputeProvider = {
+      async findOffer() {
+        return offer;
+      },
+      async createInstance() {
+        return { instanceId: 900 };
+      },
+      async waitUntilReady() {
+        if (failNext) {
+          throw new Error("The GPU instance stopped while starting up (error).");
+        }
+      },
+      async destroyInstance(instanceId) {
+        destroyed.push(instanceId);
+      }
+    };
+
+    const orchestrator = new SessionOrchestrator({
+      store,
+      compute,
+      inference: createMockInference({ response: "ok" }),
+      idleTimeoutMinutes: 10,
+      now: () => clock
+    });
+
+    const estimate = await orchestrator.createEstimate("Qwen/Qwen2.5-7B-Instruct");
+    const started = await orchestrator.start({ estimateId: estimate.id, confirmEstimate: true });
+    await orchestrator.awaitProvisioning(started.id);
+
+    const failed = orchestrator.getSession(started.id);
+    expect(failed?.state).toBe("failed");
+    expect(
+      failed?.events.some(
+        (event) => event.level === "error" && event.message.includes("stopped while starting up")
+      )
+    ).toBe(true);
+    // The log stays readable, but the model is not offered as a usable session.
+    expect(orchestrator.listSessions().map((session) => session.id)).toContain(started.id);
+    expect(orchestrator.findSessionForModel("Qwen/Qwen2.5-7B-Instruct")).toBeNull();
+    expect(destroyed).toEqual([900]);
+
+    failNext = false;
+    const retryEstimate = await orchestrator.createEstimate("Qwen/Qwen2.5-7B-Instruct");
+    const retried = await orchestrator.start({ estimateId: retryEstimate.id, confirmEstimate: true });
+    await orchestrator.awaitProvisioning(retried.id);
+
+    expect(orchestrator.getSession(retried.id)?.state).toBe("active");
+    expect(orchestrator.listSessions().map((session) => session.id)).not.toContain(started.id);
+  });
+
+  it("says plainly when every offer is taken before it can be booked", async () => {
+    let searches = 0;
+    const compute: ComputeProvider = {
+      async findOffer() {
+        searches += 1;
+        return { ...offer, offerId: 100 + searches, simulated: false };
+      },
+      async createInstance(candidate) {
+        throw new Error(
+          `PUT /api/v0/asks/${candidate.offerId}/ failed with status 400: invalid_args — error 404/3603: no_such_ask  Instance type by id ${candidate.offerId} is not available.`
+        );
+      },
+      async waitUntilReady() {
+        return undefined;
+      },
+      async destroyInstance() {
+        return undefined;
+      },
+      isOfferUnavailable: isOfferUnavailableError
+    };
+
+    const orchestrator = new SessionOrchestrator({
+      store,
+      compute,
+      inference: createMockInference({ response: "ok" }),
+      idleTimeoutMinutes: 10,
+      now: () => clock
+    });
+
+    const estimate = await orchestrator.createEstimate("Qwen/Qwen2.5-7B-Instruct");
+
+    await expect(
+      orchestrator.start({ estimateId: estimate.id, confirmEstimate: true })
+    ).rejects.toMatchObject({
+      code: "PROVIDER_UNAVAILABLE",
+      message: expect.stringContaining("taken before it could be booked")
+    });
+
+    // The estimate search, the start search, then one search per retry.
+    expect(searches).toBe(6);
+    expect(store.getActive()).toHaveLength(0);
   });
 
   it("respects the GPU filters when ranking offers", async () => {

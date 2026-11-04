@@ -3,7 +3,9 @@ import {
   buildSearchQuery,
   estimateDiskGb,
   estimateGpuRamGb,
+  isBookableOffer,
   isOfferUnavailableError,
+  isRentableOffer,
   readCountry,
   readMappedPort,
   readPublicHost,
@@ -47,6 +49,25 @@ describe("vast.ai offer search", () => {
     expect(query.disk_space).toEqual({ gte: 80 });
     expect(query.geolocation).toBeUndefined();
     expect(query.machine_id).toEqual({ in: [12] });
+  });
+
+  it("asks for GPUs vLLM can actually run on", () => {
+    const query = buildSearchQuery({ gpu_ram_gb: 24, maxHourlyMicroUsd: null, filters: undefined });
+
+    expect(query.compute_cap).toEqual({ gte: 7.5 });
+  });
+
+  it("skips offers whose machine cannot be booked", () => {
+    // vast.ai keeps listing asks that are no longer available; booking one
+    // answers `400 no_such_ask`, which is the error this filter prevents.
+    expect(isRentableOffer({ rentable: false })).toBe(false);
+    expect(isRentableOffer({ rentable: true })).toBe(true);
+    expect(isRentableOffer({})).toBe(true);
+
+    expect(isBookableOffer({ id: 1, rentable: false, compute_cap: 860 })).toBe(false);
+    expect(isBookableOffer({ id: 2, rentable: true, compute_cap: 700 })).toBe(false);
+    expect(isBookableOffer({ id: 3, rentable: true, compute_cap: 860 })).toBe(true);
+    expect(isBookableOffer({ id: 4, rentable: true })).toBe(true);
   });
 
   it("sizes the disk after the checkpoint instead of a fixed 64 GB", () => {

@@ -80,8 +80,16 @@ interface SessionRuntime {
 
 const DEFAULT_READINESS_TIMEOUT_MS = 5 * 60_000;
 
-/** Offers churn constantly on vast.ai; three attempts covers a normal booking. */
-const MAX_OFFER_ATTEMPTS = 3;
+/**
+ * Offers churn constantly on vast.ai: roughly three quarters of the listed asks
+ * disappear within seconds, so a booking may need several tries.
+ */
+const MAX_OFFER_ATTEMPTS = 5;
+
+/** States in which a session can serve chat (now or once it finishes booting). */
+function isServing(state: Session["state"]): boolean {
+  return state === "provisioning" || state === "ready" || state === "active";
+}
 
 /**
  * Owns the chargeable lifecycle of every session. Any number of sessions may run
@@ -93,6 +101,8 @@ export class SessionOrchestrator {
   private readonly now: () => number;
   private readonly estimates = new Map<string, Estimate>();
   private readonly runtimes = new Map<string, SessionRuntime>();
+  /** In-flight boot sequences, so a session can be awaited or released safely. */
+  private readonly provisioning = new Map<string, Promise<void>>();
 
   constructor(private readonly options: SessionOrchestratorOptions) {
     this.now = options.now ?? (() => Date.now());
@@ -155,6 +165,14 @@ export class SessionOrchestrator {
       : `${this.options.installId ?? "maia"}:${sessionId}`;
     const startedAt = new Date(this.now()).toISOString();
 
+    // Replace a previous failed attempt for the same model so the list does not
+    // accumulate dead sessions.
+    for (const [id, runtime] of this.runtimes) {
+      if (runtime.session.modelId === estimate.modelId && runtime.session.state === "failed") {
+        this.runtimes.delete(id);
+      }
+    }
+
     let instanceId: number | null = null;
     let inserted = false;
     const pendingLogs: Array<{ level: "info" | "warn" | "error"; message: string; at: Date }> = [];
@@ -178,10 +196,12 @@ export class SessionOrchestrator {
 
       const triedOfferIds: number[] = [];
       let created: { instanceId: number } | null = null;
+      let lastError: unknown = null;
 
       // A machine can be rented by someone else between the search and the
-      // booking (vast.ai answers `400 no_such_ask`). That is normal market
-      // churn, so move to the next cheapest offer instead of failing the run.
+      // booking (vast.ai answers `400 no_such_ask`). Almost a quarter of the
+      // listed offers churn within seconds, so move to the next offer instead
+      // of failing the run, and say plainly when the market beats us.
       for (let attempt = 1; created === null; attempt += 1) {
         try {
           created = await this.options.compute.createInstance(offer, {
@@ -189,12 +209,13 @@ export class SessionOrchestrator {
             modelId: estimate.modelId
           });
         } catch (error) {
+          lastError = error;
           const canRetry =
             attempt < MAX_OFFER_ATTEMPTS &&
             this.options.compute.isOfferUnavailable?.(error) === true;
 
           if (!canRetry) {
-            throw error;
+            break;
           }
 
           triedOfferIds.push(offer.offerId);
@@ -212,7 +233,7 @@ export class SessionOrchestrator {
             excludeOfferIds: triedOfferIds
           });
           if (!next) {
-            throw error;
+            break;
           }
 
           offer = next;
@@ -221,6 +242,20 @@ export class SessionOrchestrator {
             `Trying ${offer.gpuName} (${offer.gpuRamGb} GB) at $${(offer.hourlyRateMicroUsd / 1_000_000).toFixed(2)}/h instead.`
           );
         }
+      }
+
+      if (created === null) {
+        const offerChurned =
+          triedOfferIds.length > 0 && this.options.compute.isOfferUnavailable?.(lastError) === true;
+
+        if (offerChurned) {
+          throw new SessionError(
+            "PROVIDER_UNAVAILABLE",
+            `Every GPU we tried was taken before it could be booked (${triedOfferIds.length} attempted). The marketplace is busy right now — press start again.`
+          );
+        }
+
+        throw lastError ?? new SessionError("PROVIDER_UNAVAILABLE", "Could not book a GPU.");
       }
 
       instanceId = created.instanceId;
@@ -241,6 +276,9 @@ export class SessionOrchestrator {
       });
       this.options.store.setInstance(sessionId, instanceId, offer.offerId);
       inserted = true;
+      // The estimate is spent as soon as the GPU is booked, so a double click
+      // cannot rent a second machine for the same confirmation.
+      this.estimates.delete(estimate.id);
       for (const entry of pendingLogs) {
         this.options.store.appendEvent(sessionId, entry.level, entry.message, entry.at);
       }
@@ -249,47 +287,22 @@ export class SessionOrchestrator {
       // Expose the session immediately so the UI can show "Provisioning" and the
       // lifecycle log while the instance boots.
       const provisioning = this.options.store.get(sessionId);
-      if (provisioning) {
-        this.runtimes.set(sessionId, {
-          session: provisioning,
-          lastActivityAt: this.now(),
-          abort: null
-        });
+      if (!provisioning) {
+        throw new SessionError("NOT_FOUND", "The session could not be stored; the GPU is released again.");
       }
 
-      log("info", "Booting the instance and downloading the model…");
-      await this.options.compute.waitUntilReady(
-        instanceId,
-        this.options.readinessTimeoutMs ?? DEFAULT_READINESS_TIMEOUT_MS
-      );
-      log("info", "Model server is healthy; warming up.");
-
-      this.options.store.transition(sessionId, "ready", {
-        readyAt: new Date(this.now()).toISOString()
-      });
-      const session = this.options.store.get(sessionId);
-      if (!session) {
-        throw new SessionError("NOT_FOUND", "The session disappeared while provisioning.");
-      }
-
-      this.options.store.transition(sessionId, "active");
-      const activeSession: Session = { ...session, state: "active" };
-      log("info", "Session active. You can chat now.");
       this.runtimes.set(sessionId, {
-        session: { ...activeSession, events: this.options.store.eventsFor(sessionId) },
+        session: provisioning,
         lastActivityAt: this.now(),
         abort: null
       });
-      this.estimates.delete(estimate.id);
 
-      this.options.logger?.info("Session active", {
-        sessionId,
-        modelId: estimate.modelId,
-        instanceId,
-        running: this.runtimes.size
-      });
+      // Booting a model takes minutes. The caller must not be blocked for that
+      // long, otherwise a second model cannot be started while the first one is
+      // still downloading: the whole point of running models in parallel.
+      this.trackProvisioning(sessionId, this.activateSession(sessionId, estimate, instanceId));
 
-      return activeSession;
+      return provisioning;
     } catch (error) {
       this.options.store.transition(sessionId, "failed", {
         endedAt: new Date(this.now()).toISOString(),
@@ -319,10 +332,96 @@ export class SessionOrchestrator {
     }
   }
 
+  /**
+   * Boots a booked instance to the point where it can answer: waits for the GPU,
+   * then for vLLM to serve the model. Runs in the background so several models
+   * can provision at the same time.
+   */
+  private async activateSession(sessionId: string, estimate: Estimate, instanceId: number): Promise<void> {
+    const append = (level: "info" | "warn" | "error", message: string): void => {
+      this.options.store.appendEvent(sessionId, level, message, new Date(this.now()));
+    };
+    const stillProvisioning = (): boolean =>
+      this.runtimes.get(sessionId)?.session.state === "provisioning";
+
+    try {
+      append("info", "Booting the instance and downloading the model…");
+      await this.options.compute.waitUntilReady(
+        instanceId,
+        this.options.readinessTimeoutMs ?? DEFAULT_READINESS_TIMEOUT_MS
+      );
+
+      // The session may have been released while the model was loading; in that
+      // case there is nothing to activate and the instance is already destroyed.
+      if (!stillProvisioning()) {
+        return;
+      }
+
+      append("info", "Model server is healthy; warming up.");
+      this.options.store.transition(sessionId, "ready", {
+        readyAt: new Date(this.now()).toISOString()
+      });
+      this.options.store.transition(sessionId, "active");
+      append("info", "Session active. You can chat now.");
+
+      const active = this.options.store.get(sessionId);
+      const runtime = this.runtimes.get(sessionId);
+      if (active && runtime) {
+        runtime.session = { ...active, events: this.options.store.eventsFor(sessionId) };
+        runtime.lastActivityAt = this.now();
+      }
+
+      this.options.logger?.info("Session active", {
+        sessionId,
+        modelId: estimate.modelId,
+        instanceId,
+        running: this.runtimes.size
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.options.logger?.warn("Session provisioning failed", {
+        sessionId,
+        modelId: estimate.modelId,
+        instanceId,
+        message
+      });
+
+      if (stillProvisioning()) {
+        this.options.store.appendEvent(sessionId, "error", message, new Date(this.now()));
+        this.options.store.transition(sessionId, "failed", {
+          endedAt: new Date(this.now()).toISOString(),
+          endReason: "failure",
+          failureCode: "PROVIDER_UNAVAILABLE"
+        });
+
+        // Keep the failed session visible: its log is the only explanation for
+        // why the GPU never came up. The next start for this model replaces it.
+        const failed = this.options.store.get(sessionId);
+        const runtime = this.runtimes.get(sessionId);
+        if (failed && runtime) {
+          runtime.session = failed;
+        }
+      }
+
+      await this.options.compute.destroyInstance(instanceId).catch(() => undefined);
+    }
+  }
+
+  private trackProvisioning(sessionId: string, task: Promise<void>): void {
+    const settled = task.catch(() => undefined).finally(() => {
+      this.provisioning.delete(sessionId);
+    });
+    this.provisioning.set(sessionId, settled);
+  }
+
+  /** Resolves when a session stops booting; used by tests and by shutdown paths. */
+  async awaitProvisioning(sessionId: string): Promise<void> {
+    await this.provisioning.get(sessionId);
+  }
+
   listSessions(): Session[] {
     return [...this.runtimes.values()].map((runtime) => this.refresh(runtime).session);
   }
-
   getSession(sessionId: string): Session | null {
     const runtime = this.runtimes.get(sessionId);
     return runtime ? this.refresh(runtime).session : null;
@@ -331,7 +430,7 @@ export class SessionOrchestrator {
   /** First running session for a model, used when reviving a conversation. */
   findSessionForModel(modelId: string): Session | null {
     for (const runtime of this.runtimes.values()) {
-      if (runtime.session.modelId === modelId) {
+      if (runtime.session.modelId === modelId && isServing(runtime.session.state)) {
         return this.refresh(runtime).session;
       }
     }
