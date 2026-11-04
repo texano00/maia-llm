@@ -1,4 +1,4 @@
-import type { ModelArtifact } from "@maia/contracts";
+import { isGgufRepositoryName, type ModelArtifact } from "@maia/contracts";
 
 /**
  * Quantisations to try, best first. Q4_K_M is the usual sweet spot — small
@@ -50,9 +50,13 @@ export const GGUF_PLUGIN_INSTALL =
 
 /** `huihui-ai/X-27B-abliterated-GGUF` → `huihui-ai/X-27B-abliterated`. */
 export function baseModelCandidate(modelId: string): string | null {
-  const stripped = modelId.replace(/[-_.](gguf|GGUF)$/, "");
+  if (!isGgufRepositoryName(modelId)) {
+    return null;
+  }
 
-  return stripped !== modelId && stripped.includes("/") ? stripped : null;
+  const stripped = modelId.replace(/[-_.]gguf$/i, "");
+
+  return stripped.includes("/") ? stripped : null;
 }
 
 /**

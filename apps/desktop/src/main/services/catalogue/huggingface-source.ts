@@ -1,6 +1,7 @@
 import type { CatalogueSource } from "./service";
 import type { HuggingFaceModelPayload, HuggingFaceTreeEntry } from "./mapper";
 import { ProviderHttpClient, ProviderHttpError } from "../providers/http";
+import { baseModelCandidate } from "../inference/model-plan";
 
 interface HuggingFaceSibling {
   rfilename?: string;
@@ -100,25 +101,45 @@ export function createHuggingFaceSource(options: HuggingFaceSourceOptions = {}):
       return { model: payload, files };
     },
 
+    /**
+     * `true` when the repository defines a chat template — or, for a community
+     * GGUF mirror that ships little but `*.gguf` shards, when the repository it
+     * was quantised from does. That base repository is also the tokenizer vLLM
+     * is pointed at, so its verdict is the one chat traffic depends on.
+     */
     async getChatTemplate(id) {
-      const base = `/${modelPath(id)}/raw/main`;
-
-      const config = await readOptionalFile(`${base}/tokenizer_config.json`);
-      if (config !== null && tokenizerConfigHasTemplate(config)) {
+      if (await probeChatTemplate(id)) {
         return true;
       }
 
-      // Newer repositories ship the template as a standalone jinja file…
-      const jinja = await readOptionalFile(`${base}/chat_template.jinja`);
-      if (jinja !== null && jinja.trim().length > 0) {
-        return true;
-      }
-
-      // …or as JSON, depending on the repository's tokenizer tooling.
-      const json = await readOptionalFile(`${base}/chat_template.json`);
-      return json !== null && tokenizerConfigHasTemplate(json);
+      const base = baseModelCandidate(id);
+      return base !== null && (await probeChatTemplate(base));
     }
   };
+
+  /**
+   * The three places a repository can declare a chat template. A missing file is
+   * the normal case for a base model, so a 404/400 resolves to `false` instead
+   * of throwing; any other error propagates and becomes an "unknown" verdict.
+   */
+  async function probeChatTemplate(id: string): Promise<boolean> {
+    const root = `/${modelPath(id)}/raw/main`;
+
+    const config = await readOptionalFile(`${root}/tokenizer_config.json`);
+    if (config !== null && tokenizerConfigHasTemplate(config)) {
+      return true;
+    }
+
+    // Newer repositories ship the template as a standalone jinja file…
+    const jinja = await readOptionalFile(`${root}/chat_template.jinja`);
+    if (jinja !== null && jinja.trim().length > 0) {
+      return true;
+    }
+
+    // …or as JSON, depending on the repository's tokenizer tooling.
+    const json = await readOptionalFile(`${root}/chat_template.json`);
+    return json !== null && tokenizerConfigHasTemplate(json);
+  }
 }
 
 /**

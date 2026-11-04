@@ -16,6 +16,12 @@ export interface HuggingFaceModelPayload {
   library_name?: string | null;
   cardData?: { license?: string | string[]; context_length?: number } | null;
   safetensors?: { parameters?: Record<string, number> } | null;
+  /**
+   * Metadata the Hub parses out of the `*.gguf` headers. GGUF-only releases
+   * ship no `config.json` and no safetensors index, so this is the only place
+   * their parameter count and context length come from.
+   */
+  gguf?: { total?: number; context_length?: number; architecture?: string } | null;
   config?: { model_type?: string } | null;
 }
 
@@ -180,6 +186,12 @@ function readContextWindow(payload: HuggingFaceModelPayload): number | null {
     return fromCard;
   }
 
+  // GGUF releases carry no model card context: the length is in the GGUF header.
+  const fromGguf = payload.gguf?.context_length;
+  if (typeof fromGguf === "number" && fromGguf > 0) {
+    return fromGguf;
+  }
+
   const fromName = /(\d+)[kK][-_.]?(context|ctx)/.exec(payload.id);
   if (fromName) {
     return Number(fromName[1]) * 1024;
@@ -190,10 +202,18 @@ function readContextWindow(payload: HuggingFaceModelPayload): number | null {
 
 function sumParameters(payload: HuggingFaceModelPayload): number | null {
   const parameters = payload.safetensors?.parameters;
-  if (!parameters) {
-    return null;
+  if (parameters) {
+    const total = Object.values(parameters).reduce((sum, value) => sum + value, 0);
+    if (Number.isFinite(total) && total > 0) {
+      return Math.round(total);
+    }
   }
 
-  const total = Object.values(parameters).reduce((sum, value) => sum + value, 0);
-  return Number.isFinite(total) && total > 0 ? Math.round(total) : null;
+  // A GGUF-only repository has no safetensors index to sum; the Hub publishes
+  // the total it read from the GGUF metadata instead.
+  const fromGguf = payload.gguf?.total;
+
+  return typeof fromGguf === "number" && Number.isFinite(fromGguf) && fromGguf > 0
+    ? Math.round(fromGguf)
+    : null;
 }

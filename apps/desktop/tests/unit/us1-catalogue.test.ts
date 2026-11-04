@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { describeGatedAccess, huggingFaceModelUrl, isChatCapableModel, isGgufOnlyRepository } from "@maia/contracts";
+import { describeGatedAccess, huggingFaceModelUrl, isChatCapableModel, isGgufOnlyRepository, isGgufRepositoryName } from "@maia/contracts";
 import { closeDatabase, openDatabase, type DatabaseConnection } from "../../src/main/storage/db";
 import { CatalogueRepository } from "../../src/main/services/catalogue/repository";
 import { CatalogueService, filterAndSort, type CatalogueSource } from "../../src/main/services/catalogue/service";
@@ -55,6 +55,24 @@ describe("Hugging Face mapping", () => {
     expect(model.gated).toBe("manual");
     expect(model.license).toBe("mit");
     expect(model.contextWindow).toBeNull();
+  });
+
+  it("reads parameters and context from GGUF metadata", () => {
+    // The exact shape published for huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF:
+    // no config.json, no safetensors index, only the parsed GGUF header.
+    const model = mapHuggingFaceModel(
+      {
+        id: "huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF",
+        pipeline_tag: "image-text-to-text",
+        downloads: 3_476_597,
+        gguf: { total: 27_320_697_856, context_length: 262_144, architecture: "qwen35" }
+      },
+      "2026-11-04T00:00:00.000Z"
+    );
+
+    expect(model.parameterCount).toBe(27_320_697_856);
+    expect(model.contextWindow).toBe(262_144);
+    expect(model.capabilities).toContain("long-context");
   });
 
   it("does not advertise chat for a model vLLM cannot chat with", () => {
@@ -173,6 +191,48 @@ describe("chat template detection", () => {
     const source = createHuggingFaceSource({ client });
 
     await expect(source.getChatTemplate?.("openai-community/gpt2")).resolves.toBe(false);
+  });
+
+  it("recognises community GGUF mirror names", () => {
+    expect(isGgufRepositoryName("org/model-GGUF")).toBe(true);
+    expect(isGgufRepositoryName("org/model.gguf")).toBe(true);
+    expect(isGgufRepositoryName("org/model")).toBe(false);
+    expect(isGgufRepositoryName("org/gguf-model")).toBe(false);
+  });
+
+  it("borrows the template from the base repository of a GGUF mirror", async () => {
+    // A `-GGUF` mirror ships only shards: no tokenizer, no template.
+    const requested: string[] = [];
+    const client = {
+      async request(path: string) {
+        requested.push(path);
+        if (path === "/org/Qwen-Next/raw/main/tokenizer_config.json") {
+          return new Response(JSON.stringify({ chat_template: "{{ messages }}" }));
+        }
+        throw new ProviderHttpError("INVALID_REQUEST", "not found", false, 404);
+      }
+    } as unknown as ProviderHttpClient;
+
+    const source = createHuggingFaceSource({ client });
+
+    await expect(source.getChatTemplate?.("org/Qwen-Next-GGUF")).resolves.toBe(true);
+    expect(requested).toContain("/org/Qwen-Next-GGUF/raw/main/tokenizer_config.json");
+    expect(requested).toContain("/org/Qwen-Next/raw/main/tokenizer_config.json");
+  });
+
+  it("keeps a GGUF mirror chat-less when its base model declares no template", async () => {
+    const client = {
+      async request(path: string) {
+        if (path === "/org/Base/raw/main/tokenizer_config.json") {
+          return new Response(JSON.stringify({ model_max_length: 1024 }));
+        }
+        throw new ProviderHttpError("INVALID_REQUEST", "not found", false, 404);
+      }
+    } as unknown as ProviderHttpClient;
+
+    const source = createHuggingFaceSource({ client });
+
+    await expect(source.getChatTemplate?.("org/Base-GGUF")).resolves.toBe(false);
   });
 
   it("caches the verdict and exposes it in the detail payload", async () => {

@@ -46,7 +46,7 @@ the estimate is prepared:
 | Check | What it catches | How |
 | --- | --- | --- |
 | Repository loadable | Diffusion packs and adapters republished with a `text-generation` tag (`Comfy-Org/MiniMax-H3` → _"Invalid repository ID or local directory specified"_) | `library_name` (`diffusers`, `diffusion-single-file`, `peft`, `timm`, …), the presence of `.safetensors`/`.gguf` weights, and a root `config.json` for safetensors repositories (GGUF carries its config in the file) |
-| Chat template | Base/completion models (`openai-community/gpt2`) → vLLM **HTTP 400** on every message since transformers v4.44 | `tokenizer_config.json` (`chat_template` as a string or list), then `chat_template.jinja`, then `chat_template.json` |
+| Chat template | Base/completion models (`openai-community/gpt2`) → vLLM **HTTP 400** on every message since transformers v4.44 | `tokenizer_config.json` (`chat_template` as a string or list), then `chat_template.jinja`, then `chat_template.json`. A community `*-GGUF` mirror ships only shards, so the same probe runs against the base repository vLLM borrows the tokenizer from |
 
 Both verdicts are cached per model, shown in the detail panel, and enforced by
 `assertChatRunnable` before `createEstimate` rents anything. An unreachable Hub

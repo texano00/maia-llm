@@ -1,4 +1,4 @@
-import { isChatCapableModel } from "@maia/contracts";
+import { isChatCapableModel, isGgufRepositoryName } from "@maia/contracts";
 
 /** The facts the guard needs; a full CatalogueService satisfies it. */
 export interface ChatRunnableCatalogue {
@@ -44,8 +44,12 @@ export async function assertChatRunnable(
   }
 
   if (repository.chatTemplate === false) {
+    // A GGUF mirror is only as chat-capable as the repository it was quantised
+    // from, so say that instead of blaming the quantised copy.
+    const base = isGgufRepositoryName(modelId) ? " (nor does its base model)" : "";
+
     throw new Error(
-      `"${modelId}" defines no chat template, so it cannot answer chat requests. Pick an instruct or chat model instead.`
+      `"${modelId}" defines no chat template${base}, so it cannot answer chat requests. Pick an instruct or chat model instead.`
     );
   }
 }

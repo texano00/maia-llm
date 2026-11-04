@@ -1,7 +1,7 @@
 import { memo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import type { CatalogueModel, ModelArtifact, Session } from "@maia/contracts";
-import { describeGatedAccess, huggingFaceModelUrl, isChatCapableModel } from "@maia/contracts";
+import { describeGatedAccess, huggingFaceModelUrl, isChatCapableModel, isGgufRepositoryName } from "@maia/contracts";
 import { useWorkspace } from "../../shared/session/WorkspaceProvider";
 import { formatParameters, formatContext, formatBytes, formatUsd } from "../../shared/format";
 export function CataloguePage() {
@@ -193,7 +193,9 @@ export function CataloguePage() {
 
               {selected.chatTemplate === false ? (
                 <p className="pill pill-warning" role="note">
-                  No chat template: a base model cannot answer chat requests
+                  {isGgufRepositoryName(selected.model.id)
+                    ? "No chat template: neither this GGUF repository nor its base model declares one, so chat requests would be rejected (HTTP 400)"
+                    : "No chat template: a base model cannot answer chat requests"}
                 </p>
               ) : null}
 

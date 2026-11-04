@@ -53,6 +53,16 @@ export function isChatCapableModel(model: { pipelineTag: string | null }): boole
 }
 
 /**
+ * `org/model-GGUF` and `org/model.gguf` are community quantisations of another
+ * repository. They usually ship little but `*.gguf` shards, so facts that live
+ * in the tokenizer — the chat template above all — have to be read from the
+ * original repository, which is also the one vLLM borrows the tokenizer from.
+ */
+export function isGgufRepositoryName(id: string): boolean {
+  return /[-_.]gguf$/i.test(id);
+}
+
+/**
  * True when a repository ships GGUF weights and nothing vLLM can load directly.
  *
  * GGUF is a llama.cpp format: `vllm serve <repo>` finds no `*.safetensors` and
@@ -111,9 +121,10 @@ export const modelDetailSchema = z.object({
   model: catalogueModelSchema,
   artifacts: z.array(modelArtifactSchema),
   /**
-   * Whether the repository defines a chat template. `false` means it is a base /
-   * completion model (gpt2 and friends): vLLM boots it, then rejects every chat
-   * request with HTTP 400. `null` means it could not be checked.
+   * Whether the repository defines a chat template — for a GGUF mirror, whether
+   * it or the repository it was quantised from does. `false` means it is a base
+   * / completion model (gpt2 and friends): vLLM boots it, then rejects every
+   * chat request with HTTP 400. `null` means it could not be checked.
    */
   chatTemplate: z.boolean().nullable(),
   /**
