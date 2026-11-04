@@ -22,13 +22,26 @@ export interface ComputeProvider {
     excludeOfferIds?: number[] | undefined;
   }): Promise<ComputeOffer | null>;
   createInstance(offer: ComputeOffer, context: { label: string; modelId: string }): Promise<{ instanceId: number }>;
-  waitUntilReady(instanceId: number, timeoutMs: number): Promise<void>;
+  waitUntilReady(
+    instanceId: number,
+    timeoutMs: number,
+    onProgress?: (update: ProvisioningProgress) => void
+  ): Promise<void>;
   destroyInstance(instanceId: number): Promise<void>;
+  /** Instances carrying one of our labels, used to reclaim machines after a crash. */
+  listLabelledInstances?(prefix: string): Promise<Array<{ instanceId: number; label: string }>>;
   /**
    * True when the failure means "that machine is gone" rather than "this request is
    * wrong", so the session can be retried on another offer instead of failing.
    */
   isOfferUnavailable?(error: unknown): boolean;
+}
+
+/** A status change reported by the provider while the instance boots. */
+export interface ProvisioningProgress {
+  status: string;
+  message: string | null;
+  elapsedMs: number;
 }
 
 export interface InferenceRuntime {
@@ -80,7 +93,14 @@ interface SessionRuntime {
   abort: AbortController | null;
 }
 
-const DEFAULT_READINESS_TIMEOUT_MS = 5 * 60_000;
+/**
+ * A cold start moves ~25 GB and then loads the weights: minutes, not seconds. The
+ * startup gates keep the typical case at 2–5 minutes; this is the safety net.
+ */
+const DEFAULT_READINESS_TIMEOUT_MS = 20 * 60_000;
+
+/** Every instance the app rents carries this label, so orphans can be found. */
+const SESSION_LABEL_PREFIX = "maia:";
 
 /**
  * Offers churn constantly on vast.ai: roughly three quarters of the listed asks
@@ -160,9 +180,11 @@ export class SessionOrchestrator {
     }
 
     const sessionId = randomUUID();
+    // The session id is the last label segment, which lets startup reclaim
+    // machines even when the database row is already marked failed.
     const label = offer.simulated
       ? `maia:mock:${sessionId}`
-      : `${this.options.installId ?? "maia"}:${sessionId}`;
+      : `${SESSION_LABEL_PREFIX}${sessionId}`;
     const startedAt = new Date(this.now()).toISOString();
 
     // Replace a previous failed attempt for the same model so the list does not
@@ -323,7 +345,14 @@ export class SessionOrchestrator {
       }
 
       if (instanceId !== null) {
-        await this.options.compute.destroyInstance(instanceId).catch(() => undefined);
+        await this.options.compute.destroyInstance(instanceId).catch((teardownError: unknown) => {
+          // A GPU that cannot be released keeps billing, so never swallow this.
+          this.options.logger?.warn("Failed to release the GPU after a booking error", {
+            sessionId,
+            instanceId,
+            message: teardownError instanceof Error ? teardownError.message : String(teardownError)
+          });
+        });
       }
 
       throw error;
@@ -343,10 +372,17 @@ export class SessionOrchestrator {
       this.runtimes.get(sessionId)?.session.state === "provisioning";
 
     try {
+      const bootStartedAt = Date.now();
       append("info", "Booting the instance and downloading the model…");
       await this.options.compute.waitUntilReady(
         instanceId,
-        this.options.readinessTimeoutMs ?? DEFAULT_READINESS_TIMEOUT_MS
+        this.options.readinessTimeoutMs ?? DEFAULT_READINESS_TIMEOUT_MS,
+        (update) => {
+          // Each provider status change is one line, so a slow boot shows
+          // progress instead of silence.
+          const detail = update.message ? ` — ${update.message}` : "";
+          append("info", `${describeStatus(update.status)}${detail} (${formatDuration(update.elapsedMs)})`);
+        }
       );
 
       // The session may have been released while the model was loading; in that
@@ -355,7 +391,7 @@ export class SessionOrchestrator {
         return;
       }
 
-      append("info", "Model server is healthy; warming up.");
+      append("info", `Model server is healthy after ${formatDuration(Date.now() - bootStartedAt)}.`);
       this.options.store.transition(sessionId, "ready", {
         readyAt: new Date(this.now()).toISOString()
       });
@@ -401,7 +437,14 @@ export class SessionOrchestrator {
         }
       }
 
-      await this.options.compute.destroyInstance(instanceId).catch(() => undefined);
+      await this.options.compute.destroyInstance(instanceId).catch((teardownError: unknown) => {
+        // A GPU that cannot be released keeps billing, so never swallow this.
+        this.options.logger?.warn("Failed to release the GPU after a provisioning error", {
+          sessionId,
+          instanceId,
+          message: teardownError instanceof Error ? teardownError.message : String(teardownError)
+        });
+      });
     }
   }
 
@@ -583,6 +626,33 @@ export class SessionOrchestrator {
       this.options.logger?.warn("Reconciled orphaned sessions", { reconciled });
     }
 
+    // A crash can leave instances whose session row already says "failed", which
+    // the query above skips. Anything labelled by this app and not backed by a
+    // live session is released here, so no GPU keeps billing unattended.
+    const labelled = await this.options.compute.listLabelledInstances?.(SESSION_LABEL_PREFIX).catch(
+      () => []
+    );
+
+    if (labelled && labelled.length > 0) {
+      const live = new Set(this.options.store.getActive().map((session) => session.id));
+
+      for (const { instanceId, label } of labelled) {
+        const sessionId = label.split(":").pop() ?? "";
+        if (live.has(sessionId)) {
+          continue;
+        }
+
+        await this.options.compute.destroyInstance(instanceId).catch((error: unknown) => {
+          this.options.logger?.warn("Could not release an untracked instance", {
+            instanceId,
+            message: error instanceof Error ? error.message : String(error)
+          });
+        });
+        this.options.logger?.warn("Released an untracked instance", { instanceId, label });
+        reconciled += 1;
+      }
+    }
+
     return reconciled;
   }
 
@@ -603,6 +673,35 @@ export function hasActiveFilters(filters: GpuFilters): boolean {
     filters.minReliability !== null ||
     filters.maxHourlyMicroUsd !== null
   );
+}
+
+/** "Waiting for the host to allocate the instance" and friends. */
+function describeStatus(status: string): string {
+  switch (status) {
+    case "created":
+      return "Instance created";
+    case "scheduling":
+      return "Waiting for the host to allocate the instance";
+    case "loading":
+      return "Pulling the container image and starting it";
+    case "running":
+      return "Container is running";
+    case "starting":
+      return "Waiting for the model server to answer";
+    default:
+      return `Instance status: ${status}`;
+  }
+}
+
+function formatDuration(ms: number): string {
+  const seconds = Math.max(0, Math.round(ms / 1000));
+  if (seconds < 60) {
+    return `${seconds} s`;
+  }
+
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  return `${minutes} m ${String(rest).padStart(2, "0")} s`;
 }
 
 /** "≥1000 Mbps down, ≥200 Mbps up, ≥500 MB/s disk" — what the gates allow. */

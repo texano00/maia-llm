@@ -14,6 +14,7 @@ import {
 } from "../../src/main/services/providers/vastai/client";
 import { createVastComputeProvider } from "../../src/main/services/providers/vastai/compute-provider";
 import type { VastAiClient } from "../../src/main/services/providers/vastai/client";
+import { VastAiClient as VastAiClientImpl } from "../../src/main/services/providers/vastai/client";
 import { ProviderHttpError } from "../../src/main/services/providers/http";
 import { modelPath } from "../../src/main/services/catalogue/huggingface-source";
 import { createVllmRuntime, parseChunk, parseSseStream } from "../../src/main/services/inference/vllm";
@@ -249,6 +250,81 @@ describe("vast.ai offer picking", () => {
 
     expect(first?.offerId).toBe(10);
     expect(second?.offerId).toBe(11);
+  });
+
+  it("starts vLLM with the flags that cut boot time, and publishes the port", async () => {
+    let captured: { args: string[]; env: Record<string, string>; port?: number } | null = null;
+    const fake = {
+      async createInstance(input: { args: string[]; env: Record<string, string>; port?: number }) {
+        captured = input;
+        return 9001;
+      }
+    } as unknown as VastAiClient;
+
+    const provider = createVastComputeProvider({
+      getApiKey: async () => "key",
+      getParameterCount: async () => 7.6e9,
+      clientFactory: () => fake
+    });
+
+    await provider.createInstance(
+      {
+        offerId: 1,
+        gpuName: "RTX 3090",
+        gpuRamGb: 24,
+        hourlyRateMicroUsd: 120_000,
+        expectedWaitMinutes: 3,
+        simulated: false
+      },
+      { label: "maia:test", modelId: "Qwen/Qwen2.5-7B-Instruct" }
+    );
+
+    const input = captured as unknown as
+      | { args: string[]; env: Record<string, string>; port?: number }
+      | null;
+    expect(input).not.toBeNull();
+
+    // CUDA graph capture and per-request logging cost startup time.
+    expect(input!.args).toContain("--enforce-eager");
+    expect(input!.args).toContain("--disable-log-requests");
+    expect(input!.args).toContain("--model");
+    // The port must not travel as an entrypoint argument.
+    expect(input!.args).not.toContain("-p");
+    expect(input!.port).toBe(8000);
+    expect(input!.env.HF_HUB_ENABLE_HF_TRANSFER).toBe("1");
+  });
+
+  it("sends the port mapping as a Docker flag, where vast.ai expects it", async () => {
+    let body: Record<string, unknown> | null = null;
+    const http = {
+      async request(_path: string, init: RequestInit) {
+        body = JSON.parse(String(init.body)) as Record<string, unknown>;
+        return new Response(JSON.stringify({ success: true, new_contract: 4242 }), { status: 200 });
+      }
+    };
+
+    const client = new VastAiClientImpl("key", { client: http as never });
+    const instanceId = await client.createInstance({
+      offerId: 7,
+      image: "vllm/vllm-openai:latest",
+      diskGb: 64,
+      label: "maia:abc",
+      env: { HF_HUB_ENABLE_HF_TRANSFER: "1" },
+      args: ["--model", "Qwen/Qwen2.5-7B-Instruct"],
+      port: 8000
+    });
+
+    expect(instanceId).toBe(4242);
+    expect(body!.env).toBe("-e HF_HUB_ENABLE_HF_TRANSFER=1 -p 8000:8000");
+    expect(body!.args).toEqual(["--model", "Qwen/Qwen2.5-7B-Instruct"]);
+    expect(body!.runtype).toBe("args");
+  });
+
+  it("reads the published port from every shape vast.ai has used", () => {
+    expect(readMappedPort({ ports: { "8000/tcp": [{ HostPort: "31234" }] } })).toBe(31234);
+    expect(readMappedPort({ ports: { "8000": [{ HostPort: 40000 }] } })).toBe(40000);
+    expect(readMappedPort({ ports: { "8000/tcp": [] } })).toBeNull();
+    expect(readMappedPort({})).toBeNull();
   });
 });
 

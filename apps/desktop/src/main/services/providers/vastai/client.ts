@@ -38,8 +38,12 @@ export interface VastAiInstancePayload {
   status_msg?: string;
   public_ipaddr?: string;
   ssh_host?: string;
-  ports?: Record<string, Array<{ HostIp?: string; HostPort?: string }>>;
+  ports?: Record<
+    string,
+    Array<{ HostIp?: string; HostPort?: string | number }> | { HostIp?: string; HostPort?: string | number }
+  > | null;
   machine_id?: number;
+  label?: string;
 }
 
 export const VASTAI_BASE_URL = "https://console.vast.ai";
@@ -253,7 +257,20 @@ export class VastAiClient {
     label: string;
     env: Record<string, string>;
     args: string[];
+    /** Container port published on the host, e.g. 8000 for the vLLM server. */
+    port?: number;
   }): Promise<number> {
+    const containerPort = input.port ?? 8000;
+
+    // vast.ai takes Docker flags in `env` (documented: "Environment variables
+    // **and port mappings** in Docker flag format") while `args` goes to the
+    // image entrypoint. Sending `-p 8000:8000` as an entrypoint argument leaves
+    // the port unpublished, so the model is served but unreachable.
+    const dockerFlags = [
+      ...Object.entries(input.env).map(([key, value]) => `-e ${key}=${value}`),
+      `-p ${containerPort}:${containerPort}`
+    ].join(" ");
+
     const response = await this.http.request(`/api/v0/asks/${input.offerId}/`, {
       method: "PUT",
       headers: { ...this.authHeaders(), "content-type": "application/json" },
@@ -263,9 +280,7 @@ export class VastAiClient {
         label: input.label,
         runtype: "args",
         args: input.args,
-        env: Object.entries(input.env)
-          .map(([key, value]) => `-e ${key}=${value}`)
-          .join(" ")
+        env: dockerFlags
       })
     });
 
@@ -282,6 +297,17 @@ export class VastAiClient {
    * so listing and filtering by id is the shape that stays valid.
    */
   async getInstance(instanceId: number): Promise<VastAiInstancePayload> {
+    const list = await this.listInstances();
+    const found = list.find((instance) => instance.id === instanceId);
+    if (!found) {
+      throw new Error(`vast.ai instance ${instanceId} is not visible any more.`);
+    }
+
+    return found;
+  }
+
+  /** Every instance on the account, used to find machines the app lost track of. */
+  async listInstances(): Promise<VastAiInstancePayload[]> {
     const response = await this.http.request("/api/v1/instances/", {
       headers: this.authHeaders()
     });
@@ -291,18 +317,7 @@ export class VastAiClient {
     };
 
     const instances = payload.instances;
-    const list: VastAiInstancePayload[] = Array.isArray(instances)
-      ? instances
-      : instances
-        ? Object.values(instances)
-        : [];
-
-    const found = list.find((instance) => instance.id === instanceId);
-    if (!found) {
-      throw new Error(`vast.ai instance ${instanceId} is not visible any more.`);
-    }
-
-    return found;
+    return Array.isArray(instances) ? instances : instances ? Object.values(instances) : [];
   }
 
   async destroyInstance(instanceId: number): Promise<void> {
@@ -331,11 +346,27 @@ export class VastAiClient {
 
 /** Reads the mapped HTTP port from an instance payload. */
 export function readMappedPort(instance: VastAiInstancePayload, containerPort = 8000): number | null {
-  const entry = instance.ports?.[`${containerPort}/tcp`]?.[0];
-  const port = entry?.HostPort ?? entry?.HostIp;
-  const parsed = Number(port);
+  const ports = instance.ports;
+  if (!ports) {
+    return null;
+  }
 
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  // vast.ai has used more than one key shape over time ("8000/tcp" and "8000").
+  const entries = [
+    ports[`${containerPort}/tcp`],
+    ports[`${containerPort}`],
+    ports[String(containerPort)]
+  ];
+
+  for (const entry of entries) {
+    const first = Array.isArray(entry) ? entry[0] : entry;
+    const port = Number(first?.HostPort);
+    if (Number.isFinite(port) && port > 0) {
+      return port;
+    }
+  }
+
+  return null;
 }
 
 export function readPublicHost(instance: VastAiInstancePayload): string | null {

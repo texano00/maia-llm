@@ -10,7 +10,14 @@ export interface CredentialHandle {
   label: string;
 }
 
-export class CredentialVault {
+/** What the credential store needs; the web host supplies a non-Electron vault. */
+export interface SecretVault {
+  store(provider: Provider, label: string, secret: string): Promise<CredentialHandle>;
+  read(handle: string): Promise<string>;
+  remove(handle: string): Promise<void>;
+}
+
+export class CredentialVault implements SecretVault {
   constructor(private readonly directory: string) {}
 
   async store(provider: Provider, label: string, secret: string): Promise<CredentialHandle> {

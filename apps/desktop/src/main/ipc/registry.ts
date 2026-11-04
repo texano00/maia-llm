@@ -1,4 +1,3 @@
-import { ipcMain, type IpcMainInvokeEvent } from "electron";
 import type { ZodType } from "zod";
 import {
   errorCodeSchema,
@@ -9,6 +8,7 @@ import {
   type IpcChannel,
   type Result
 } from "@maia/contracts";
+import type { IpcMainInvokeEvent } from "electron";
 
 type IpcHandler<T> = (payload: T) => Promise<unknown> | unknown;
 
@@ -26,6 +26,7 @@ export class IpcRegistry {
   private readonly registrations = new Map<IpcChannel, Registration>();
   private readonly isSenderAllowed: (event: IpcMainInvokeEvent) => boolean;
   private readonly onError: ((channel: IpcChannel, error: unknown) => void) | undefined;
+  private installed = false;
 
   constructor(options: IpcRegistryOptions = {}) {
     this.isSenderAllowed = options.isSenderAllowed ?? defaultSenderAllowed;
@@ -43,32 +44,54 @@ export class IpcRegistry {
     });
   }
 
-  install(): void {
-    for (const [channel, registration] of this.registrations) {
-      ipcMain.handle(channel, async (event, payload: unknown): Promise<Result<unknown>> => {
-        if (!this.isSenderAllowed(event)) {
-          return fail("NOT_AUTHENTICATED", "Request came from an untrusted renderer", false);
-        }
+  /**
+   * Runs one channel with the same validation and error mapping used by IPC, so
+   * the web host can reuse every handler without Electron.
+   */
+  async invoke(channel: IpcChannel, payload: unknown): Promise<Result<unknown>> {
+    const registration = this.registrations.get(channel);
+    if (!registration) {
+      return fail("VALIDATION_FAILED", `Unsupported IPC channel: ${channel}`, false);
+    }
 
-        const parsed = registration.schema.safeParse(payload);
-        if (!parsed.success) {
-          return fail("VALIDATION_FAILED", "Request payload is invalid", false);
-        }
+    const parsed = registration.schema.safeParse(payload);
+    if (!parsed.success) {
+      return fail("VALIDATION_FAILED", "Request payload is invalid", false);
+    }
 
-        try {
-          const data = await registration.handler(parsed.data);
-          return ok(data);
-        } catch (error) {
-          this.onError?.(channel, error);
-          return fail(errorToCode(error), toSafeMessage(error), false);
-        }
-      });
+    try {
+      const data = await registration.handler(parsed.data);
+      return ok(data);
+    } catch (error) {
+      this.onError?.(channel, error);
+      return fail(errorToCode(error), toSafeMessage(error), false);
     }
   }
 
+  install(): void {
+    // Imported lazily so a Node process (the web host) can use this class.
+    void import("electron").then(({ ipcMain }) => {
+      for (const channel of this.registrations.keys()) {
+        ipcMain.handle(channel, async (event, payload: unknown): Promise<Result<unknown>> => {
+          if (!this.isSenderAllowed(event)) {
+            return fail("NOT_AUTHENTICATED", "Request came from an untrusted renderer", false);
+          }
+
+          return this.invoke(channel, payload);
+        });
+      }
+
+      this.installed = true;
+    });
+  }
+
   dispose(): void {
-    for (const channel of this.registrations.keys()) {
-      ipcMain.removeHandler(channel);
+    if (this.installed) {
+      void import("electron").then(({ ipcMain }) => {
+        for (const channel of this.registrations.keys()) {
+          ipcMain.removeHandler(channel);
+        }
+      });
     }
 
     this.registrations.clear();

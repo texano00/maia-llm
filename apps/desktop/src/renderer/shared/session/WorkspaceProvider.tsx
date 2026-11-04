@@ -35,6 +35,9 @@ interface WorkspaceValue {
   sessions: Session[];
   /** Model ids with a start request in flight (not the same as "provisioning"). */
   startingIds: string[];
+  /** Session the user just started; the chat screen selects it once. */
+  focusSessionId: string | null;
+  clearFocusSession(): void;
   error: string | null;
   clearError(): void;
   prepareEstimate(modelId: string): Promise<void>;
@@ -57,6 +60,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [preparing, setPreparing] = useState(false);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [startingIds, setStartingIds] = useState<string[]>([]);
+  const [focusSessionId, setFocusSessionId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const reloadSessions = useCallback(async () => {
@@ -203,6 +207,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         });
         setError(null);
         await reloadSessions();
+        setFocusSessionId(result.data.id);
         return result.data;
       }
 
@@ -230,6 +235,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       preparing,
       sessions,
       startingIds,
+      focusSessionId,
+      clearFocusSession: () => setFocusSessionId(null),
       error,
       clearError: () => setError(null),
       prepareEstimate,
@@ -240,6 +247,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       capability,
       error,
       estimates,
+      focusSessionId,
       loadingCatalogue,
       models,
       prepareEstimate,

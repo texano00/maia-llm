@@ -388,6 +388,83 @@ describe("SessionOrchestrator", () => {
     expect(orchestrator.getSession(started.id)?.instanceId).toBe(777);
   });
 
+  it("logs every provisioning stage so a slow boot is visible", async () => {
+    const compute: ComputeProvider = {
+      async findOffer() {
+        return offer;
+      },
+      async createInstance() {
+        return { instanceId: 4242 };
+      },
+      async waitUntilReady(_instanceId, _timeoutMs, onProgress) {
+        onProgress?.({ status: "scheduling", message: null, elapsedMs: 2_000 });
+        onProgress?.({ status: "loading", message: "pulling the image", elapsedMs: 61_000 });
+        onProgress?.({ status: "running", message: null, elapsedMs: 121_000 });
+      },
+      async destroyInstance() {
+        return undefined;
+      }
+    };
+
+    const orchestrator = new SessionOrchestrator({
+      store,
+      compute,
+      inference: createMockInference({ response: "ok" }),
+      idleTimeoutMinutes: 10,
+      delay: async () => undefined,
+      now: () => clock
+    });
+
+    const estimate = await orchestrator.createEstimate("Qwen/Qwen2.5-7B-Instruct");
+    const started = await orchestrator.start({ estimateId: estimate.id, confirmEstimate: true });
+    await orchestrator.awaitProvisioning(started.id);
+
+    const messages = store.eventsFor(started.id).map((event) => event.message);
+
+    expect(messages.some((message) => message.includes("Waiting for the host to allocate"))).toBe(true);
+    expect(messages.some((message) => message.includes("pulling the image"))).toBe(true);
+    expect(messages.some((message) => message.includes("2 m 01 s"))).toBe(true);
+    expect(messages.some((message) => message.includes("Model server is healthy after"))).toBe(true);
+  });
+
+  it("releases instances the app lost track of, so nothing keeps billing", async () => {
+    const destroyed: number[] = [];
+    const compute: ComputeProvider = {
+      async findOffer() {
+        return offer;
+      },
+      async createInstance() {
+        return { instanceId: 1 };
+      },
+      async waitUntilReady() {
+        return undefined;
+      },
+      async destroyInstance(instanceId) {
+        destroyed.push(instanceId);
+      },
+      async listLabelledInstances() {
+        return [
+          { instanceId: 55, label: "maia:session-that-failed" },
+          { instanceId: 66, label: "maia:some-other-run" }
+        ];
+      }
+    };
+
+    const orchestrator = new SessionOrchestrator({
+      store,
+      compute,
+      inference: createMockInference({ response: "ok" }),
+      idleTimeoutMinutes: 10,
+      delay: async () => undefined,
+      now: () => clock
+    });
+
+    const reconciled = await orchestrator.reconcile();
+
+    expect(destroyed.sort()).toEqual([55, 66]);
+    expect(reconciled).toBe(2);
+  });
+
   it("respects the GPU filters when ranking offers", async () => {
     const filtered = createMockComputeProvider();
     const offer = await filtered.findOffer({

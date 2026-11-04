@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { CredentialProvider, CredentialStatus } from "@maia/contracts";
 import type { DatabaseConnection } from "../../storage/db";
-import type { CredentialVault } from "../credentials/vault";
+import type { SecretVault } from "../credentials/vault";
 
 interface HandleRow {
   id: string;
@@ -19,7 +19,7 @@ interface HandleRow {
 export class CredentialStore {
   constructor(
     private readonly database: DatabaseConnection,
-    private readonly vault: CredentialVault
+    private readonly vault: SecretVault
   ) {}
 
   async set(provider: CredentialProvider, secret: string): Promise<void> {

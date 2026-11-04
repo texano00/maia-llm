@@ -31,6 +31,9 @@ at startup.
 | "Not checked yet." stays | Look for `Checking for update`; if it appears without a follow-up, the feed request stalled (20 s timeout applies). |
 | Update banner never appears | Log line `Update for version X is not available` means the feed is healthy and the build is current. |
 | Settings do not persist | `settings.update` should be followed by no error; a validation failure returns `VALIDATION_FAILED`. |
+| "Every GPU we tried was taken…" | Normal market churn: about three quarters of vast.ai asks disappear within seconds. The app retries on the next rentable offer; pressing start again is safe. |
+| The instance runs but no model appears | The container port must be published through vast.ai's `env` Docker flags (`-p 8000:8000`), not through `args`, which goes to the image entrypoint. The app now verifies `/v1/models` before reporting a session as active. |
+| Startup takes 5–15 minutes | Check the host's `inet_down` (Mbps) in the log line `vast.ai offer search finished`. The default gates require 1000 Mbps down / 500 MB/s disk; lower them in Settings only if you accept a slower boot. |
 
 The main process now self-checks after the window loads and logs
 `Preload bridge missing: IPC is unavailable in this renderer` when the preload

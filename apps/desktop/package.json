@@ -1,6 +1,6 @@
 {
   "name": "@maia/desktop",
-  "version": "0.4.7",
+  "version": "0.4.8",
   "private": true,
   "productName": "Maia LLM",
   "description": "Maia LLM desktop client",
@@ -16,7 +16,9 @@
     "rebuild:native": "electron-builder install-app-deps",
     "pack:win": "npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win dir --x64 --publish never",
     "dist:win": "npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win nsis --x64 --publish never",
-    "dist:win:msi": "npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win msi --x64 --publish never"
+    "dist:win:msi": "npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win msi --x64 --publish never",
+    "web": "tsx src/web/server.ts",
+    "web:dev": "npm run build && tsx src/web/server.ts"
   },
   "dependencies": {
     "better-sqlite3": "13.0.3",

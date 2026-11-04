@@ -15,7 +15,14 @@ interface StreamingBubble {
 }
 
 export function ChatPage() {
-  const { sessions, reloadSessions, error: workspaceError, clearError } = useWorkspace();
+  const {
+    sessions,
+    reloadSessions,
+    focusSessionId,
+    clearFocusSession,
+    error: workspaceError,
+    clearError
+  } = useWorkspace();
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [detail, setDetail] = useState<ConversationDetail | null>(null);
@@ -29,6 +36,9 @@ export function ChatPage() {
   const [creating, setCreating] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const transcriptRef = useRef<HTMLDivElement>(null);
+  // Event transports can deliver the last deltas after the send resolves; those
+  // must not paint a second bubble over the stored transcript.
+  const inFlightRef = useRef(false);
 
   const activeSession = sessions.find((session) => session.id === activeSessionId) ?? null;
   const frozen =
@@ -72,6 +82,19 @@ export function ChatPage() {
     void loadConversations();
   }, [loadConversations]);
 
+  // Starting a model from the catalogue lands here: select that session so the
+  // composer is usable straight away instead of asking for a new chat.
+  useEffect(() => {
+    if (!focusSessionId) {
+      return;
+    }
+
+    if (sessions.some((session) => session.id === focusSessionId)) {
+      setActiveSessionId(focusSessionId);
+      clearFocusSession();
+    }
+  }, [clearFocusSession, focusSessionId, sessions]);
+
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
@@ -84,7 +107,7 @@ export function ChatPage() {
     }
 
     return bridge.onChatEvent((chunk) => {
-      if (chunk.conversationId !== activeConversationId) {
+      if (chunk.conversationId !== activeConversationId || !inFlightRef.current) {
         return;
       }
 
@@ -187,6 +210,7 @@ export function ChatPage() {
 
     setDraft("");
     setBusy(true);
+    inFlightRef.current = true;
     setError(null);
     setDetail((existing) =>
       existing
@@ -214,6 +238,7 @@ export function ChatPage() {
 
     if (!result.ok) {
       setBusy(false);
+      inFlightRef.current = false;
       setStreaming(null);
       setError(result.error.message);
       return;
@@ -224,6 +249,19 @@ export function ChatPage() {
       setCreating(false);
       await loadConversations();
     }
+
+    // The first message creates the conversation, so the stored transcript has to
+    // be loaded — otherwise the reply streams into a view that never renders it.
+    const loaded = await bridge.invoke<ConversationDetail>("conversation.get", {
+      id: activeConversationId ?? result.data.conversationId
+    });
+    if (loaded.ok) {
+      setDetail(loaded.data);
+      setStreaming(null);
+    }
+
+    inFlightRef.current = false;
+    setBusy(false);
   }
 
   async function switchModel(session: Session): Promise<void> {

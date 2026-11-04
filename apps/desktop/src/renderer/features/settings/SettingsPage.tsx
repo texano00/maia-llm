@@ -232,6 +232,13 @@ export function SettingsPage() {
         vault here.
       </p>
 
+      {appInfo?.app === "web" ? (
+        <p className="field-hint">
+          Browser preview: secrets are kept in memory for this session and are never written to
+          disk. Use the desktop build for stored credentials and in-app updates.
+        </p>
+      ) : null}
+
       {bridgeAvailable ? null : (
         <p className="field-error">
           The application bridge is unavailable. Settings cannot be read or saved — reinstall Maia

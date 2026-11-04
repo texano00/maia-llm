@@ -34,6 +34,41 @@ before starting. Node-based unit tests expect the Node ABI; after running the
 desktop app, restore it with `npm rebuild better-sqlite3` before running
 `npm test` again.
 
+## Run it in a browser
+
+The renderer does not depend on Electron: the same screens are served by a small
+Node host that reuses every main-process service.
+
+```bash
+# build the renderer, then serve it with the same channels over HTTP
+npm run -w @maia/desktop web:dev
+# → http://127.0.0.1:5173  (mock providers, data in .maia-web/)
+```
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `MAIA_PROVIDER_MODE` | `mock` | `live` rents real GPUs (needs a vast.ai key) |
+| `MAIA_WEB_PORT` | `5173` | HTTP port |
+| `MAIA_WEB_HOST` | `127.0.0.1` | Bind address (loopback only) |
+| `MAIA_WEB_DATA` | `.maia-web` | SQLite database directory |
+| `VAST_API_KEY` / `HF_TOKEN` | – | Imported into the credential store at start |
+
+How the transport differs, and why:
+
+- `POST /rpc` carries `{ channel, payload }` and reuses the Electron IPC registry,
+  including the Zod schemas and error mapping — one handler set, two transports.
+- Chat and update events are **polled** from `/events?since=<cursor>`, not streamed
+  over SSE. Proxied and forwarded ports buffer event streams, which silently drops
+  token-by-token updates; polling every 350 ms works everywhere.
+- Credentials live in memory only (`EnvSecretVault`): the browser build never
+  touches the OS keyring, and nothing is persisted outside `.maia-web/maia.db`.
+- In-app updates are disabled; the "Check for updates" button reports that updates
+  belong to the installed desktop build.
+
+Only the Ollama/llama-compatible local endpoint is desktop-only: it binds a
+loopback port on the user's machine, which has no meaning in a browser tab.
+
+
 ## Verify
 
 ```bash

@@ -28,9 +28,17 @@ export interface VastComputeProviderOptions {
   logger?: { info(message: string, context?: Record<string, unknown>): void; warn(message: string, context?: Record<string, unknown>): void } | undefined;
 }
 
-interface InstanceEndpoint {
+export interface InstanceEndpoint {
   host: string;
   port: number;
+}
+
+export interface ProvisioningProgress {
+  /** vast.ai instance status: scheduling, loading, running… */
+  status: string;
+  /** Provider message for that status, when it sends one. */
+  message: string | null;
+  elapsedMs: number;
 }
 
 /**
@@ -39,6 +47,7 @@ interface InstanceEndpoint {
  */
 export function createVastComputeProvider(options: VastComputeProviderOptions): ComputeProvider & {
   resolveEndpoint(instanceId: number): InstanceEndpoint | null;
+  listLabelledInstances(prefix: string): Promise<Array<{ instanceId: number; label: string }>>;
 } {
   const endpoints = new Map<number, InstanceEndpoint>();
 
@@ -125,42 +134,91 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
         image: options.containerImage ?? "vllm/vllm-openai:latest",
         diskGb: options.diskGb ?? estimateDiskGb(parameterCount),
         label: context.label,
-        env: hfToken ? { HUGGING_FACE_HUB_TOKEN: hfToken } : {},
-        args: ["-p", "8000:8000", "--model", context.modelId, "--port", "8000"]
+        env: {
+          // Parallel ranged downloads: the weights are 15 GB for a 7B model, and
+          // Hugging Face limits a single stream, so this is the difference
+          // between minutes and tens of minutes on a fast host.
+          HF_HUB_ENABLE_HF_TRANSFER: "1",
+          ...(hfToken ? { HUGGING_FACE_HUB_TOKEN: hfToken } : {})
+        },
+        // Only vLLM arguments: the port mapping belongs to the Docker flags in
+        // `env`, otherwise nothing is published and the model is unreachable.
+        args: [
+          "--model",
+          context.modelId,
+          "--port",
+          "8000",
+          // Skip CUDA graph capture and per-request logging: both cost startup
+          // time, and the graphs matter less than answering sooner.
+          "--enforce-eager",
+          "--disable-log-requests"
+        ],
+        port: 8000
       });
 
       options.logger?.info("vast.ai instance requested", { instanceId, offerId: offer.offerId });
       return { instanceId };
     },
 
-    async waitUntilReady(instanceId, timeoutMs) {
+    async waitUntilReady(instanceId, timeoutMs, onProgress) {
       const api = await client();
       const deadline = Date.now() + (options.readyTimeoutMs ?? timeoutMs);
       const pollInterval = options.pollIntervalMs ?? 5_000;
+      const startedAt = Date.now();
+      let lastStatus = "";
+      let unknownSince: number | null = null;
 
       for (;;) {
         const instance = await api.getInstance(instanceId);
-        const status = instance.actual_status;
+        const status = instance.actual_status ?? "unknown";
+
+        if (status !== lastStatus) {
+          lastStatus = status;
+          onProgress?.({
+            status,
+            message: instance.status_msg ?? null,
+            elapsedMs: Date.now() - startedAt
+          });
+        }
+
+        // A freshly created instance reports `unknown` until the host reports
+        // back, so only a persistent unknown/offline is fatal.
+        if (status === "unknown" || status === "offline") {
+          unknownSince ??= Date.now();
+          if (Date.now() - unknownSince > 120_000) {
+            throw new Error(`The GPU instance never became visible (${status}).`);
+          }
+        } else {
+          unknownSince = null;
+        }
+
+        if (["exited", "error", "destroyed"].includes(status)) {
+          throw new Error(`The GPU instance stopped while starting up (${status}).`);
+        }
 
         if (status === "running") {
           const host = readPublicHost(instance);
           const port = readMappedPort(instance);
           if (host && port) {
             endpoints.set(instanceId, { host, port });
-            const healthy = await waitForHealth(`http://${host}:${port}`, deadline, options.fetchImpl);
-            if (!healthy) {
-              throw new Error("The model server did not become ready in time. The GPU was released.");
+            onProgress?.({ status: "starting", message: "waiting for the model server", elapsedMs: Date.now() - startedAt });
+            const served = await waitForServing(`http://${host}:${port}`, deadline, options.fetchImpl);
+            if (served === null) {
+              throw new Error(
+                "The model server did not become ready in time. The GPU was released — a cold start can take several minutes when the host is slow."
+              );
             }
+
+            options.logger?.info("Model server is serving", { instanceId, models: served });
             return;
           }
         }
 
-        if (status === "exited" || status === "error" || status === "destroyed") {
-          throw new Error(`The GPU instance stopped while starting up (${status}).`);
-        }
-
+        // vast.ai documents that `exited`, `unknown` and `offline` never recover.
         if (Date.now() > deadline) {
-          throw new Error("Timed out waiting for the GPU instance to start.");
+          throw new Error(
+            `Timed out waiting for the GPU instance to start (${Math.round((Date.now() - startedAt) / 60_000)} min). The GPU was released.`
+          );
         }
 
         await sleep(pollInterval);
@@ -171,29 +229,49 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
       endpoints.delete(instanceId);
       const api = await client();
       await api.destroyInstance(instanceId);
+    },
+
+    async listLabelledInstances(prefix: string): Promise<Array<{ instanceId: number; label: string }>> {
+      const api = await client();
+      const instances = await api.listInstances();
+
+      return instances
+        .filter((instance) => typeof instance.id === "number")
+        .map((instance) => ({ instanceId: instance.id as number, label: instance.label ?? "" }))
+        .filter((instance) => instance.label.startsWith(prefix));
     }
   };
 }
 
-async function waitForHealth(
+/**
+ * Waits until the OpenAI surface answers and lists at least one model, which is
+ * the only proof that the GPU is actually serving rather than merely running.
+ * Returns the served model ids, or null on timeout.
+ */
+async function waitForServing(
   baseUrl: string,
   deadline: number,
   fetchImpl: typeof fetch = fetch
-): Promise<boolean> {
+): Promise<string[] | null> {
   for (;;) {
     try {
-      const response = await fetchImpl(`${baseUrl}/health`, {
-        signal: AbortSignal.timeout(5_000)
-      });
-      if (response.ok) {
-        return true;
+      const health = await fetchImpl(`${baseUrl}/health`, { signal: AbortSignal.timeout(5_000) });
+      if (health.ok) {
+        const models = await fetchImpl(`${baseUrl}/v1/models`, { signal: AbortSignal.timeout(5_000) });
+        if (models.ok) {
+          const payload = (await models.json()) as { data?: Array<{ id?: string }> };
+          const ids = (payload.data ?? []).map((entry) => entry.id ?? "").filter(Boolean);
+          if (ids.length > 0) {
+            return ids;
+          }
+        }
       }
     } catch {
       // Model servers reject connections until vLLM finished loading weights.
     }
 
     if (Date.now() > deadline) {
-      return false;
+      return null;
     }
 
     await sleep(5_000);
