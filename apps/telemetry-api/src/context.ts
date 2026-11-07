@@ -14,6 +14,9 @@ import { FailureService } from "./services/failure-service.js";
 import { GpuReputationService } from "./services/gpu-reputation-service.js";
 import { TelemetryService } from "./services/telemetry-service.js";
 import { AdminAuthService, TokenService } from "./services/portal-auth.js";
+import { createHuggingFaceCatalogueClient } from "./services/catalogue/huggingface.js";
+import { SnapshotService } from "./services/catalogue/snapshot-service.js";
+import { createUseCaseReader, type UseCaseSummary } from "./services/catalogue/use-cases.js";
 
 export interface AppContext {
   config: ServerConfig;
@@ -23,6 +26,8 @@ export interface AppContext {
   failures: FailureService;
   tokens: TokenService;
   admins: AdminAuthService;
+  snapshot: SnapshotService;
+  useCases: () => Promise<UseCaseSummary[]>;
   repositories: {
     gpus: GpuReputationRepository;
     telemetry: TelemetryRepository;
@@ -97,6 +102,14 @@ export async function createAppContext(options: CreateAppContextOptions = {}): P
     await admins.seed(config.adminEmail, config.adminPassword);
   }
 
+  const snapshot = new SnapshotService({
+    db,
+    client: createHuggingFaceCatalogueClient({ token: config.hfToken }),
+    limit: config.catalogueLimit,
+    ...(options.now ? { now: options.now } : {}),
+  });
+  const useCases = createUseCaseReader(db);
+
   return {
     config,
     db,
@@ -105,6 +118,8 @@ export async function createAppContext(options: CreateAppContextOptions = {}): P
     failures,
     tokens,
     admins,
+    snapshot,
+    useCases,
     repositories: { gpus: gpuRepository, telemetry: telemetryRepository, failures: failureRepository },
     async close() {
       if (ownsDatabase) {

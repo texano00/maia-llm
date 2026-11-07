@@ -28,6 +28,12 @@ export interface ServerConfig {
   /** Bootstrap administrator, seeded on first boot when both are set. */
   adminEmail: string | null;
   adminPassword: string | null;
+  /** Service credential used to build the catalogue snapshot. */
+  hfToken: string | null;
+  /** How often the snapshot is rebuilt. */
+  catalogueRefreshHours: number;
+  /** How many models one snapshot pass covers. */
+  catalogueLimit: number;
 }
 
 const DRIVERS: readonly SqlDialect[] = ["sqlite", "postgres", "mysql"];
@@ -70,6 +76,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     requireClientAuth: env.MAIA_REQUIRE_CLIENT_AUTH === "true",
     adminEmail: env.MAIA_ADMIN_EMAIL ?? null,
     adminPassword: env.MAIA_ADMIN_PASSWORD ?? null,
+    hfToken: env.MAIA_PORTAL_HF_TOKEN ?? env.HF_TOKEN ?? null,
+    catalogueRefreshHours: positive(env.MAIA_CATALOGUE_REFRESH_HOURS, 6),
+    catalogueLimit: positive(env.MAIA_CATALOGUE_LIMIT, 300),
   };
 }
 

@@ -41,6 +41,7 @@ describe("migrations", () => {
         "initial-schema",
         "failure-reports",
         "portal-auth",
+        "catalogue-snapshots",
       ]);
 
       // Running again is a no-op, which is what a restart does.
@@ -53,14 +54,20 @@ describe("migrations", () => {
         "admin_sessions",
         "admin_users",
         "audit_entries",
+        "catalogue_assets",
         "failure_reports",
         "gpu_machines",
         "gpu_reports",
         "installation_credentials",
         "installations",
+        "refresh_runs",
         "schema_migrations",
+        "snapshot_models",
+        "snapshots",
         "telemetry_batches",
         "telemetry_events",
+        "use_case_models",
+        "use_cases",
       ]);
     } finally {
       await db.close();

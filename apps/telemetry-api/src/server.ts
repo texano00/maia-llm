@@ -2,9 +2,11 @@ import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { pathToFileURL } from "node:url";
 import { bearerToken } from "./auth.js";
 import { loadConfig, type ServerConfig } from "./config.js";
+import { registerConfigRoutes } from "./config-routes.js";
 import { createAppContext, type AppContext } from "./context.js";
 import { registerDiagnosticsRoutes } from "./diagnostics.js";
 import { registerFailureRoutes } from "./failures.js";
+import { startCatalogueRefreshJob } from "./jobs/catalogue-refresh.js";
 import { registerPortalAuthRoutes } from "./portal-auth-routes.js";
 import { registerReputationRoutes } from "./reputation.js";
 
@@ -15,6 +17,11 @@ export interface BuildServerOptions {
   config?: ServerConfig;
   /** Test clock used by the services. */
   now?: () => number;
+  /**
+   * Start the scheduled catalogue refresh. Only the real entrypoint sets this:
+   * a test that builds a server must never reach for the network.
+   */
+  startJobs?: boolean;
 }
 
 /**
@@ -52,6 +59,19 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   registerDiagnosticsRoutes(app, context.telemetry, authorize ? { authorize } : {});
   registerReputationRoutes(app, context.gpus);
   registerFailureRoutes(app, context.failures, authorize ? { authorize } : {});
+  registerConfigRoutes(app, {
+    snapshot: context.snapshot,
+    useCases: context.useCases,
+    ...(authorize ? { authorize } : {})
+  });
+
+  if (ownsContext && options.startJobs) {
+    const job = startCatalogueRefreshJob({
+      service: context.snapshot,
+      intervalMs: context.config.catalogueRefreshHours * 60 * 60_000
+    });
+    app.addHook("onClose", async () => job.stop());
+  }
 
   if (ownsContext) {
     // Only close what this call opened.
@@ -72,6 +92,12 @@ if (isMain) {
   const port = Number(process.env.TELEMETRY_PORT ?? 8787);
   const host = process.env.TELEMETRY_HOST ?? "127.0.0.1";
 
+  // The snapshot is built by this process only; tests never start it.
+  const catalogueJob = startCatalogueRefreshJob({
+    service: context.snapshot,
+    intervalMs: context.config.catalogueRefreshHours * 60 * 60_000
+  });
+
   await app.listen({ port, host });
   app.log.info(
     { storage: context.db.dialect, file: context.config.databaseFile },
@@ -79,6 +105,7 @@ if (isMain) {
   );
 
   const shutdown = async (): Promise<void> => {
+    catalogueJob.stop();
     await app.close();
     await context.close();
     process.exit(0);
