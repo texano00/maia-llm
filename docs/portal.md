@@ -46,3 +46,38 @@ itself ships: older clients post diagnostics without a token.
 - `supported` = engine derivable (GGUF → llama.cpp, safetensors → vLLM) **and**
   repository loadable **and** chat template present. The reason is stored with
   the record so the desktop can label unsupported rows.
+
+## Backoffice
+
+The owner-facing console lives at `/admin` and is served by the API process
+itself, so the `SameSite=Strict` admin cookie never crosses an origin.
+
+```
+apps/telemetry-api/ui        React source (Vite, JSX)
+apps/telemetry-api/public/admin  build output, git-ignored
+```
+
+- Build: `npm run -w @maia/telemetry-api build:admin`.
+- Live editing: `npm run -w @maia/telemetry-api dev:admin` (proxies `/v1` to
+  `http://127.0.0.1:8787`).
+- Deployment order matters: run the UI build **before** starting the process.
+  Without it `/admin` answers with a page telling you to run the build, and the
+  API keeps working normally.
+
+Tabs, in order:
+
+1. **Operations** — snapshot version, model/supported counts, age, a manual
+   refresh button (a second click during a run reports `refresh_in_progress`),
+   and the last refresh runs with their outcome.
+2. **Use cases** — the basic-mode cards: ordered list, editor, image upload,
+   enable flag. Each referenced model shows `vllm`/`llamacpp` when the snapshot
+   supports it, `unsupported` (with the stored reason available from the API) or
+   `missing` when the id is no longer in the snapshot. Saves carry the row
+   version, so a stale editor gets `409 conflict` instead of overwriting.
+3. **Installations** — every enrollment with app version, platform, last contact
+   and a revoke action.
+4. **Audit** — the append-only trail of admin actions.
+
+First boot seeds the administrator from `MAIA_ADMIN_EMAIL` / `MAIA_ADMIN_PASSWORD`;
+change the password by restarting with a new value and a fresh database, or by
+updating the seeded row directly until a password-change flow exists.

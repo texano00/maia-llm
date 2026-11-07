@@ -11,6 +11,7 @@ export default tseslint.config(
       "**/coverage/**",
       "**/playwright-report/**",
       "**/test-results/**",
+      "**/public/admin/**",
       "**/src/renderer/index.html"
     ]
   },
@@ -33,6 +34,20 @@ export default tseslint.config(
           "varsIgnorePattern": "^_"
         }
       ]
+    }
+  },
+  {
+    // The backoffice SPA is browser code bundled by Vite, not Node code.
+    files: ["apps/telemetry-api/ui/**/*.{js,jsx}"],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: "module",
+      parserOptions: {
+        ecmaFeatures: { jsx: true }
+      },
+      globals: {
+        ...globals.browser
+      }
     }
   }
 );

@@ -3,6 +3,7 @@ import { pathToFileURL } from "node:url";
 import { bearerToken } from "./auth.js";
 import { loadConfig, type ServerConfig } from "./config.js";
 import { registerAdminRoutes } from "./admin-routes.js";
+import { registerAdminUi } from "./admin-ui.js";
 import { registerConfigRoutes } from "./config-routes.js";
 import { createAppContext, type AppContext } from "./context.js";
 import { registerDiagnosticsRoutes } from "./diagnostics.js";
@@ -23,6 +24,8 @@ export interface BuildServerOptions {
    * a test that builds a server must never reach for the network.
    */
   startJobs?: boolean;
+  /** Overrides the built backoffice bundle location (default `public/admin`). */
+  adminUiRoot?: string;
 }
 
 /**
@@ -72,6 +75,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
     db: context.db,
     ...(options.now ? { now: options.now } : {})
   });
+  registerAdminUi(app, options.adminUiRoot ? { root: options.adminUiRoot } : {});
 
   if (ownsContext && options.startJobs) {
     const job = startCatalogueRefreshJob({
