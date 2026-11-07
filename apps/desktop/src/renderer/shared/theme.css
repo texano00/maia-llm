@@ -401,6 +401,67 @@ nav {
   align-items: start;
 }
 
+/* Basic mode: one card per curated use case, resolved to a single model. */
+/* An author `display` rule beats the UA `[hidden]` rule, so state it here. */
+.catalogue-grid[hidden],
+.use-case-grid[hidden] {
+  display: none;
+}
+
+.mode-switch {
+  display: inline-flex;
+  gap: 0.25rem;
+  padding: 0.15rem;
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 0.6rem;
+}
+
+.mode-switch .ghost-button.active {
+  background: rgb(120 170 255 / 22%);
+  color: #eef4ff;
+}
+
+.use-case-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+  gap: 0.9rem;
+  margin: 1rem 0;
+}
+
+.use-case-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.9rem;
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 0.8rem;
+  background: rgb(12 16 26 / 85%);
+}
+
+.use-case-card h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.use-case-card p {
+  margin: 0;
+  color: #c3ccdb;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.use-case-card button {
+  margin-top: auto;
+  align-self: flex-start;
+}
+
+.use-case-image {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: 0.5rem;
+}
+
 .model-list {
   display: grid;
   gap: 0.4rem;

@@ -81,3 +81,20 @@ Tabs, in order:
 First boot seeds the administrator from `MAIA_ADMIN_EMAIL` / `MAIA_ADMIN_PASSWORD`;
 change the password by restarting with a new value and a fresh database, or by
 updating the seeded row directly until a password-change flow exists.
+
+## Desktop client
+
+With `MAIA_PORTAL_URL` set, the desktop reads `GET /v1/config/catalogue`
+instead of listing the Hub:
+
+- The first read enrolls silently (`POST /v1/installations`) and stores the
+  credential pair in `<userData>/portal.json` (mode `0600`).
+- A 401 rotates the access token once; a revoked refresh token re-enrolls, which
+  the backend honours by reactivating the same installation.
+- `304 Not Modified` keeps the previous payload, so a poll costs no bandwidth.
+- `503 no_snapshot` is reported as such: an unbuilt snapshot is not an outage.
+- `GET /v1/config/use-cases` powers basic mode; the desktop picks the first
+  curated entry the snapshot marks supported and explains a card when none is.
+
+The variable is **empty by default**, so a release keeps working before the
+hosted portal exists.

@@ -1,8 +1,15 @@
 import { z } from "zod";
 import { providerModeSchema, releaseChannelSchema } from "@maia/contracts";
 
-/** Where the published catalogue lives; `MAIA_PORTAL_URL=` disables it. */
-export const DEFAULT_PORTAL_URL = "https://maiallm.com";
+/**
+ * Where the published catalogue lives.
+ *
+ * Empty by default: until `maiallm.com` serves the portal, an app that only
+ * trusts a remote snapshot would show an empty catalogue on every fresh
+ * install. Deployments (and the release that follows the portal going live)
+ * set `MAIA_PORTAL_URL` to switch the source.
+ */
+export const DEFAULT_PORTAL_URL = "";
 
 const appConfigSchema = z.object({  providerMode: providerModeSchema,
   releaseChannel: releaseChannelSchema,

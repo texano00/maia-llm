@@ -4,7 +4,8 @@ import type {
   ConversationDetail,
   ConversationSummary,
   ModelDetail,
-  Session
+  Session,
+  UseCaseCard
 } from "@maia/contracts";
 import {
   catalogueQuerySchema,
@@ -55,6 +56,8 @@ export interface WorkspaceHandlersOptions {
   sessions: SessionOrchestrator;
   history: HistoryRepository;
   broadcastChat: (payload: ChatChunk) => void;
+  /** Basic-mode cards; absent when the app never talks to a portal. */
+  useCases?: (() => Promise<UseCaseCard[]>) | undefined;
 }
 
 const TITLE_MAX_LENGTH = 60;
@@ -77,6 +80,10 @@ export function registerWorkspaceHandlers(options: WorkspaceHandlersOptions): vo
 
   registry.register("catalogue.refresh", z.unknown(), (): Promise<CatalogueResult> => {
     return catalogue.refresh();
+  });
+
+  registry.register("catalogue.useCases", z.unknown(), async (): Promise<UseCaseCard[]> => {
+    return options.useCases ? options.useCases() : [];
   });
 
   registry.register("estimate.create", estimateRequestSchema, async (payload) => {

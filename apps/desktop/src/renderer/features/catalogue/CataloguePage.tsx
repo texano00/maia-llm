@@ -18,6 +18,10 @@ export function CataloguePage() {
     setCapability,
     supportedOnly,
     setSupportedOnly,
+    mode,
+    setMode,
+    useCases,
+    reloadUseCases,
     refreshCatalogue,
     selectModel,
     selected,
@@ -32,6 +36,12 @@ export function CataloguePage() {
   } = useWorkspace();
   const navigate = useNavigate();
   const [gatedConsentModelId, setGatedConsentModelId] = useState<string | null>(null);
+
+  /** A curated card resolves to one model; the estimate panel is where it lands. */
+  const pickUseCase = async (modelId: string): Promise<void> => {
+    await selectModel(modelId);
+    setMode("advanced");
+  };
 
   // Every model keeps its own estimate and its own start request, so a model that
   // is still loading never blocks a different one from being prepared.
@@ -104,6 +114,24 @@ export function CataloguePage() {
       </div>
 
       <div className="toolbar">
+        <div className="mode-switch" role="group" aria-label="Catalogue mode">
+          <button
+            type="button"
+            className={mode === "basic" ? "ghost-button active" : "ghost-button"}
+            aria-pressed={mode === "basic"}
+            onClick={() => setMode("basic")}
+          >
+            Basic
+          </button>
+          <button
+            type="button"
+            className={mode === "advanced" ? "ghost-button active" : "ghost-button"}
+            aria-pressed={mode === "advanced"}
+            onClick={() => setMode("advanced")}
+          >
+            Advanced
+          </button>
+        </div>
         <label className="inline-field">
           <span>Order by</span>
           <select value={sort} onChange={(event) => setSort(event.target.value as typeof sort)}>
@@ -137,7 +165,42 @@ export function CataloguePage() {
         </label>
       </div>
 
-      <div className="catalogue-grid">
+      <div className="use-case-grid" hidden={mode !== "basic"}>
+        {useCases.map((useCase) => (
+          <article key={useCase.id} className="use-case-card">
+            {useCase.imageUrl ? (
+              <img className="use-case-image" src={useCase.imageUrl} alt="" loading="lazy" />
+            ) : null}
+            <h2>{useCase.title}</h2>
+            <p>{useCase.description}</p>
+            {useCase.modelId ? (
+              <p className="muted">
+                Runs <code>{useCase.modelName ?? useCase.modelId}</code>
+              </p>
+            ) : (
+              <p className="pill pill-warning">{useCase.reason ?? "No runnable model yet"}</p>
+            )}
+            <button
+              type="button"
+              disabled={!useCase.modelId}
+              onClick={() => void pickUseCase(useCase.modelId as string)}
+            >
+              {useCase.modelId ? "Review and start" : "Unavailable"}
+            </button>
+          </article>
+        ))}
+        {useCases.length === 0 ? (
+          <p className="muted">
+            No curated use cases yet.{" "}
+            <button type="button" className="ghost-button" onClick={() => void reloadUseCases()}>
+              Reload
+            </button>{" "}
+            or switch to Advanced to browse the whole catalogue.
+          </p>
+        ) : null}
+      </div>
+
+      <div className="catalogue-grid" hidden={mode !== "advanced"}>
         <ul className="model-list">
           {models.length === 0 && !loadingCatalogue ? (
             <li className="muted">No models match this search.</li>

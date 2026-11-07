@@ -1,6 +1,26 @@
 import { z } from "zod";
 import { artifactFormatSchema, gatedStatusSchema } from "./domain";
 
+/**
+ * A basic-mode card: the curated use case plus the model the app would run.
+ *
+ * The backend publishes ordered preference lists; the desktop picks the first
+ * entry it can serve and says why when it cannot serve any.
+ */
+export const useCaseCardSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  description: z.string(),
+  imageUrl: z.string().nullable(),
+  /** First curated model that can actually run; null when none can. */
+  modelId: z.string().nullable(),
+  modelName: z.string().nullable(),
+  /** One sentence explaining an unusable card; null when a model was picked. */
+  reason: z.string().nullable()
+});
+
+export type UseCaseCard = z.infer<typeof useCaseCardSchema>;
+
 export const catalogueSortSchema = z.enum([
   "downloads",
   "likes",

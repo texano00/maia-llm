@@ -81,6 +81,7 @@ export const ipcChannels = [
   "catalogue.search",
   "catalogue.detail",
   "catalogue.refresh",
+  "catalogue.useCases",
   "estimate.create",
   "session.list",
   "session.status",

@@ -25,6 +25,7 @@ import { createPortalClient } from "../services/portal/client";
 import { PortalCredentialStore } from "../services/portal/credentials";
 import { createHuggingFaceSource, testHuggingFaceToken } from "../services/catalogue/huggingface-source";
 import { assertChatRunnable } from "../services/catalogue/runnable";
+import { createUseCaseResolver } from "../services/catalogue/use-cases";
 import { CredentialStore } from "../services/credentials/store";
 import { SessionOrchestrator } from "../services/sessions/orchestrator";
 import { SessionStore } from "../services/sessions/store";
@@ -457,6 +458,11 @@ async function bootstrap(): Promise<void> {
     catalogue,
     sessions,
     history: repository,
+    useCases: createUseCaseResolver({
+      list: portal.configured() ? () => portal.useCases() : null,
+      catalogue,
+      logger
+    }),
     broadcastChat: (payload) => {
       mainWindow?.webContents.send(chatEventChannel, payload);
     }

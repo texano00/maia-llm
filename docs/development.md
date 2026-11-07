@@ -144,8 +144,9 @@ likewise overrides the update feed when testing a mirror.
 
 ### Pointing the desktop at a local portal
 
-The catalogue ships from the portal (see `docs/portal.md`), which defaults to
-`https://maiallm.com`. To develop against a local one:
+The catalogue ships from the portal (see `docs/portal.md`), and the app falls
+back to listing the Hub when `MAIA_PORTAL_URL` is empty — which is the default
+until the hosted portal is live. To develop against a local one:
 
 ```bash
 # terminal 1: the portal (seeds an admin and refreshes on boot)

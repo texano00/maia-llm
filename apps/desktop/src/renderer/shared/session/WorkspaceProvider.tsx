@@ -14,8 +14,11 @@ import type {
   CatalogueSort,
   Estimate,
   ModelDetail,
-  Session
+  Session,
+  UseCaseCard
 } from "@maia/contracts";
+
+export type CatalogueMode = "basic" | "advanced";
 
 interface WorkspaceValue {
   models: CatalogueModel[];
@@ -32,6 +35,11 @@ interface WorkspaceValue {
   /** Hide models the backend says no engine can serve. On by default. */
   supportedOnly: boolean;
   setSupportedOnly(value: boolean): void;
+  /** Basic mode = curated cards; advanced mode = the full catalogue list. */
+  mode: CatalogueMode;
+  setMode(value: CatalogueMode): void;
+  useCases: UseCaseCard[];
+  reloadUseCases(): Promise<void>;
   refreshCatalogue(): Promise<void>;
   selectModel(id: string): Promise<void>;
   selected: ModelDetail | null;
@@ -66,6 +74,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   // costs money before it fails.
   const [supportedOnly, setSupportedOnly] = useState(true);
   const [snapshot, setSnapshot] = useState<CatalogueSnapshotInfo | null>(null);
+  // Basic mode is the product default once the backend publishes use cases; a
+  // deployment without them starts on the full list instead of an empty screen.
+  const [mode, setMode] = useState<CatalogueMode>(() => {
+    const stored = typeof localStorage === "undefined" ? null : localStorage.getItem("maia:catalogue-mode");
+    return stored === "advanced" ? "advanced" : "basic";
+  });
+  const [useCases, setUseCases] = useState<UseCaseCard[]>([]);
   const [selected, setSelected] = useState<ModelDetail | null>(null);
   const [estimates, setEstimates] = useState<Record<string, Estimate>>({});
   const [preparing, setPreparing] = useState(false);
@@ -149,6 +164,32 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       document.removeEventListener("visibilitychange", onVisible);
     };
   }, [reloadSessions]);
+
+  useEffect(() => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("maia:catalogue-mode", mode);
+    }
+  }, [mode]);
+
+  const reloadUseCases = useCallback(async () => {
+    const bridge = window.maia;
+    if (!bridge) {
+      return;
+    }
+
+    const result = await bridge.invoke<UseCaseCard[]>("catalogue.useCases");
+    if (result.ok) {
+      setUseCases(result.data);
+      // No curated cards means this deployment is advanced-only.
+      if (result.data.length === 0) {
+        setMode((current) => (current === "basic" ? "advanced" : current));
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    void reloadUseCases();
+  }, [reloadUseCases]);
 
   const refreshCatalogue = useCallback(async () => {
     const bridge = window.maia;
@@ -265,6 +306,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       setCapability,
       supportedOnly,
       setSupportedOnly,
+      mode,
+      setMode,
+      useCases,
+      reloadUseCases,
       refreshCatalogue,
       selectModel,
       selected,
@@ -300,7 +345,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       startSession,
       startingIds,
       stale,
-      supportedOnly
+      supportedOnly,
+      mode,
+      useCases,
+      reloadUseCases
     ]
   );
 

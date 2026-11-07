@@ -203,6 +203,14 @@ export class CatalogueService {
     return this.options.repository.get(id);
   }
 
+  /**
+   * The backend verdict, when the source has one. Synchronous on purpose: it
+   * reads the snapshot the current listing came from.
+   */
+  supportFor(id: string): ModelSupport | null {
+    return this.options.source.getSupport?.(id) ?? null;
+  }
+
   private async refreshInto(search: string): Promise<CatalogueResult> {
     const payloads = await this.options.source.listModels({
       limit: 100,
