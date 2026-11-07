@@ -13,6 +13,7 @@ import { createTelemetryRepository, type TelemetryRepository } from "./repositor
 import { FailureService } from "./services/failure-service.js";
 import { GpuReputationService } from "./services/gpu-reputation-service.js";
 import { TelemetryService } from "./services/telemetry-service.js";
+import { AdminAuthService, TokenService } from "./services/portal-auth.js";
 
 export interface AppContext {
   config: ServerConfig;
@@ -20,6 +21,8 @@ export interface AppContext {
   gpus: GpuReputationService;
   telemetry: TelemetryService;
   failures: FailureService;
+  tokens: TokenService;
+  admins: AdminAuthService;
   repositories: {
     gpus: GpuReputationRepository;
     telemetry: TelemetryRepository;
@@ -74,12 +77,34 @@ export async function createAppContext(options: CreateAppContextOptions = {}): P
     ...(options.now ? { now: options.now } : {}),
   });
 
+  const tokens = new TokenService({
+    db,
+    secret: config.portalTokenSecret,
+    accessTtlMs: config.accessTokenTtlMs,
+    refreshTtlMs: config.refreshTokenTtlMs,
+    ...(options.now ? { now: options.now } : {}),
+  });
+
+  const admins = new AdminAuthService({
+    db,
+    sessionTtlMs: config.adminSessionTtlMs,
+    ...(options.now ? { now: options.now } : {}),
+  });
+
+  // Bootstrap the single administrator from deployment configuration; the
+  // backoffice has no self-service sign-up.
+  if (config.adminEmail && config.adminPassword) {
+    await admins.seed(config.adminEmail, config.adminPassword);
+  }
+
   return {
     config,
     db,
     gpus,
     telemetry,
     failures,
+    tokens,
+    admins,
     repositories: { gpus: gpuRepository, telemetry: telemetryRepository, failures: failureRepository },
     async close() {
       if (ownsDatabase) {

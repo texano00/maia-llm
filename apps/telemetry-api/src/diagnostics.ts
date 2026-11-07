@@ -1,4 +1,4 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import type { TelemetryService } from "./services/telemetry-service.js";
 
@@ -40,8 +40,27 @@ const isoTimestamp = (raw: unknown): string | undefined => {
  * so a desktop app running elsewhere can be watched live, and pruned once they
  * fall outside the retention window. No conversation content is expected here.
  */
-export function registerDiagnosticsRoutes(app: FastifyInstance, telemetry: TelemetryService): void {
+export interface DiagnosticsRouteOptions {
+  /**
+   * Resolves the calling installation. Present only when client authentication
+   * is enforced; an older desktop build would otherwise lose its diagnostics.
+   */
+  authorize?: (request: FastifyRequest) => Promise<string | null>;
+}
+
+export function registerDiagnosticsRoutes(
+  app: FastifyInstance,
+  telemetry: TelemetryService,
+  options: DiagnosticsRouteOptions = {}
+): void {
   app.post("/v1/diagnostics/logs", async (request, reply) => {
+    if (options.authorize) {
+      const installationId = await options.authorize(request);
+      if (!installationId) {
+        return reply.status(401).send({ error: "not_authenticated" });
+      }
+    }
+
     const parsed = diagnosticsPayloadSchema.safeParse(request.body);
 
     if (!parsed.success) {

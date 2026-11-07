@@ -1,9 +1,11 @@
-import Fastify, { type FastifyInstance } from "fastify";
+import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { pathToFileURL } from "node:url";
+import { bearerToken } from "./auth.js";
 import { loadConfig, type ServerConfig } from "./config.js";
 import { createAppContext, type AppContext } from "./context.js";
 import { registerDiagnosticsRoutes } from "./diagnostics.js";
 import { registerFailureRoutes } from "./failures.js";
+import { registerPortalAuthRoutes } from "./portal-auth-routes.js";
 import { registerReputationRoutes } from "./reputation.js";
 
 export interface BuildServerOptions {
@@ -33,9 +35,23 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
 
   app.get("/health", async () => ({ status: "ok", storage: context.db.dialect }));
 
-  registerDiagnosticsRoutes(app, context.telemetry);
+  const authorize = context.config.requireClientAuth
+    ? async (request: FastifyRequest): Promise<string | null> => {
+        const token = bearerToken(request);
+        return token ? context.tokens.verifyAccess(token) : null;
+      }
+    : undefined;
+
+  registerPortalAuthRoutes(app, {
+    tokens: context.tokens,
+    admins: context.admins,
+    secureCookies: process.env.NODE_ENV === "production",
+    ...(options.now ? { now: options.now } : {}),
+  });
+
+  registerDiagnosticsRoutes(app, context.telemetry, authorize ? { authorize } : {});
   registerReputationRoutes(app, context.gpus);
-  registerFailureRoutes(app, context.failures);
+  registerFailureRoutes(app, context.failures, authorize ? { authorize } : {});
 
   if (ownsContext) {
     // Only close what this call opened.

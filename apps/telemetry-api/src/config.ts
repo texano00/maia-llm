@@ -12,6 +12,22 @@ export interface ServerConfig {
   telemetryRetentionMs: number;
   /** Pre-SQLite JSON file imported once on first boot, if present. */
   legacyReputationFile: string | null;
+  /** HMAC key for installation access tokens; a deployment secret. */
+  portalTokenSecret: string;
+  /** Access-token lifetime; the spec caps it at 60 minutes. */
+  accessTokenTtlMs: number;
+  /** Refresh-token lifetime; the spec caps it at 30 days. */
+  refreshTokenTtlMs: number;
+  /** Backoffice session lifetime. */
+  adminSessionTtlMs: number;
+  /**
+   * Enforce installation credentials on ingestion routes. Off until desktop
+   * enrollment ships, so an older client does not lose its diagnostics.
+   */
+  requireClientAuth: boolean;
+  /** Bootstrap administrator, seeded on first boot when both are set. */
+  adminEmail: string | null;
+  adminPassword: string | null;
 }
 
 const DRIVERS: readonly SqlDialect[] = ["sqlite", "postgres", "mysql"];
@@ -47,6 +63,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     unstableTtlMs: positive(env.MAIA_UNSTABLE_TTL_HOURS, 6) * 60 * 60_000,
     telemetryRetentionMs: positive(env.MAIA_TELEMETRY_RETENTION_DAYS, 30) * 24 * 60 * 60_000,
     legacyReputationFile: env.MAIA_REPUTATION_FILE ?? null,
+    portalTokenSecret: env.MAIA_PORTAL_TOKEN_SECRET ?? "dev-only-token-secret",
+    accessTokenTtlMs: positive(env.MAIA_PORTAL_ACCESS_TTL_MINUTES, 60) * 60_000,
+    refreshTokenTtlMs: positive(env.MAIA_PORTAL_REFRESH_TTL_DAYS, 30) * 24 * 60 * 60_000,
+    adminSessionTtlMs: positive(env.MAIA_ADMIN_SESSION_HOURS, 12) * 60 * 60_000,
+    requireClientAuth: env.MAIA_REQUIRE_CLIENT_AUTH === "true",
+    adminEmail: env.MAIA_ADMIN_EMAIL ?? null,
+    adminPassword: env.MAIA_ADMIN_PASSWORD ?? null,
   };
 }
 
