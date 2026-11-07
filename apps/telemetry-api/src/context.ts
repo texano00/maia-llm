@@ -8,7 +8,9 @@ import {
   createGpuReputationRepository,
   type GpuReputationRepository,
 } from "./repositories/gpu-reputation.js";
+import { createFailureRepository, type FailureRepository } from "./repositories/failures.js";
 import { createTelemetryRepository, type TelemetryRepository } from "./repositories/telemetry.js";
+import { FailureService } from "./services/failure-service.js";
 import { GpuReputationService } from "./services/gpu-reputation-service.js";
 import { TelemetryService } from "./services/telemetry-service.js";
 
@@ -17,9 +19,11 @@ export interface AppContext {
   db: SqlDatabase;
   gpus: GpuReputationService;
   telemetry: TelemetryService;
+  failures: FailureService;
   repositories: {
     gpus: GpuReputationRepository;
     telemetry: TelemetryRepository;
+    failures: FailureRepository;
   };
   close(): Promise<void>;
 }
@@ -47,6 +51,7 @@ export async function createAppContext(options: CreateAppContextOptions = {}): P
 
   const gpuRepository = createGpuReputationRepository(db);
   const telemetryRepository = createTelemetryRepository(db);
+  const failureRepository = createFailureRepository(db);
 
   if (config.legacyReputationFile) {
     await importLegacyReputation(gpuRepository, { file: config.legacyReputationFile });
@@ -64,12 +69,18 @@ export async function createAppContext(options: CreateAppContextOptions = {}): P
     ...(options.now ? { now: options.now } : {}),
   });
 
+  const failures = new FailureService({
+    repository: failureRepository,
+    ...(options.now ? { now: options.now } : {}),
+  });
+
   return {
     config,
     db,
     gpus,
     telemetry,
-    repositories: { gpus: gpuRepository, telemetry: telemetryRepository },
+    failures,
+    repositories: { gpus: gpuRepository, telemetry: telemetryRepository, failures: failureRepository },
     async close() {
       if (ownsDatabase) {
         await db.close();

@@ -15,6 +15,7 @@ import {
   DiagnosticForwarder,
   resolveDiagnosticsEndpoint
 } from "../services/diagnostics/forwarder";
+import { createFailureReporter } from "../services/diagnostics/failures";
 import { SettingsStore } from "../services/settings/store";
 import { CatalogueRepository } from "../services/catalogue/repository";
 import { CatalogueService } from "../services/catalogue/service";
@@ -206,6 +207,15 @@ async function bootstrap(): Promise<void> {
   appLogger = logger;
   logFlush = flushLogs;
 
+  // Start-up failures carry the only copy of the container log, so they are
+  // reported to the diagnostics service before the instance is destroyed.
+  const reportFailure = createFailureReporter({
+    url: () => resolveDiagnosticsEndpoint(settings.get().diagnosticsUrl) ?? settings.get().diagnosticsUrl,
+    appVersion: app.getVersion(),
+    platform: process.platform,
+    logger
+  });
+
   const repository = new HistoryRepository(database);
   const vault = new CredentialVault(paths.vaultDir);
   const credentials = new CredentialStore(database, vault);
@@ -271,6 +281,7 @@ async function bootstrap(): Promise<void> {
       await assertChatRunnable(catalogue, modelId);
     },
     isGatedModel: (modelId) => catalogueRepository.get(modelId)?.gated !== "none",
+    reportFailure,
     logger
   });
 

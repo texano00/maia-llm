@@ -37,7 +37,11 @@ export interface VastComputeProviderOptions {
    * How the model should be launched (safetensors vs GGUF). Falls back to
    * passing the model id straight to `--model`.
    */
-  getModelPlan?: (modelId: string, offer: ComputeOffer) => Promise<VllmModelPlan>;
+  getModelPlan?: (
+    modelId: string,
+    offer: ComputeOffer,
+    contextScale?: number
+  ) => Promise<VllmModelPlan>;
   /**
    * Hard cap on the whole boot. Generous on purpose: pulling a multi-GB image
    * and then 10-25 GB of weights legitimately takes half an hour on a slow
@@ -57,6 +61,12 @@ export interface VastComputeProviderOptions {
    * minutes unless the wait says something.
    */
   progressIntervalMs?: number;
+  /**
+   * While the model server is loading, how often the instance itself is
+   * re-checked. A crashed engine core closes the port, so a container that
+   * exited is otherwise indistinguishable from "still loading".
+   */
+  aliveCheckIntervalMs?: number;
   /** How long a running container may stay portless before it is reported as broken. */
   missingPortTimeoutMs?: number;
   fetchImpl?: typeof fetch;
@@ -233,7 +243,11 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
       const api = await client();
       const hfToken = await options.getHfToken?.();
       const parameterCount = await options.getParameterCount(context.modelId);
-      const plan = (await options.getModelPlan?.(context.modelId, offer)) ?? {
+      const plan = (await options.getModelPlan?.(
+        context.modelId,
+        offer,
+        context.contextScale
+      )) ?? {
         modelArg: context.modelId,
         extraArgs: [],
         env: {},
@@ -325,6 +339,12 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
       // then downloading weights. That phase gets the full deadline instead of
       // being cancelled for "looking quiet".
       let containerStarted = false;
+      // While the model server is "loading", the instance is not polled again:
+      // a crashed engine core closes the port and every probe is swallowed as
+      // "not ready yet". Re-checking the instance is what turns a 40-minute
+      // stall into a 15-second failure with a readable cause.
+      const aliveCheckIntervalMs = options.aliveCheckIntervalMs ?? 15_000;
+      let lastAliveCheckAt = -aliveCheckIntervalMs;
 
       for (;;) {
         const instance = await api.getInstance(instanceId);
@@ -402,7 +422,31 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
                 lastReportAt = now();
                 onProgress?.({ status: "starting", message: endpoint, elapsedMs });
               },
-              progressIntervalMs
+              progressIntervalMs,
+              async (elapsedMs) => {
+                if (elapsedMs - lastAliveCheckAt < aliveCheckIntervalMs) {
+                  return;
+                }
+                lastAliveCheckAt = elapsedMs;
+
+                const current = await api.getInstance(instanceId).catch(() => null);
+                if (!current) {
+                  throw new InstanceStartTimeoutError(
+                    "The GPU instance disappeared while the model was loading. The GPU was released.",
+                    instanceId
+                  );
+                }
+
+                const state = current.actual_status ?? "unknown";
+                if (["exited", "error", "destroyed", "offline"].includes(state)) {
+                  throw new InstanceStartTimeoutError(
+                    `The model container stopped while loading the model (vast.ai reported "${state}"${
+                      current.status_msg ? `: ${current.status_msg}` : ""
+                    }). The GPU was released before the deadline.`,
+                    instanceId
+                  );
+                }
+              }
             );
             if (served === null) {
               throw new InstanceStartTimeoutError(
@@ -490,12 +534,19 @@ async function waitForServing(
     pause: sleep
   },
   onWait?: (elapsedMs: number) => void,
-  reportIntervalMs = 60_000
+  reportIntervalMs = 60_000,
+  onPoll?: (elapsedMs: number) => Promise<void>
 ): Promise<string[] | null> {
   const startedAt = clock.now();
   let lastReportAt = startedAt;
 
   for (;;) {
+    // The caller checks that the container is still alive here; a throw is the
+    // whole point, so it is not swallowed like a failed health probe.
+    if (onPoll) {
+      await onPoll(clock.now() - startedAt);
+    }
+
     try {
       const health = await fetchImpl(`${baseUrl}/health`, { signal: AbortSignal.timeout(5_000) });
       if (health.ok) {

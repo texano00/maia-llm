@@ -127,6 +127,31 @@ MAIA_READY_TIMEOUT_MINUTES=40   # hard cap for the whole boot
 MAIA_READY_STALL_MINUTES=15     # host never started the container
 ```
 
+### A dead container is not a slow one
+
+Once vast.ai reports `running`, the app waits for `/health` — and a crashed model
+server looks exactly like a loading one: the port stays closed, so every probe
+fails and the loop waits for the full 40-minute budget. That is why the instance
+itself is re-checked every 15 seconds during that phase (`aliveCheckIntervalMs`).
+When vast.ai reports `exited`, `error`, `destroyed` or `offline`, the wait fails
+immediately, the container log is captured before the instance is destroyed, and
+the root-cause line lands in the session log:
+
+```text
+A100 PCIE startup failed on 117.18.102.40 (attempt 1 of 6): The model container
+stopped while loading the model (vast.ai reported "exited").
+Container log: RuntimeError: Engine core initialization failed…
+Root cause: torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 58.00 GiB
+```
+
+The same record is sent to the diagnostics service (`POST /v1/failures`), so a
+failure in the field can be counted and grouped by model, GPU and root cause —
+the container log is otherwise destroyed with the instance.
+
+A memory failure also halves the context budget for the retry (`contextScale`),
+so the next attempt asks for less instead of repeating the same crash on another
+host.
+
 ### Startup retries
 
 A failed boot is not the user's fault, so the session books another machine

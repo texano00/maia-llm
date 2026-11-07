@@ -3,6 +3,7 @@ import { pathToFileURL } from "node:url";
 import { loadConfig, type ServerConfig } from "./config.js";
 import { createAppContext, type AppContext } from "./context.js";
 import { registerDiagnosticsRoutes } from "./diagnostics.js";
+import { registerFailureRoutes } from "./failures.js";
 import { registerReputationRoutes } from "./reputation.js";
 
 export interface BuildServerOptions {
@@ -34,6 +35,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
 
   registerDiagnosticsRoutes(app, context.telemetry);
   registerReputationRoutes(app, context.gpus);
+  registerFailureRoutes(app, context.failures);
 
   if (ownsContext) {
     // Only close what this call opened.

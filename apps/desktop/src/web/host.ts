@@ -20,6 +20,7 @@ import { createVastComputeProvider } from "../main/services/providers/vastai/com
 import { VastAiClient } from "../main/services/providers/vastai/client";
 import { createVllmRuntime } from "../main/services/inference/vllm";
 import { createModelPlanResolver } from "../main/services/inference/model-plan-resolver";
+import { createFailureReporter } from "../main/services/diagnostics/failures";
 import { GpuReputationClient } from "../main/services/gpu/reputation";
 import { IpcRegistry } from "../main/ipc/registry";
 import { registerSettingsHandlers } from "../main/ipc/settings";
@@ -122,6 +123,14 @@ export async function createWebHost(options: WebHostOptions): Promise<WebHost> {
       })
     : createMockInference({ chunkDelayMs: 12 });
 
+  const reportFailure = createFailureReporter({
+    url: process.env.MAIA_FAILURE_REPORT_URL ?? settings.get().diagnosticsUrl,
+    appVersion: process.env.MAIA_APP_VERSION ?? "web",
+    platform: process.platform,
+    retryDelayMs: 0,
+    logger
+  });
+
   const sessions = new SessionOrchestrator({
     store: new SessionStore(database),
     compute,
@@ -133,6 +142,7 @@ export async function createWebHost(options: WebHostOptions): Promise<WebHost> {
     assertRunnable: async (modelId) => {
       await assertChatRunnable(catalogue, modelId);
     },
+    reportFailure,
     logger
   });
 

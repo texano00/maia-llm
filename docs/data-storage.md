@@ -1,8 +1,8 @@
 # Data storage
 
-The telemetry API (`apps/telemetry-api`) stores two things: diagnostic batches sent
-by the desktop app, and the shared GPU reputation. Both live in one SQLite
-database on the server.
+The telemetry API (`apps/telemetry-api`) stores three things: diagnostic batches sent
+by the desktop app, the shared GPU reputation, and the start-up failures reported
+by clients. All live in one SQLite database on the server.
 
 ```bash
 npm run -w @maia/telemetry-api dev      # migrates and serves on :8787

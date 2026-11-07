@@ -12,6 +12,16 @@
 
 **Amendment 2026-11-02 (planning input)**: The desktop client is built on a cross-platform foundation so the same application can later ship for macOS and Linux desktops. A telemetry-only backend collects crash reports, diagnostic logs, app/OS version details, and pseudonymized environment information to guide continuous improvement; it never carries chat or inference traffic.
 
+## Clarifications
+
+### Session 2026-11-07
+
+- Q: When a model could plausibly run on both engines, what should decide which one Maia LLM launches? → A: Rules plus a backoffice override — weight format/architecture derives the engine by default (GGUF weights → llama.cpp, safetensors → vLLM), and a per-model engine pin stored in the backoffice overrides the derived choice without a client release.
+- Q: What makes a catalogue model count as "supported", and how should unsupported models appear? → A: Supported means a launch plan can be derived (engine resolvable from weights/architecture, repository loadable, chat template defined). Unsupported models stay visible with a label and a disabled Start, and the "supported only" filter is ON by default and can be switched off.
+- Q: Which catalogue facts come from the MaiaLLM backend snapshot, and which may the desktop still fetch live from Hugging Face? → A: The snapshot is authoritative for every catalogue fact — listing, filters, supported flag, artifacts, sizes, gated state and chat-template verdict — and the desktop never reads Hugging Face catalogue endpoints. Hugging Face is accessed only by the backend, with a service token held in backend static configuration.
+- Q: How should the desktop app obtain and renew its credential for the MaiaLLM configs and telemetry APIs? → A: Short-lived access token (≤60 minutes) exchanged through a rotating refresh token (≤30 days), renewed automatically by the app, stored in OS-protected storage, and revocable per installation from the backoffice.
+- Q: How should a basic-mode scenario map to open-weight models, and what happens when its model cannot be used? → A: Each scenario holds a ranked list of models; the app picks the first entry that is supported and matches budget/GPU availability, shows which model it chose and why, and when no entry is usable it says so and offers advanced mode instead of hiding the scenario.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Pick a model and chat on rented GPU (Priority: P1)
@@ -149,12 +159,25 @@ The user decides to protect themselves against Hugging Face outages or the remov
 
 #### Model Catalogue
 
-- **FR-001**: System MUST present a browsable, searchable catalogue of open-weight language models sourced from Hugging Face, including name, publisher, license, parameter count, context window, artifact size, last update, and access status.
+- **FR-001**: System MUST present a browsable, searchable catalogue of open-weight language models whose listing and MaiaLLM-owned enrichment (including the supported flag) are served by the MaiaLLM catalogue service, which mirrors Hugging Face and includes name, publisher, license, parameter count, context window, artifact size, last update, and access status.
 - **FR-002**: Users MUST be able to filter and sort the catalogue by license, size, parameter count, context window, popularity, recency, and compatibility with available GPU options.
 - **FR-003**: System MUST show a model detail view with license terms or license link, available artifacts and quantizations, hardware requirements, and expected GPU class.
-- **FR-004**: System MUST refresh the catalogue on demand and cache the most recent successful result for offline browsing.
+- **FR-004**: System MUST refresh the catalogue from the MaiaLLM catalogue service on demand and cache the most recent successful result for offline browsing.
 - **FR-005**: System MUST clearly identify models that are gated, private, or otherwise not usable without additional authorization.
 - **FR-006**: System MUST allow the user to record acceptance of model license terms and reuse that acceptance in later sessions.
+- **FR-087**: A model MUST be considered supported only when the app can derive a launch plan for it — an inference engine resolves from its weights or architecture, the repository is loadable, and a chat template is defined; every other model MUST be presented as unsupported.
+- **FR-088**: Unsupported models MUST remain visible in advanced mode with an explicit unsupported label, MUST NOT be startable, and MUST be excluded from basic-mode scenario results.
+- **FR-089**: The catalogue MUST offer a “supported only” filter that is ON by default and can be switched off to reveal unsupported models.
+- **FR-090**: The MaiaLLM backend MUST maintain the catalogue as a server-side snapshot refreshed by a recurring job and MUST offer a manual forced refresh from the backoffice.
+- **FR-091**: The desktop app MUST obtain the model listing, the supported flag, and future MaiaLLM-owned fields from the MaiaLLM configs API and MUST NOT assemble the listing from a live Hugging Face models call.
+- **FR-092**: The snapshot MUST expose when it was last refreshed; the app MUST display that age and MUST keep serving its last successful snapshot when the configs API is unreachable.
+- **FR-093**: The snapshot MUST be authoritative for every catalogue fact the app displays — listing, filters, artifacts, sizes, gated state and chat-template verdict — the model detail view MUST be served from the same snapshot, and the desktop MUST NOT call Hugging Face catalogue endpoints.
+- **FR-094**: The backend MUST authenticate to Hugging Face with a service token held in backend static configuration, MUST use it for both the recurring and the manually forced refresh, and MUST NOT ship or issue that token to desktop clients.
+- **FR-098**: The catalogue MUST offer two search modes: **basic** (default), which guides the user through predefined scenarios, and **advanced**, which is the free-hand filtered and sorted model list; advanced MUST be described as the expert path for users who want to choose the model themselves.
+- **FR-099**: In basic mode the user MUST choose a scenario only; System MUST resolve that scenario's ranked model list and select the first entry that is supported and compatible with the user's budget and available GPU offers, and MUST state which model was chosen and why before any cost estimate is confirmed.
+- **FR-100**: When no entry of a scenario is currently usable, basic mode MUST keep the scenario visible, state the reason (unsupported, gated, or no matching GPU), and offer advanced mode as the alternative.
+- **FR-101**: Every model card MUST state that inference is exposed as an OpenAI-compatible API, independent of the engine or tools that serve it.
+- **FR-102**: The backoffice MUST let an administrator create, edit, disable and reorder scenarios — title, description, image, and the ordered model mapping — without shipping a client release.
 
 #### Remote Inference Sessions
 
@@ -173,6 +196,8 @@ The user decides to protect themselves against Hugging Face outages or the remov
 - **FR-079**: While a model is working, System MUST stream and display its reasoning or thinking output separately from the answer, in a collapsible block that the user can hide.
 - **FR-080**: Conversation history MUST be presented as a sub-sidebar inside the chat screen, not in the primary navigation, and any conversation MUST be resumable at any time; a conversation whose model is no longer running MUST be shown as frozen.
 - **FR-081**: A frozen conversation MUST offer exactly two continuations — restart the original model, or continue with a different running model after an explicit confirmation — and MUST keep earlier replies attributed to the model that produced them.
+- **FR-082**: System MUST route every startable model to exactly one inference engine: GGUF weight repositories run on llama.cpp, safetensors repositories run on vLLM, and a per-model engine pin managed in the backoffice MUST override the derived choice without requiring a new client release.
+- **FR-083**: The engine chosen by the route (or by a backoffice pin) MUST be visible on the model's catalogue card and in the session log before the cost estimate is confirmed.
 
 #### Cost Transparency and Control
 
@@ -243,6 +268,9 @@ The user decides to protect themselves against Hugging Face outages or the remov
 - **FR-062**: Users MUST be able to preview the categories of telemetry that would be sent before enabling it.
 - **FR-063**: System MUST delete or irreversibly anonymize telemetry associated with an installation on request within a documented period.
 - **FR-064**: Telemetry payloads MUST NEVER include prompts, model responses, chat history, credentials, API keys, model artifacts, or backup contents; an automated allowlist test MUST enforce this boundary.
+- **FR-095**: Every MaiaLLM configs and telemetry API request MUST carry an installation-scoped credential; unauthenticated or expired requests MUST be rejected with `401` and the endpoints MUST NOT be usable anonymously.
+- **FR-096**: Credentials MUST follow a short-lived access token (≤60 minutes) plus a rotating refresh token (≤30 days); the app MUST store them in OS-protected storage, renew automatically before expiry, and never log or transmit the refresh token outside the token exchange.
+- **FR-097**: Revoking or expiring one installation's refresh token MUST stop that installation from fetching the catalogue or submitting telemetry without affecting other installations, and revocation MUST take effect at the next token exchange.
 
 #### Release and Distribution
 
@@ -263,7 +291,9 @@ The user decides to protect themselves against Hugging Face outages or the remov
 
 ### Key Entities *(include if feature involves data)*
 
-- **Model Catalogue Entry**: A model family published on Hugging Face; key attributes are identifier, publisher, license, parameter count, context window, access status, and popularity/recency signals.
+- **Model Catalogue Entry**: A model family published on Hugging Face; key attributes are identifier, publisher, license, parameter count, context window, access status, popularity/recency signals, the derived inference engine (vLLM, llama.cpp, or none), the supported flag as decided by the backend snapshot, and an optional backoffice engine pin that overrides the derivation.
+- **Catalogue Snapshot**: The backend-held, versioned list of models served to desktop clients, with its refresh timestamp, per-model supported verdict and engine, and any future MaiaLLM-owned enrichment fields.
+- **Use Case Scenario**: A curated basic-mode entry with title, description, image, enabled state, and an ordered list of model identifiers from which the app selects the first usable one.
 - **Model Artifact**: A downloadable file set for a model version, including format, quantization, size, checksum, and hardware requirements.
 - **Inference Session**: A rented compute session bound to one model and serving one or more conversations (in-app chat and IDE clients); attributes include state, GPU type, start and end times, idle timeout, and failure reason.
 - **GPU Offer**: A rentable hardware option with type, memory, hourly price, availability, and region.
@@ -272,9 +302,11 @@ The user decides to protect themselves against Hugging Face outages or the remov
 - **Budget**: A user-defined per-session cap or monthly spending limit with warning thresholds.
 - **Backup Record**: A tracked archive of a model version, linking source identifier and version to storage destination, checksums, status, and last verification result.
 - **Provider Credential**: User-supplied authorization for Hugging Face, vast.ai, or S3-compatible storage, stored securely and never exposed in plaintext.
+- **Service Credential**: A backend-held credential — for example the Hugging Face service token used to build the catalogue snapshot — stored in server-side static configuration and never shipped with or issued to clients.
 - **User Preferences**: Locally stored settings such as idle timeout, default caps, preferred filters, GPU price ceiling, and whether the local endpoint is enabled.
 - **Local IDE Endpoint**: The optional loopback-only service exposed for IDE assistants; attributes include enabled state, address and port in use, exposed model name, connected clients, requests served, and last activity time.
 - **Installation Profile**: A pseudonymous record of one installed application instance, including installation identifier, app version, build channel, OS family and version, architecture, first/last seen time, and consent version.
+- **API Credential**: The token pair bound to one installation — short-lived access token, rotating refresh token, scopes, issue and expiry timestamps, and revocation state.
 - **Environment Snapshot**: A periodic, pseudonymized description of the user's machine used for diagnosis, including PC type, CPU class and cores, memory, GPU, free disk space, locale, timezone, and display configuration.
 - **Telemetry Event Package**: A batched, allowlisted set of app events and measurements sent for product improvement, containing no conversation content or credentials.
 - **Crash Report**: A diagnostic record of an abnormal termination, including app version, OS, failure signature, scrubbed stack trace, and an optional uploaded diagnostic bundle.
@@ -317,19 +349,20 @@ The user decides to protect themselves against Hugging Face outages or the remov
 - Users bring their own vast.ai account and S3-compatible storage credentials and pay those providers directly; the application does not resell compute or storage.
 - Windows 10/11 x64 is the only supported platform in this release; common Linux distributions are a stated future target, so platform-specific behavior must be isolated.
 - Network access is required for catalogue refresh, model download, GPU rental, and backups; offline use is limited to chat history and previously restored local models.
-- The Hugging Face catalogue is accessed through its public interfaces, and gated models require a user-provided access token and license acceptance.
+- The Hugging Face catalogue is read only by the MaiaLLM backend, which authenticates with a service token held in its static configuration; desktop clients read the backend snapshot and never call Hugging Face catalogue endpoints.
 - Supported models are text and chat-oriented open-weight language models; image, audio, embedding, and multimodal models are out of scope for this release.
 - Any S3-compatible storage is acceptable, including public cloud object storage and self-hosted alternatives.
 - Backups are initiated by the user; automatic scheduled backups and cross-device synchronization are not included in this release.
 - Users are responsible for complying with model licenses; the application warns about redistribution restrictions but does not provide legal advice.
 - Default idle timeout is 10 minutes and is configurable; default spending caps are unset, and users are prompted to define them on first use.
-- The inference runtime is selected automatically based on model format and GPU capabilities, with advanced overrides available to experienced users.
+- The inference engine is derived from the model's weight format (GGUF → llama.cpp, safetensors → vLLM) and can be pinned per model in the backoffice; users can still pick any model themselves through advanced mode.
 - Costs are shown in US dollars based on provider-reported pricing; taxes, currency conversion, and provider billing adjustments are outside the application's control.
 - The optional local endpoint targets the Ollama interface so that existing IDE assistants can connect without a custom integration; other interface styles are out of scope for this release.
 - The endpoint is available only while an inference session is active and is billed as part of that session; it does not run a local model or a separate free service.
 - The endpoint is loopback-only by design and cannot be exposed to other devices, local networks, or the internet.
 - Telemetry is opt-in and off by default; crash, performance, log, and environment collection begins only after explicit consent.
-- The telemetry backend is the only server-side component; it has no inference path, no chat storage, and no model hosting role.
+- The telemetry backend is one role of the MaiaLLM-hosted service; it has no inference path, no chat storage, and no model hosting role.
 - Environment information is tied to a pseudonymous installation identifier rather than an account, and IP addresses are retained for no longer than 30 days under restricted access.
 - Software artifacts are built, signed, and distributed through GitHub Actions and GitHub Releases; the GitHub repository is the distribution channel in this release, and code-signing credentials are held in a protected CI environment.
-- Out of scope: model training or fine-tuning, exposing the inference endpoint beyond the local machine or operating a production multi-user API service, mobile or macOS clients in this release, managing provider account creation, hosting or redistributing models on behalf of users, and any server-side capability beyond telemetry ingestion.
+- The MaiaLLM-hosted service (maiallm.com) is in scope for the catalogue snapshot, the configs API, the telemetry API and the backoffice UI; it holds no conversation content and runs no inference. Backoffice administrator authentication, deployment topology, and hosting cost model are deferred to the next specification cycle.
+- Out of scope: model training or fine-tuning, exposing the inference endpoint beyond the local machine or operating a public inference service, mobile or macOS clients in this release, managing provider account creation, hosting or redistributing models on behalf of users, and any server-side capability beyond catalogue serving, configuration delivery, telemetry ingestion and backoffice administration.

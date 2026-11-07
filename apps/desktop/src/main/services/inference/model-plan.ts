@@ -113,6 +113,11 @@ export function planLaunchLimits(input: {
   parameterCount?: number | null;
   quantization?: string | null;
   contextWindow?: number | null;
+  /**
+   * Multiplier applied after a memory failure, so the retry asks for less
+   * instead of repeating the same crash on another host.
+   */
+  contextScale?: number | null;
 }): LaunchLimits {
   const advertised =
     input.contextWindow && input.contextWindow > 0 ? input.contextWindow : DEFAULT_CONTEXT_LIMIT;
@@ -132,8 +137,14 @@ export function planLaunchLimits(input: {
   const kvPerTokenGb = parameters ? parameters * KV_GB_PER_PARAMETER_TOKEN : null;
   const fitting = kvPerTokenGb ? Math.floor(availableGb / kvPerTokenGb / 1_024) * 1_024 : 0;
 
-  const maxModelLen =
+  const fitted =
     fitting > 0 ? Math.min(desired, Math.max(MIN_CONTEXT_LIMIT, fitting)) : desired;
+
+  const scale = input.contextScale;
+  const maxModelLen =
+    scale !== undefined && scale !== null && scale > 0 && scale < 1
+      ? Math.max(MIN_CONTEXT_LIMIT, Math.floor((fitted * scale) / 1_024) * 1_024)
+      : fitted;
 
   return {
     maxModelLen,
@@ -246,6 +257,8 @@ export interface PlanVllmModelInput {
   vramGb?: number | null;
   parameterCount?: number | null;
   contextWindow?: number | null;
+  /** Shrinks the context on a retry after a memory failure (0 < scale < 1). */
+  contextScale?: number | null;
 }
 
 /**
@@ -271,7 +284,8 @@ export function planVllmModel(input: PlanVllmModelInput): VllmModelPlan {
           vramGb: input.vramGb,
           parameterCount: input.parameterCount ?? null,
           quantization,
-          contextWindow: input.contextWindow ?? null
+          contextWindow: input.contextWindow ?? null,
+          contextScale: input.contextScale ?? null
         })
       : null;
   const limitArgs = launchLimitArgs(limits);

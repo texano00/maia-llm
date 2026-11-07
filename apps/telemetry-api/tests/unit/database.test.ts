@@ -37,7 +37,7 @@ describe("migrations", () => {
 
     try {
       const applied = await migrate(db, migrations);
-      expect(applied.map((migration) => migration.name)).toEqual(["initial-schema"]);
+      expect(applied.map((migration) => migration.name)).toEqual(["initial-schema", "failure-reports"]);
 
       // Running again is a no-op, which is what a restart does.
       expect(await migrate(db, migrations)).toEqual([]);
@@ -46,6 +46,7 @@ describe("migrations", () => {
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
       );
       expect(tables.map((table) => table.name)).toEqual([
+        "failure_reports",
         "gpu_machines",
         "gpu_reports",
         "schema_migrations",

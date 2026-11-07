@@ -17,7 +17,11 @@ export interface ModelPlanResolverOptions {
  * `Engine core initialization failed` traceback.
  */
 export function createModelPlanResolver(options: ModelPlanResolverOptions) {
-  return async (modelId: string, offer: { gpuRamGb: number }): Promise<VllmModelPlan> => {
+  return async (
+    modelId: string,
+    offer: { gpuRamGb: number },
+    contextScale?: number
+  ): Promise<VllmModelPlan> => {
     let artifacts = options.artifacts(modelId);
     if (artifacts.length === 0) {
       artifacts = await options.loadDetail(modelId).then(
@@ -44,7 +48,8 @@ export function createModelPlanResolver(options: ModelPlanResolverOptions) {
       tokenizer,
       vramGb: offer.gpuRamGb,
       parameterCount: model?.parameterCount ?? null,
-      contextWindow: model?.contextWindow ?? null
+      contextWindow: model?.contextWindow ?? null,
+      contextScale: contextScale ?? null
     });
   };
 }

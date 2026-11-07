@@ -1,5 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { DEFAULT_GPU_STARTUP_RETRIES, type Estimate, type GpuFilters, type Session, type SessionStart } from "@maia/contracts";
+import {
+  DEFAULT_GPU_STARTUP_RETRIES,
+  type Estimate,
+  type FailureEvent,
+  type GpuFilters,
+  type Session,
+  type SessionStart
+} from "@maia/contracts";
 import { buildEstimate } from "../cost/estimator";
 import { describeMemoryFailure, describeModelFailure, extractRootCause } from "./failure";
 import type { SessionStore } from "./store";
@@ -26,7 +33,10 @@ export interface ComputeProvider {
     /** Machines that cannot start a container, so a retry never returns to them. */
     excludeMachineIds?: number[] | undefined;
   }): Promise<ComputeOffer | null>;
-  createInstance(offer: ComputeOffer, context: { label: string; modelId: string }): Promise<{ instanceId: number }>;
+  createInstance(
+    offer: ComputeOffer,
+    context: { label: string; modelId: string; contextScale?: number }
+  ): Promise<{ instanceId: number }>;
   waitUntilReady(
     instanceId: number,
     timeoutMs: number,
@@ -130,6 +140,11 @@ export interface SessionOrchestratorOptions {
   assertRunnable?: (modelId: string) => void | Promise<void>;
   /** Returns true when the catalogue marks a model as gated. */
   isGatedModel?: (modelId: string) => boolean;
+  /**
+   * Sends a failed start-up to the diagnostics service. Fire-and-forget: the
+   * implementation must never throw or block the teardown path.
+   */
+  reportFailure?: (event: FailureEvent) => void;
 }
 
 interface SessionRuntime {
@@ -493,6 +508,9 @@ export class SessionOrchestrator {
     let current = booking;
     const failedMachines: number[] = [];
     const startupRetries = this.options.startupRetries?.() ?? DEFAULT_GPU_STARTUP_RETRIES;
+    // Context multiplier for the current attempt. A memory failure halves it so
+    // the retry asks for less, instead of repeating the same crash elsewhere.
+    let contextScale = 1;
 
     for (let attempt = 1; ; attempt += 1) {
       const bootStartedAt = Date.now();
@@ -610,11 +628,33 @@ export class SessionOrchestrator {
         }
 
         if (remoteLogs?.memoryNote) {
+          contextScale = Math.max(0.25, contextScale / 2);
           append(
             "warn",
-            `The container ran out of GPU memory: ${remoteLogs.memoryNote}. Retries size --max-model-len to the card, so a smaller context should boot.`
+            `The container ran out of GPU memory: ${remoteLogs.memoryNote}. The next attempt asks for ${Math.round(
+              contextScale * 100
+            )}% of the context budget.`
           );
         }
+
+        // Record the attempt while the container log is still in memory: the
+        // instance is destroyed below and nothing else will ever see it.
+        this.options.reportFailure?.({
+          stage: "provisioning",
+          modelId: estimate.modelId,
+          gpuName: current.offer.gpuName,
+          machineId: current.offer.machineId,
+          instanceId: current.instanceId,
+          attempt,
+          attemptsTotal: totalAttempts,
+          errorClass: error instanceof Error ? error.name : "Error",
+          errorMessage: message.slice(0, 2_000),
+          rootCause,
+          memoryNote: remoteLogs?.memoryNote ?? null,
+          modelFailure,
+          contextScale,
+          logTail: remoteLogs?.tail ?? null
+        });
 
         if (modelFailure) {
           append(
@@ -659,7 +699,13 @@ export class SessionOrchestrator {
             }trying another GPU (retry ${attempt} of ${startupRetries})…`
           );
 
-          const replacement = await this.bookAnotherOffer(sessionId, estimate.modelId, filters, failedMachines).catch(
+          const replacement = await this.bookAnotherOffer(
+            sessionId,
+            estimate.modelId,
+            filters,
+            failedMachines,
+            contextScale
+          ).catch(
             (bookingError: unknown) => {
               this.options.logger?.warn("Could not book a replacement GPU", {
                 sessionId,
@@ -713,6 +759,22 @@ export class SessionOrchestrator {
                 }`
               : diagnosis;
           this.options.store.appendEvent(sessionId, "error", reason, new Date(this.now()));
+          this.options.reportFailure?.({
+            stage: "startup",
+            modelId: estimate.modelId,
+            gpuName: current.offer.gpuName,
+            machineId: current.offer.machineId,
+            instanceId: current.instanceId,
+            attempt,
+            attemptsTotal: totalAttempts,
+            errorClass: modelFailure ? "ModelFailure" : "StartupFailure",
+            errorMessage: reason.slice(0, 2_000),
+            rootCause,
+            memoryNote: remoteLogs?.memoryNote ?? null,
+            modelFailure,
+            contextScale,
+            logTail: remoteLogs?.tail ?? null
+          });
           this.options.store.transition(sessionId, "failed", {
             endedAt: new Date(this.now()).toISOString(),
             endReason: "failure",
@@ -738,7 +800,8 @@ export class SessionOrchestrator {
     sessionId: string,
     modelId: string,
     filters: GpuFilters | undefined,
-    excludeMachineIds: number[]
+    excludeMachineIds: number[],
+    contextScale: number
   ): Promise<{ instanceId: number; offer: ComputeOffer } | null> {
     const triedOffers: number[] = [];
 
@@ -757,7 +820,8 @@ export class SessionOrchestrator {
       try {
         const created = await this.options.compute.createInstance(offer, {
           label: `${SESSION_LABEL_PREFIX}${sessionId}`,
-          modelId
+          modelId,
+          contextScale
         });
         return { instanceId: created.instanceId, offer };
       } catch (error) {
