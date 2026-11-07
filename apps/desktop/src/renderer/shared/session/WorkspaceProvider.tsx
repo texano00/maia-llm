@@ -10,6 +10,7 @@ import {
 import type {
   CatalogueModel,
   CatalogueResult,
+  CatalogueSnapshotInfo,
   CatalogueSort,
   Estimate,
   ModelDetail,
@@ -20,12 +21,17 @@ interface WorkspaceValue {
   models: CatalogueModel[];
   stale: boolean;
   loadingCatalogue: boolean;
+  /** Which catalogue snapshot the list came from (null for a Hub listing). */
+  snapshot: CatalogueSnapshotInfo | null;
   search: string;
   setSearch(value: string): void;
   sort: CatalogueSort;
   setSort(value: CatalogueSort): void;
   capability: string;
   setCapability(value: string): void;
+  /** Hide models the backend says no engine can serve. On by default. */
+  supportedOnly: boolean;
+  setSupportedOnly(value: boolean): void;
   refreshCatalogue(): Promise<void>;
   selectModel(id: string): Promise<void>;
   selected: ModelDetail | null;
@@ -55,6 +61,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<CatalogueSort>("downloads");
   const [capability, setCapability] = useState("");
+  // FR-089: unsupported models are hidden until the user asks to see them. The
+  // portal flags things vLLM cannot serve, and renting a GPU for one of those
+  // costs money before it fails.
+  const [supportedOnly, setSupportedOnly] = useState(true);
+  const [snapshot, setSnapshot] = useState<CatalogueSnapshotInfo | null>(null);
   const [selected, setSelected] = useState<ModelDetail | null>(null);
   const [estimates, setEstimates] = useState<Record<string, Estimate>>({});
   const [preparing, setPreparing] = useState(false);
@@ -78,7 +89,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const loadCatalogue = useCallback(
-    async (term: string, order: CatalogueSort, feature: string) => {
+    async (term: string, order: CatalogueSort, feature: string, runnableOnly: boolean) => {
       const bridge = window.maia;
       if (!bridge) {
         return;
@@ -89,6 +100,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         search: term || undefined,
         sort: order,
         capability: feature || undefined,
+        ...(runnableOnly ? { supportedOnly: true } : {}),
         limit: 100
       });
       setLoadingCatalogue(false);
@@ -96,6 +108,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       if (result.ok) {
         setModels(result.data.models);
         setStale(result.data.stale);
+        setSnapshot(result.data.snapshot ?? null);
       } else {
         setError(result.error.message);
       }
@@ -107,11 +120,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   // Hugging Face search is not called on every keystroke.
   useEffect(() => {
     const timer = setTimeout(() => {
-      void loadCatalogue(search, sort, capability);
+      void loadCatalogue(search, sort, capability, supportedOnly);
     }, search.length > 0 ? 400 : 0);
 
     return () => clearTimeout(timer);
-  }, [capability, loadCatalogue, search, sort]);
+  }, [capability, loadCatalogue, search, sort, supportedOnly]);
 
   useEffect(() => {
     void reloadSessions();
@@ -148,11 +161,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setLoadingCatalogue(false);
 
     if (result.ok) {
-      await loadCatalogue(search, sort, capability);
+      await loadCatalogue(search, sort, capability, supportedOnly);
     } else {
       setError(result.error.message);
     }
-  }, [capability, loadCatalogue, search, sort]);
+  }, [capability, loadCatalogue, search, sort, supportedOnly]);
 
   const selectModel = useCallback(async (id: string) => {
     const bridge = window.maia;
@@ -243,12 +256,15 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       models,
       stale,
       loadingCatalogue,
+      snapshot,
       search,
       setSearch,
       sort,
       setSort,
       capability,
       setCapability,
+      supportedOnly,
+      setSupportedOnly,
       refreshCatalogue,
       selectModel,
       selected,
@@ -279,10 +295,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       selectModel,
       selected,
       sessions,
+      snapshot,
       sort,
       startSession,
       startingIds,
-      stale
+      stale,
+      supportedOnly
     ]
   );
 

@@ -9,12 +9,15 @@ export function CataloguePage() {
     models,
     stale,
     loadingCatalogue,
+    snapshot,
     search,
     setSearch,
     sort,
     setSort,
     capability,
     setCapability,
+    supportedOnly,
+    setSupportedOnly,
     refreshCatalogue,
     selectModel,
     selected,
@@ -37,9 +40,10 @@ export function CataloguePage() {
   // vLLM boots it and then rejects every message with HTTP 400. It can also be a
   // diffusion pack with no config.json, which vLLM cannot load at all.
   const chatReady = selected
-    ? isChatCapableModel(selected.model) &&
+    ? selected.support?.supported !== false &&
+      selected.runnable !== false &&
       selected.chatTemplate !== false &&
-      selected.runnable !== false
+      isChatCapableModel(selected.model)
     : false;
   const access = selected ? describeGatedAccess(selected.model.gated) : null;
   const starting = selected ? startingIds.includes(selected.model.id) : false;
@@ -58,8 +62,9 @@ export function CataloguePage() {
       <p className="eyebrow">Catalogue</p>
       <h1>Pick a model to run</h1>
       <p className="lede">
-        Models come from the local snapshot of the Hugging Face catalogue. Nothing is provisioned
-        until you review and confirm the cost estimate.
+        Models come from the catalogue MaiaLLM publishes, so the list is the same everywhere and
+        works offline from the last snapshot. Nothing is provisioned until you review and confirm
+        the cost estimate.
       </p>
 
       {error ? (
@@ -88,6 +93,11 @@ export function CataloguePage() {
           {loadingCatalogue ? "Refreshing…" : "Refresh"}
         </button>
         {stale ? <span className="pill pill-warning">Offline snapshot</span> : null}
+        {snapshot ? (
+          <span className="pill" title={`Published ${snapshot.refreshedAt}`}>
+            catalogue v{snapshot.version} · {formatSnapshotAge(snapshot.refreshedAt)}
+          </span>
+        ) : null}
         {sessions.length > 0 ? (
           <span className="pill pill-ok">{describeSessions(sessions)}</span>
         ) : null}
@@ -104,6 +114,14 @@ export function CataloguePage() {
             <option value="parameters-asc">Smallest model</option>
             <option value="parameters-desc">Largest model</option>
           </select>
+        </label>
+        <label className="inline-field">
+          <input
+            type="checkbox"
+            checked={supportedOnly}
+            onChange={(event) => setSupportedOnly(event.target.checked)}
+          />
+          <span>Only models I can run</span>
         </label>
         <label className="inline-field">
           <span>Feature</span>
@@ -177,7 +195,19 @@ export function CataloguePage() {
                   <dt>Weights</dt>
                   <dd>{describeWeights(selected.artifacts)}</dd>
                 </div>
+                {selected.support?.engine ? (
+                  <div className="info-row">
+                    <dt>Engine</dt>
+                    <dd>{describeEngine(selected.support.engine)}</dd>
+                  </div>
+                ) : null}
               </dl>
+
+              {selected.support && !selected.support.supported ? (
+                <p className="pill pill-warning" role="note">
+                  Cannot run this model: {selected.support.reason ?? "no engine can serve it"}
+                </p>
+              ) : null}
 
               {access ? (
                 <GatedAccessNotice modelId={selected.model.id} description={access.description} />
@@ -210,6 +240,13 @@ export function CataloguePage() {
                 </ul>
               ) : null}
 
+              {/* Every session serves the OpenAI chat-completions API on
+                  localhost, which is what IDE extensions and scripts talk to. */}
+              <p className="muted">
+                Speaks the OpenAI API: once it is running, any tool that accepts a custom base URL
+                can use it (Chat Completions at <code>/v1</code>).
+              </p>
+
               {existingSession ? (
                 <div className="session-state">
                   <p className={existingSession.state === "active" ? "pill pill-ok" : "pill pill-warning"}>
@@ -229,9 +266,11 @@ export function CataloguePage() {
                     ? "Estimating…"
                     : chatReady
                       ? "Estimate a session"
-                      : selected.runnable === false
+                      : selected.support?.supported === false
                         ? "Cannot run this model"
-                        : "Not a chat model"}
+                        : selected.runnable === false
+                          ? "Cannot run this model"
+                          : "Not a chat model"}
                 </button>
               ) : (
                 <div className="estimate-card">
@@ -397,6 +436,24 @@ const ModelRow = memo(function ModelRow({
               <span className="pill pill-warning">{access.label}</span>
             </span>
           ) : null}
+          {model.supported === false ? (
+            <span
+              className="tooltip-source"
+              onMouseEnter={(event) =>
+                showTip(
+                  model.supportedReason ??
+                    "No engine can serve this model, so it cannot be started.",
+                  event.currentTarget
+                )
+              }
+              onMouseLeave={() => setTip(null)}
+            >
+              <span className="pill pill-warning">unsupported</span>
+            </span>
+          ) : null}
+          {model.engine ? (
+            <span className="pill">{describeEngine(model.engine)}</span>
+          ) : null}
           {isChatCapableModel(model) ? null : (
             <span
               className="tooltip-source"
@@ -484,6 +541,30 @@ function describeWeights(artifacts: readonly ModelArtifact[]): string {
 
   const quants = [...new Set(gguf.map((artifact) => artifact.quantization).filter(Boolean))];
   return quants.length > 0 ? `GGUF · ${quants.slice(0, 3).join(", ")}` : "GGUF";
+}
+
+/** Which runtime serves the model, in the words the docs use. */
+function describeEngine(engine: "vllm" | "llamacpp"): string {
+  return engine === "vllm" ? "vLLM" : "llama.cpp";
+}
+
+/** "12 min old" — the snapshot's age is what says whether the list is current. */
+function formatSnapshotAge(refreshedAt: string): string {
+  const then = new Date(refreshedAt).getTime();
+  if (Number.isNaN(then)) {
+    return "age unknown";
+  }
+
+  const minutes = Math.max(0, Math.round((Date.now() - then) / 60_000));
+  if (minutes < 1) {
+    return "just refreshed";
+  }
+  if (minutes < 60) {
+    return `${minutes} min old`;
+  }
+
+  const hours = Math.round(minutes / 60);
+  return hours < 48 ? `${hours} h old` : `${Math.round(hours / 24)} d old`;
 }
 
 function formatCount(value: number): string {
