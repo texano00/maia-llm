@@ -79,7 +79,7 @@ export const catalogueSnapshots: Migration = {
       id ${autoId(dialect)},
       name TEXT NOT NULL UNIQUE,
       content_type TEXT NOT NULL,
-      bytes BLOB NOT NULL,
+      data_base64 TEXT NOT NULL,
       created_at TEXT NOT NULL
     )`
   ]

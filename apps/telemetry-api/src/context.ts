@@ -17,6 +17,7 @@ import { AdminAuthService, TokenService } from "./services/portal-auth.js";
 import { createHuggingFaceCatalogueClient } from "./services/catalogue/huggingface.js";
 import { SnapshotService } from "./services/catalogue/snapshot-service.js";
 import { createUseCaseReader, type UseCaseSummary } from "./services/catalogue/use-cases.js";
+import { UseCaseAdminService } from "./services/catalogue/use-case-admin.js";
 
 export interface AppContext {
   config: ServerConfig;
@@ -28,6 +29,7 @@ export interface AppContext {
   admins: AdminAuthService;
   snapshot: SnapshotService;
   useCases: () => Promise<UseCaseSummary[]>;
+  useCaseAdmin: UseCaseAdminService;
   repositories: {
     gpus: GpuReputationRepository;
     telemetry: TelemetryRepository;
@@ -109,6 +111,14 @@ export async function createAppContext(options: CreateAppContextOptions = {}): P
     ...(options.now ? { now: options.now } : {}),
   });
   const useCases = createUseCaseReader(db);
+  const useCaseAdmin = new UseCaseAdminService({
+    db,
+    currentModels: async () => {
+      const current = await snapshot.current();
+      return new Map((current?.models ?? []).map((model) => [model.id, model]));
+    },
+    ...(options.now ? { now: options.now } : {}),
+  });
 
   return {
     config,
@@ -120,6 +130,7 @@ export async function createAppContext(options: CreateAppContextOptions = {}): P
     admins,
     snapshot,
     useCases,
+    useCaseAdmin,
     repositories: { gpus: gpuRepository, telemetry: telemetryRepository, failures: failureRepository },
     async close() {
       if (ownsDatabase) {

@@ -2,6 +2,7 @@ import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { pathToFileURL } from "node:url";
 import { bearerToken } from "./auth.js";
 import { loadConfig, type ServerConfig } from "./config.js";
+import { registerAdminRoutes } from "./admin-routes.js";
 import { registerConfigRoutes } from "./config-routes.js";
 import { createAppContext, type AppContext } from "./context.js";
 import { registerDiagnosticsRoutes } from "./diagnostics.js";
@@ -63,6 +64,13 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
     snapshot: context.snapshot,
     useCases: context.useCases,
     ...(authorize ? { authorize } : {})
+  });
+  registerAdminRoutes(app, {
+    admins: context.admins,
+    useCases: context.useCaseAdmin,
+    snapshot: context.snapshot,
+    db: context.db,
+    ...(options.now ? { now: options.now } : {})
   });
 
   if (ownsContext && options.startJobs) {
