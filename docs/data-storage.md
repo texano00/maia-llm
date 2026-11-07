@@ -1,11 +1,11 @@
 # Data storage
 
-The telemetry API (`apps/telemetry-api`) stores three things: diagnostic batches sent
+The telemetry API (`apps/portal`) stores three things: diagnostic batches sent
 by the desktop app, the shared GPU reputation, and the start-up failures reported
 by clients. All live in one SQLite database on the server.
 
 ```bash
-npm run -w @maia/telemetry-api dev      # migrates and serves on :8787
+npm run -w @maia/portal dev      # migrates and serves on :8787
 ```
 
 | Variable                        | Default             | Purpose                                                               |
@@ -136,7 +136,7 @@ The work is confined to one new adapter and a short verification pass:
    branches.
 4. **Verify behaviour** — the suite is engine-agnostic. Point
    `createAppContext({ databaseFile })` at the new adapter and run
-   `npx vitest run apps/telemetry-api`; the tests assert on ISO timestamps, monotonic
+   `npx vitest run apps/portal`; the tests assert on ISO timestamps, monotonic
    history and retention, not on SQLite specifics.
 5. **Copy the data** — export from SQLite (`sqlite3 maia.sqlite .dump` or a small
    script over the repositories) and import into the new engine. `id` columns are

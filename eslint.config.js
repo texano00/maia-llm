@@ -38,7 +38,7 @@ export default tseslint.config(
   },
   {
     // The backoffice SPA is browser code bundled by Vite, not Node code.
-    files: ["apps/telemetry-api/ui/**/*.{js,jsx}"],
+    files: ["apps/portal/ui/**/*.{js,jsx}"],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: "module",

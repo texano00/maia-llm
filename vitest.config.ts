@@ -14,7 +14,7 @@ export default defineConfig({
   test: {
     include: [
       "apps/desktop/tests/**/*.test.ts",
-      "apps/telemetry-api/tests/**/*.test.ts",
+      "apps/portal/tests/**/*.test.ts",
       "packages/**/tests/**/*.test.ts",
       "scripts/**/tests/**/*.test.ts"
     ],

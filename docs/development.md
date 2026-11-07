@@ -26,7 +26,7 @@ npm run -w @maia/desktop dev
 MAIA_PROVIDER_MODE=mock npm run -w @maia/desktop dev
 
 # Telemetry API + GPU reputation API (one service, port 8787)
-npm run -w @maia/telemetry-api dev
+npm run -w @maia/portal dev
 ```
 
 The service also stores which GPU machines start reliably; the desktop app reads
@@ -129,7 +129,7 @@ accepts connections from the Windows host:
 
 ```bash
 # terminal 1: keep it running while you test
-TELEMETRY_HOST=0.0.0.0 npm run -w @maia/telemetry-api dev
+TELEMETRY_HOST=0.0.0.0 npm run -w @maia/portal dev
 ```
 
 Then open **Settings → Telemetry and diagnostics host** in the app and confirm the

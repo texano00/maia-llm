@@ -11,7 +11,7 @@ database; see [data-storage.md](data-storage.md) for the schema, the retention
 rules and how to move the service to PostgreSQL or MySQL later.
 
 ```bash
-npm run -w @maia/telemetry-api dev       # http://localhost:8787
+npm run -w @maia/portal dev       # http://localhost:8787
 ```
 
 | Variable                  | Default             | Purpose                                                      |

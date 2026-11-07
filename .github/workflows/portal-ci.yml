@@ -1,4 +1,4 @@
-name: telemetry-ci
+name: portal-ci
 
 on:
   pull_request:
@@ -20,4 +20,5 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run test:integration
-      - run: npm run -w @maia/telemetry-api build
+      - run: npm run -w @maia/portal build
+      - run: npm run -w @maia/portal build:admin

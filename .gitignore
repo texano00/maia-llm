@@ -43,5 +43,5 @@ Thumbs.db
 # telemetry service runtime data
 var/
 
-# Built backoffice bundle (npm run -w @maia/telemetry-api build:admin)
-apps/telemetry-api/public/admin/
+# Built backoffice bundle (npm run -w @maia/portal build:admin)
+apps/portal/public/admin/

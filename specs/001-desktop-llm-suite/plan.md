@@ -139,7 +139,7 @@ apps/
 │   │   └── e2e/                      # Playwright Electron flows
 │   ├── resources/                    # icons, installer assets
 │   └── electron-builder.yml
-├── telemetry-api/
+├── portal/
 │   ├── src/
 │   │   ├── routes/                   # installations, events, crashes, bundles, deletion
 │   │   ├── ingest/                   # schema validation, allowlist, rate limits
@@ -152,7 +152,7 @@ packages/
 ├── contracts/                        # shared Zod schemas and generated types
 └── shared/                           # pure utilities, no platform APIs
 infra/
-├── docker-compose.yml                # PostgreSQL, MinIO, telemetry-api
+├── docker-compose.yml                # PostgreSQL, MinIO, portal
 ├── migrations/
 └── dashboards/                       # operational queries and charts
 .github/workflows/
@@ -163,7 +163,7 @@ scripts/
 └── release/                         # version check, checksums, manifest, feed, verification
 ```
 
-**Structure Decision**: npm-workspaces monorepo with two deployables: `apps/desktop` (Electron main, preload, renderer) and `apps/telemetry-api` (Fastify, the only server-side component). `packages/contracts` is the single source of truth for IPC, the Ollama-compatible HTTP surface, telemetry ingestion, and provider adapter payloads, preventing client/server drift. Main-process code is organized by domain service, renderer code by feature folder, and platform-specific code is confined to `providers/`, `credentials/`, `updates/`, and packaging configuration. `infra/` provides local parity for PostgreSQL and S3-compatible storage, while `.github/workflows/` and `scripts/release/` own CI, signing inputs, checksums, the release manifest, and feed generation.
+**Structure Decision**: npm-workspaces monorepo with two deployables: `apps/desktop` (Electron main, preload, renderer) and `apps/portal` (Fastify, the only server-side component). `packages/contracts` is the single source of truth for IPC, the Ollama-compatible HTTP surface, telemetry ingestion, and provider adapter payloads, preventing client/server drift. Main-process code is organized by domain service, renderer code by feature folder, and platform-specific code is confined to `providers/`, `credentials/`, `updates/`, and packaging configuration. `infra/` provides local parity for PostgreSQL and S3-compatible storage, while `.github/workflows/` and `scripts/release/` own CI, signing inputs, checksums, the release manifest, and feed generation.
 
 ## Complexity Tracking
 

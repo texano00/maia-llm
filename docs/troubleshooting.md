@@ -13,7 +13,7 @@ is also surfaced in the startup log line `Application services initialized`.
 Start the telemetry API locally and point the app at it:
 
 ```bash
-TELEMETRY_HOST=0.0.0.0 npm run -w @maia/telemetry-api dev
+TELEMETRY_HOST=0.0.0.0 npm run -w @maia/portal dev
 ```
 
 In the app: **Settings → Telemetry and diagnostics host** (default

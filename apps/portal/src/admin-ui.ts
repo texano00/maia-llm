@@ -17,7 +17,7 @@ const MISSING_BUILD = `<!doctype html>
 <html><head><meta charset="utf-8"><title>Maia LLM backoffice</title></head>
 <body style="font:16px system-ui;background:#070a12;color:#e7ecf5;padding:3rem">
   <h1>Backoffice not built</h1>
-  <p>Run <code>npm run -w @maia/telemetry-api build:admin</code> and reload.</p>
+  <p>Run <code>npm run -w @maia/portal build:admin</code> and reload.</p>
 </body></html>`;
 
 /**

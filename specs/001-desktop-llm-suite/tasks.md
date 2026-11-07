@@ -12,7 +12,7 @@ description: "Task list for Desktop LLM Suite implementation"
 
 **Organization**: Tasks are grouped by user story to enable independent implementation and testing.
 
-**Path conventions**: npm-workspaces monorepo — `apps/desktop/` (Electron main/preload/renderer), `apps/telemetry-api/` (Fastify), `packages/contracts/`, `packages/shared/`, `scripts/release/`, `infra/`, `.github/workflows/`.
+**Path conventions**: npm-workspaces monorepo — `apps/desktop/` (Electron main/preload/renderer), `apps/portal/` (Fastify), `packages/contracts/`, `packages/shared/`, `scripts/release/`, `infra/`, `.github/workflows/`.
 
 ## Format: `[ID] [P?] [Story] Description`
 
@@ -27,16 +27,16 @@ description: "Task list for Desktop LLM Suite implementation"
 **Purpose**: Create the monorepo, toolchain, app shells, and CI skeletons.
 
 - [x] T001 Create npm-workspaces root with Node 22 engine and scripts (`dev`, `build`, `test`, `test:contract`, `test:integration`, `test:telemetry-allowlist`, `release:verify`) in `package.json`
-- [x] T002 [P] Add strict TypeScript base config and path aliases in `tsconfig.base.json`, `apps/desktop/tsconfig.json`, `apps/telemetry-api/tsconfig.json`
+- [x] T002 [P] Add strict TypeScript base config and path aliases in `tsconfig.base.json`, `apps/desktop/tsconfig.json`, `apps/portal/tsconfig.json`
 - [x] T003 [P] Configure ESLint, Prettier, and import boundaries in `eslint.config.js` and `.prettierrc`
 - [x] T004 [P] Configure Vitest runner and Playwright Electron runner in `vitest.config.ts` and `apps/desktop/playwright.config.ts`
 - [x] T005 [P] Scaffold Electron main, preload, and renderer with electron-vite in `apps/desktop/electron.vite.config.ts`, `apps/desktop/src/main/bootstrap/main.ts`, `apps/desktop/src/preload/index.ts`, `apps/desktop/src/renderer/index.html`
-- [x] T006 [P] Scaffold the Fastify telemetry service entry point in `apps/telemetry-api/src/server.ts` and `apps/telemetry-api/package.json`
+- [x] T006 [P] Scaffold the Fastify telemetry service entry point in `apps/portal/src/server.ts` and `apps/portal/package.json`
 - [x] T007 [P] Add local PostgreSQL 16 and MinIO services in `infra/docker-compose.yml`
 - [x] T008 [P] Add environment template, ignore rules, and development setup notes in `.env.example`, `.gitignore`, `docs/development.md`
 - [x] T009 [P] Create shared package exports in `packages/contracts/src/index.ts` and `packages/shared/src/index.ts`
 - [x] T010 [P] Add verify-only PR workflows in `.github/workflows/desktop-ci.yml` and `.github/workflows/telemetry-ci.yml`
-- [x] T011 [P] Create test scaffolding for integration and performance suites in `apps/desktop/tests/integration/README.md`, `apps/desktop/tests/perf/README.md`, and `apps/telemetry-api/tests/integration/README.md`
+- [x] T011 [P] Create test scaffolding for integration and performance suites in `apps/desktop/tests/integration/README.md`, `apps/desktop/tests/perf/README.md`, and `apps/portal/tests/integration/README.md`
 
 **Checkpoint**: Repository builds, lint runs, and both app shells start.
 
@@ -249,10 +249,10 @@ description: "Task list for Desktop LLM Suite implementation"
 
 ### Tests for Telemetry
 
-- [ ] T108 [P] Contract test telemetry ingestion schemas, idempotency, allowlist, and rejection codes in `apps/telemetry-api/tests/contract/ingestion.test.ts`
-- [ ] T109 [P] Integration test consent → batch → crash bundle → deletion with PostgreSQL and MinIO in `apps/telemetry-api/tests/integration/telemetry.test.ts`
+- [ ] T108 [P] Contract test telemetry ingestion schemas, idempotency, allowlist, and rejection codes in `apps/portal/tests/contract/ingestion.test.ts`
+- [ ] T109 [P] Integration test consent → batch → crash bundle → deletion with PostgreSQL and MinIO in `apps/portal/tests/integration/telemetry.test.ts`
 - [ ] T110 [P] Unit test the scrubber rejects prompt-like, secret-like, and path-like payloads in `apps/desktop/tests/unit/telemetry-scrubber.test.ts`
-- [ ] T111 [P] Backend test asserting batch acceptance latency and crash version/OS attribution in `apps/telemetry-api/tests/integration/metrics.test.ts`
+- [ ] T111 [P] Backend test asserting batch acceptance latency and crash version/OS attribution in `apps/portal/tests/integration/metrics.test.ts`
 - [ ] T112 [P] E2E consent-off/no-upload and consent-on/upload behavior in `apps/desktop/tests/e2e/telemetry-consent.spec.ts`
 
 ### Implementation for Telemetry
@@ -265,13 +265,13 @@ description: "Task list for Desktop LLM Suite implementation"
 - [ ] T118 Implement telemetry IPC handlers and the synthetic preview payload in `apps/desktop/src/main/ipc/telemetry.ts`
 - [ ] T119 Build consent, preview, opt-out, and deletion-request UI in `apps/desktop/src/renderer/features/telemetry-consent/ConsentPage.tsx`
 - [ ] T120 [P] Build the diagnostics screen showing local log locations, last telemetry upload, and orphan status in `apps/desktop/src/renderer/features/diagnostics/DiagnosticsPage.tsx`
-- [ ] T121 Scaffold Fastify config, health endpoint, and error handling in `apps/telemetry-api/src/server.ts` and `apps/telemetry-api/src/config.ts`
-- [ ] T122 [P] Implement PostgreSQL schema and migrations for installations, batches, events, snapshots, crashes, bundles, retention, and deletion in `apps/telemetry-api/src/db/schema.ts` and `apps/telemetry-api/drizzle/`
-- [ ] T123 Implement installation registration with token hashing and consent version in `apps/telemetry-api/src/routes/installations.ts` and `apps/telemetry-api/src/services/tokens.ts`
-- [ ] T124 Implement the event batch endpoint with allowlist validation, idempotency, truncated IP handling, and rate limits in `apps/telemetry-api/src/routes/events.ts` and `apps/telemetry-api/src/ingest/allowlist.ts`
-- [ ] T125 Implement crash and log-bundle presign/complete routes in `apps/telemetry-api/src/routes/crashes.ts` and `apps/telemetry-api/src/routes/log-bundles.ts`
-- [ ] T126 Implement deletion requests, retention sweeps, and daily aggregates in `apps/telemetry-api/src/routes/deletion.ts`, `apps/telemetry-api/src/jobs/retention.ts`, `apps/telemetry-api/src/jobs/deletion.ts`, and `apps/telemetry-api/src/jobs/aggregates.ts`
-- [ ] T127 Add the telemetry Dockerfile and backend integration CI in `apps/telemetry-api/Dockerfile` and `.github/workflows/telemetry-ci.yml`
+- [ ] T121 Scaffold Fastify config, health endpoint, and error handling in `apps/portal/src/server.ts` and `apps/portal/src/config.ts`
+- [ ] T122 [P] Implement PostgreSQL schema and migrations for installations, batches, events, snapshots, crashes, bundles, retention, and deletion in `apps/portal/src/db/schema.ts` and `apps/portal/drizzle/`
+- [ ] T123 Implement installation registration with token hashing and consent version in `apps/portal/src/routes/installations.ts` and `apps/portal/src/services/tokens.ts`
+- [ ] T124 Implement the event batch endpoint with allowlist validation, idempotency, truncated IP handling, and rate limits in `apps/portal/src/routes/events.ts` and `apps/portal/src/ingest/allowlist.ts`
+- [ ] T125 Implement crash and log-bundle presign/complete routes in `apps/portal/src/routes/crashes.ts` and `apps/portal/src/routes/log-bundles.ts`
+- [ ] T126 Implement deletion requests, retention sweeps, and daily aggregates in `apps/portal/src/routes/deletion.ts`, `apps/portal/src/jobs/retention.ts`, `apps/portal/src/jobs/deletion.ts`, and `apps/portal/src/jobs/aggregates.ts`
+- [ ] T127 Add the telemetry Dockerfile and backend integration CI in `apps/portal/Dockerfile` and `.github/workflows/telemetry-ci.yml`
 
 **Checkpoint**: Telemetry is opt-in, content-free, auditable, and independently deployable.
 
@@ -315,7 +315,7 @@ description: "Task list for Desktop LLM Suite implementation"
 
 **Purpose**: Final quality, security, documentation, and end-to-end validation.
 
-- [ ] T142 [P] Add the telemetry allowlist CI gate and fixture test in `apps/telemetry-api/tests/contract/telemetry-allowlist.test.ts` and `package.json`
+- [ ] T142 [P] Add the telemetry allowlist CI gate and fixture test in `apps/portal/tests/contract/telemetry-allowlist.test.ts` and `package.json`
 - [ ] T143 [P] Add performance checks for catalogue search, idle memory, and start-to-first-token in `apps/desktop/tests/perf/catalogue-search.test.ts` and `apps/desktop/tests/perf/startup.test.ts`
 - [ ] T144 Complete a security review of CSP, IPC validation, secret redaction, and dependency audit in `docs/security-review.md`
 - [ ] T145 [P] Add accessibility and keyboard-navigation checks for catalogue, chat, session, backup, and consent screens in `apps/desktop/src/renderer/shared/a11y.css`

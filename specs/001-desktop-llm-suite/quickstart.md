@@ -27,7 +27,7 @@ npm install
 cp .env.example .env          # backend-only values; provider keys stay in the app vault
 docker compose -f infra/docker-compose.yml up -d
 npm run db:migrate            # desktop SQLite migrations
-npm run -w apps/telemetry-api db:migrate
+npm run -w apps/portal db:migrate
 ```
 
 The desktop app never reads provider keys from `.env`; enter Hugging Face, vast.ai, and S3 credentials through **Settings → Providers** so they land in the OS credential vault.
@@ -36,7 +36,7 @@ The desktop app never reads provider keys from `.env`; enter Hugging Face, vast.
 
 ```bash
 # Backend (telemetry only)
-npm run -w apps/telemetry-api dev
+npm run -w apps/portal dev
 
 # Desktop with real providers
 npm run -w apps/desktop dev
@@ -55,7 +55,7 @@ npm run typecheck
 npm test                                  # unit and service tests, all workspaces
 npm run test:contract                     # provider and API contract fixtures
 npm run test:telemetry-allowlist          # content-free payload guard
-npm run -w apps/telemetry-api test:integration   # Testcontainers: PostgreSQL + MinIO
+npm run -w apps/portal test:integration   # Testcontainers: PostgreSQL + MinIO
 npm run -w apps/desktop test:e2e          # Playwright Electron flows
 npm run release:verify                    # version, tag, manifest, and checksum consistency
 npm run -w apps/desktop build:win         # signed installer in release mode

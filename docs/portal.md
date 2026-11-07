@@ -2,7 +2,7 @@
 
 The portal is the server side of `specs/002-maiallm-portal`: the telemetry
 ingestion API, the configs API the desktop catalogue reads, and the backoffice.
-It currently lives in `apps/telemetry-api` and will be renamed to `apps/portal`
+It currently lives in `apps/portal` and will be renamed to `apps/portal`
 once the surface is complete.
 
 ## Configuration
@@ -53,12 +53,12 @@ The owner-facing console lives at `/admin` and is served by the API process
 itself, so the `SameSite=Strict` admin cookie never crosses an origin.
 
 ```
-apps/telemetry-api/ui        React source (Vite, JSX)
-apps/telemetry-api/public/admin  build output, git-ignored
+apps/portal/ui        React source (Vite, JSX)
+apps/portal/public/admin  build output, git-ignored
 ```
 
-- Build: `npm run -w @maia/telemetry-api build:admin`.
-- Live editing: `npm run -w @maia/telemetry-api dev:admin` (proxies `/v1` to
+- Build: `npm run -w @maia/portal build:admin`.
+- Live editing: `npm run -w @maia/portal dev:admin` (proxies `/v1` to
   `http://127.0.0.1:8787`).
 - Deployment order matters: run the UI build **before** starting the process.
   Without it `/admin` answers with a page telling you to run the build, and the
