@@ -10,6 +10,18 @@ export const catalogueSortSchema = z.enum([
   "context-desc"
 ]);
 
+export const inferenceEngineSchema = z.enum(["vllm", "llamacpp"]);
+
+/**
+ * The backend's verdict on a model: which engine serves it, and if none can,
+ * why. The desktop never recomputes this — it labels and filters with it.
+ */
+export const modelSupportSchema = z.object({
+  supported: z.boolean(),
+  engine: inferenceEngineSchema.nullable(),
+  reason: z.string().nullable()
+});
+
 export const catalogueModelSchema = z.object({
   id: z.string().min(1),
   author: z.string().min(1),
@@ -25,6 +37,10 @@ export const catalogueModelSchema = z.object({
   tags: z.array(z.string()),
   /** Derived feature flags: chat, tools, vision, code, reasoning, long-context. */
   capabilities: z.array(z.string()),
+  /** Backend verdict; absent on records cached from the Hub itself. */
+  supported: z.boolean().nullable().optional(),
+  supportedReason: z.string().nullable().optional(),
+  engine: inferenceEngineSchema.nullable().optional(),
   cachedAt: z.string()
 });
 
@@ -105,16 +121,26 @@ export const catalogueQuerySchema = z.object({
   /** Feature filter, for example `tools` or `vision`. */
   capability: z.string().trim().max(40).optional(),
   gated: z.enum(["any", "open", "gated"]).optional(),
+  /** Hide models the backend says nothing can serve. On by default in the UI. */
+  supportedOnly: z.boolean().optional(),
   maxParameters: z.number().int().positive().optional(),
   minContextWindow: z.number().int().positive().optional(),
   limit: z.number().int().min(1).max(100).optional()
+});
+
+export const catalogueSnapshotInfoSchema = z.object({
+  version: z.number().int().nonnegative(),
+  refreshedAt: z.string(),
+  /** Where the list came from: the backend snapshot or the Hub direct. */
+  source: z.enum(["portal", "hub"])
 });
 
 export const catalogueResultSchema = z.object({
   models: z.array(catalogueModelSchema),
   /** True when the network refresh failed and a cached snapshot is served. */
   stale: z.boolean(),
-  fetchedAt: z.string()
+  fetchedAt: z.string(),
+  snapshot: catalogueSnapshotInfoSchema.nullable().optional()
 });
 
 export const modelDetailSchema = z.object({
@@ -135,6 +161,8 @@ export const modelDetailSchema = z.object({
   /** One sentence explaining a `runnable: false` verdict. */
   runnableProblem: z.string().nullable(),
   licenseAccepted: z.boolean(),
+  /** Present when the catalogue came from the backend snapshot. */
+  support: modelSupportSchema.nullable().optional(),
   stale: z.boolean()
 });
 
@@ -143,7 +171,10 @@ export type CatalogueModel = z.infer<typeof catalogueModelSchema>;
 export type ModelArtifact = z.infer<typeof modelArtifactSchema>;
 export type CatalogueQuery = z.infer<typeof catalogueQuerySchema>;
 export type CatalogueResult = z.infer<typeof catalogueResultSchema>;
+export type CatalogueSnapshotInfo = z.infer<typeof catalogueSnapshotInfoSchema>;
 export type ModelDetail = z.infer<typeof modelDetailSchema>;
+export type InferenceEngine = z.infer<typeof inferenceEngineSchema>;
+export type ModelSupport = z.infer<typeof modelSupportSchema>;
 
 export interface GatedAccessInfo {
   /** Short badge text next to the model name. */

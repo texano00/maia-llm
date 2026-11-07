@@ -1,8 +1,10 @@
 import { z } from "zod";
 import { providerModeSchema, releaseChannelSchema } from "@maia/contracts";
 
-const appConfigSchema = z.object({
-  providerMode: providerModeSchema,
+/** Where the published catalogue lives; `MAIA_PORTAL_URL=` disables it. */
+export const DEFAULT_PORTAL_URL = "https://maiallm.com";
+
+const appConfigSchema = z.object({  providerMode: providerModeSchema,
   releaseChannel: releaseChannelSchema,
   idleTimeoutMinutes: z.number().int().min(1).max(120),
   updateCheckIntervalHours: z.number().int().min(1).max(168),
@@ -13,7 +15,12 @@ const appConfigSchema = z.object({
   updateFeedUrl: z.string().min(1).optional(),
   diagnosticLogUrl: z.string().min(1).optional(),
   /** Base URL of the shared GPU reputation API (defaults to the telemetry host). */
-  reputationUrl: z.string().min(1).optional()
+  reputationUrl: z.string().min(1).optional(),
+  /**
+   * MaiaLLM portal that publishes the catalogue. Empty disables it, and the app
+   * falls back to listing the Hub directly.
+   */
+  portalUrl: z.string().optional()
 });
 
 export type AppConfig = z.infer<typeof appConfigSchema>;
@@ -29,7 +36,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     simulatedUpdateVersion: env.MAIA_UPDATE_SIMULATE_VERSION?.trim() || undefined,
     updateFeedUrl: env.MAIA_UPDATE_FEED_URL?.trim() || undefined,
     diagnosticLogUrl: env.MAIA_DIAGNOSTIC_LOG_URL?.trim() || undefined,
-    reputationUrl: env.MAIA_REPUTATION_URL?.trim() || undefined
+    reputationUrl: env.MAIA_REPUTATION_URL?.trim() || undefined,
+    portalUrl: env.MAIA_PORTAL_URL === undefined ? DEFAULT_PORTAL_URL : env.MAIA_PORTAL_URL.trim()
   });
 }
 

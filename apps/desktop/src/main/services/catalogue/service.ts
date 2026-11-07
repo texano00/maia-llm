@@ -1,7 +1,18 @@
-import type { CatalogueModel, CatalogueQuery, CatalogueResult, ModelDetail } from "@maia/contracts";
+import type {
+  CatalogueModel,
+  CatalogueQuery,
+  CatalogueResult,
+  CatalogueSnapshotInfo,
+  ModelArtifact,
+  ModelDetail,
+  ModelSupport
+} from "@maia/contracts";
 import type { CatalogueRepository } from "./repository";
 import { mapArtifacts, mapHuggingFaceModel, type HuggingFaceModelPayload, type HuggingFaceTreeEntry } from "./mapper";
 import { assessRepository, type RepositoryVerdict } from "./repository-check";
+
+export type CatalogueSupport = ModelSupport;
+export type { CatalogueSnapshotInfo };
 
 export interface CatalogueSource {
   /** Latest model listing, optionally scoped by a search term. */
@@ -13,6 +24,15 @@ export interface CatalogueSource {
    * no tokenizer config to inspect and reports nothing.
    */
   getChatTemplate?(id: string): Promise<boolean>;
+  /**
+   * The backend's engine/support verdict, when the source has one. Synchronous
+   * because it reads an already fetched snapshot; `null` means "not known".
+   */
+  getSupport?(id: string): CatalogueSupport | null;
+  /** Artifacts the source already mapped (snapshot sources know quantization). */
+  getArtifacts?(id: string): ModelArtifact[];
+  /** Which snapshot the listing came from, for the "catalogue is N minutes old" line. */
+  snapshotInfo?(): CatalogueSnapshotInfo | null;
 }
 
 export interface CatalogueServiceOptions {
@@ -54,9 +74,21 @@ export class CatalogueService {
    * verdicts block the start; `null` (could not check) does not.
    */
   async checkRepository(id: string): Promise<RepositoryCheck> {
-    const chatTemplate = await this.hasChatTemplate(id);
+    const known = this.options.source.getSupport?.(id) ?? null;
+    if (known) {
+      return { chatTemplate: null, loadable: known.supported, problem: known.reason };
+    }
+
     const verdict = this.repositories.get(id) ?? (await this.probeRepository(id));
 
+    // Probing fetched the model, so a snapshot source can answer now even when
+    // the catalogue has not been listed yet in this run.
+    const support = this.options.source.getSupport?.(id) ?? null;
+    if (support) {
+      return { chatTemplate: null, loadable: support.supported, problem: support.reason };
+    }
+
+    const chatTemplate = await this.hasChatTemplate(id);
     return { chatTemplate, loadable: verdict.loadable, problem: verdict.problem };
   }
 
@@ -131,14 +163,39 @@ export class CatalogueService {
     const { models, cachedAt } = this.options.repository.list();
 
     return {
-      models: filterAndSort(models, query),
+      models: filterAndSort(this.withSupport(models), query),
       stale,
-      fetchedAt: cachedAt ?? this.now().toISOString()
+      fetchedAt: cachedAt ?? this.now().toISOString(),
+      snapshot: this.options.source.snapshotInfo?.() ?? null
     };
   }
 
+  /** Attaches the backend verdict to cached rows; unknown stays unknown. */
+  private withSupport(models: CatalogueModel[]): CatalogueModel[] {
+    if (!this.options.source.getSupport) {
+      return models;
+    }
+
+    return models.map((model) => {
+      const support = this.options.source.getSupport?.(model.id) ?? null;
+      return support
+        ? {
+            ...model,
+            supported: support.supported,
+            supportedReason: support.reason,
+            engine: support.engine
+          }
+        : model;
+    });
+  }
+
   async refresh(): Promise<CatalogueResult> {
-    return this.refreshInto("");
+    const result = await this.refreshInto("");
+    return {
+      ...result,
+      models: this.withSupport(result.models),
+      snapshot: this.options.source.snapshotInfo?.() ?? null
+    };
   }
 
   /** Cached record, without touching the network. */
@@ -169,7 +226,9 @@ export class CatalogueService {
     try {
       const { model, files } = await this.options.source.getModel(id);
       const mapped = mapHuggingFaceModel(model, this.now().toISOString());
-      const artifacts = mapArtifacts(id, "main", files);
+      // A snapshot source maps its own artifacts: quantization comes from the
+      // backend, and re-deriving it from file names would lose information.
+      const artifacts = this.options.source.getArtifacts?.(id) ?? mapArtifacts(id, "main", files);
 
       this.repositories.set(id, assessRepository(model, files));
       this.options.repository.saveModels([mapped]);
@@ -194,14 +253,16 @@ export class CatalogueService {
     }
 
     const verdict = this.repositories.get(id) ?? UNKNOWN_REPOSITORY;
+    const support = this.options.source.getSupport?.(id) ?? null;
 
     return {
-      model,
+      model: this.withSupport([model])[0] ?? model,
       artifacts: this.options.repository.getArtifacts(id),
       chatTemplate: await this.hasChatTemplate(id),
-      runnable: verdict.loadable,
-      runnableProblem: verdict.problem,
+      runnable: support ? support.supported : verdict.loadable,
+      runnableProblem: support ? support.reason : verdict.problem,
       licenseAccepted: ACCEPTED_LICENSES.has(id),
+      support,
       stale
     };
   }
@@ -251,6 +312,11 @@ export function filterAndSort(
       return false;
     }
     if (query.minContextWindow && (model.contextWindow ?? 0) < query.minContextWindow) {
+      return false;
+    }
+    // Only a known `false` is hidden: a Hub-sourced row has no verdict yet and
+    // must not disappear just because the backend has not spoken.
+    if (query.supportedOnly && model.supported === false) {
       return false;
     }
     if (query.capability && !model.capabilities.includes(query.capability)) {

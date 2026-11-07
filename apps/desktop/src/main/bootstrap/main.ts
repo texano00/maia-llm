@@ -20,6 +20,9 @@ import { SettingsStore } from "../services/settings/store";
 import { CatalogueRepository } from "../services/catalogue/repository";
 import { CatalogueService } from "../services/catalogue/service";
 import { createFixtureCatalogueSource } from "../services/catalogue/fixture-source";
+import { createPortalCatalogueSource } from "../services/catalogue/portal-source";
+import { createPortalClient } from "../services/portal/client";
+import { PortalCredentialStore } from "../services/portal/credentials";
 import { createHuggingFaceSource, testHuggingFaceToken } from "../services/catalogue/huggingface-source";
 import { assertChatRunnable } from "../services/catalogue/runnable";
 import { CredentialStore } from "../services/credentials/store";
@@ -221,12 +224,25 @@ async function bootstrap(): Promise<void> {
   const credentials = new CredentialStore(database, vault);
 
   const catalogueRepository = new CatalogueRepository(database);
+  // The published snapshot is the catalogue: it already carries the engine and
+  // support verdicts, so the app never lists the Hub itself when the portal is
+  // reachable. Without a portal URL it falls back to the Hub live listing.
+  const portal = createPortalClient({
+    baseUrl: () => config.portalUrl || null,
+    credentials: new PortalCredentialStore(join(paths.userData, "portal.json")),
+    appVersion: app.getVersion(),
+    platform: process.platform,
+    logger
+  });
+
   const catalogue = new CatalogueService({
     repository: catalogueRepository,
     source:
-      config.providerMode === "live"
-        ? createHuggingFaceSource({ getToken: () => credentials.get("huggingface") })
-        : createFixtureCatalogueSource(),
+      config.providerMode !== "live"
+        ? createFixtureCatalogueSource()
+        : portal.configured()
+          ? createPortalCatalogueSource({ client: portal })
+          : createHuggingFaceSource({ getToken: () => credentials.get("huggingface") }),
     logger,
     ...(config.providerMode === "mock" ? { ttlMs: 0 } : {})
   });

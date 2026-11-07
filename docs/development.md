@@ -142,6 +142,25 @@ The endpoint echoes events as `[diag] <time> <level> <message>`, keeps the last
 `GET /v1/diagnostics/logs?limit=200`. Nothing is persisted. `MAIA_UPDATE_FEED_URL`
 likewise overrides the update feed when testing a mirror.
 
+### Pointing the desktop at a local portal
+
+The catalogue ships from the portal (see `docs/portal.md`), which defaults to
+`https://maiallm.com`. To develop against a local one:
+
+```bash
+# terminal 1: the portal (seeds an admin and refreshes on boot)
+MAIA_ADMIN_EMAIL=admin@maia.test MAIA_ADMIN_PASSWORD='correct-horse-1' \
+  TELEMETRY_PORT=8791 npm run -w @maia/portal dev
+
+# terminal 2: the desktop against it
+MAIA_PORTAL_URL=http://127.0.0.1:8791 npm run -w @maia/desktop dev
+```
+
+The first catalogue read enrolls the installation silently and writes
+`<userData>/portal.json` (mode 0600). Delete that file to simulate a fresh
+install; `MAIA_PORTAL_URL=` (empty) disables the portal and falls back to listing
+the Hub directly, which needs a Hugging Face token for anything gated.
+
 ## Brand assets
 
 `assets/logo.png` is the source artwork — the emblem on a transparent background.
