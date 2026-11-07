@@ -32,6 +32,24 @@ services:
       timeout: 5s
       retries: 10
 
+  telemetry:
+    build:
+      context: ..
+      dockerfile: apps/portal/Dockerfile
+    image: maia-portal:local
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      MAIA_DATABASE_FILE: /data/maia.sqlite
+      TELEMETRY_HOST: 0.0.0.0
+      TELEMETRY_PORT: "8787"
+    ports:
+      - "8787:8787"
+    volumes:
+      - portaldata:/data
+
 volumes:
   pgdata:
   miniodata:
+  portaldata:

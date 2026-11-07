@@ -1,0 +1,13 @@
+node_modules
+**/node_modules
+**/dist
+**/out
+**/release
+**/public/admin
+**/.git
+**/.vscode
+**/coverage
+**/*.log
+var
+apps/desktop
+!apps/desktop/package.json
