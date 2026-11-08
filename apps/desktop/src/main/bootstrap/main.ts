@@ -271,7 +271,10 @@ async function bootstrap(): Promise<void> {
         getModelPlan: createModelPlanResolver({
           artifacts: (modelId) => catalogueRepository.getArtifacts(modelId),
           loadDetail: (modelId) => catalogue.detail(modelId),
-          get: (modelId) => catalogueRepository.get(modelId)
+          get: (modelId) => catalogueRepository.get(modelId),
+          // The snapshot says which engine serves this repository; GGUF without
+          // a verdict falls back to llama.cpp anyway.
+          engine: (modelId) => catalogue.supportFor(modelId)?.engine ?? null
         }),
         logger
       })

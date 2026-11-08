@@ -50,6 +50,20 @@ const MODEL_FAILURE_SIGNS: ReadonlyArray<{ pattern: RegExp; reason: string }> = 
     reason: "the GGUF loader could not be installed inside the container"
   },
   {
+    // llama.cpp: `-hf` cannot resolve the reference, or the quantisation is not
+    // in the repository. Another machine would download the same nothing.
+    pattern: /llama_model_load: error loading model|unable to load model|error loading model: .*not found/i,
+    reason: "llama.cpp could not load the GGUF file it was pointed at"
+  },
+  {
+    pattern: /failed to load model|no such file or directory: .*\.gguf/i,
+    reason: "the GGUF file is not present in the repository"
+  },
+  {
+    pattern: /does not support chat template|failed to apply chat template/i,
+    reason: "the GGUF file carries no usable chat template, so chat requests cannot be templated"
+  },
+  {
     // The container's startup script was exec'd instead of run by a shell (the
     // `runtype: "args"` mistake), or its interpreter is missing from the image.
     pattern: /exec: .*vllm-gguf-plugin.*executable file not found|exec: ".*pip install.*" ?: executable file not found/i,
@@ -86,8 +100,12 @@ const ROOT_CAUSE_PATTERNS: readonly RegExp[] = [
   /OutOfMemoryError:.*/,
   /The model's max seq len \(\d+\) is larger than the maximum number of tokens that can be stored in KV cache.*/i,
   /KV cache (is )?(too small|not enough|does not fit).*/i,
-  /MemoryError:.*/,
-  /(ValueError|RuntimeError|TypeError|KeyError|IndexError|AssertionError|NotImplementedError|ImportError|ModuleNotFoundError): .*/,
+  /MemoryError:.*/,  // llama.cpp/ggml report allocation failures instead of throwing.
+  /ggml_backend_cuda_buffer_type_alloc_buffer: allocating .* failed.*/i,
+  /CUDA error: out of memory.*/i,
+  /failed to allocate .*/i,
+  /llama_model_load: error loading model.*/i,
+  /error loading model: .*/i,  /(ValueError|RuntimeError|TypeError|KeyError|IndexError|AssertionError|NotImplementedError|ImportError|ModuleNotFoundError): .*/,
   /validation error for \w+.*/i,
   /Error (loading|initializing) .*/i
 ];
@@ -131,7 +149,7 @@ export function describeMemoryFailure(logs: string | null | undefined): string |
     return null;
   }
 
-  if (/out of memory|OutOfMemoryError/i.test(logs)) {
+  if (/out of memory|OutOfMemoryError|ggml_backend_cuda_buffer_type_alloc_buffer|failed to allocate|cudaMalloc failed/i.test(logs)) {
     return "the GPU ran out of memory while loading the weights or reserving the KV cache";
   }
 

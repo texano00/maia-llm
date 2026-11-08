@@ -9,31 +9,43 @@ boot is abandoned.
 
 ### Weights format
 
-| Repository ships | How it is served |
-| --- | --- |
-| `*.safetensors` | `vllm serve <repo>` — nothing special |
-| GGUF only | `vllm serve <repo>:<QUANT> --tokenizer <base repo>`, plus a one-time `uv pip install vllm-gguf-plugin` in the container's `onstart`. The quantisation is picked from `Q4_K_M, Q5_K_M, Q4_K_S, …` by what the repository actually contains. GGUF support in vLLM is experimental: it trades speed for a smaller footprint. || Both | safetensors, which is the faster path |
+| Repository ships | Engine | How it is served |
+| --- | --- | --- |
+| `*.safetensors` | vLLM | `vllm/vllm-openai:latest`, `--model <repo>` |
+| GGUF only | llama.cpp | `ghcr.io/ggml-org/llama.cpp:server-cuda`, `-hf <repo>:<QUANT>` |
+| Both | vLLM, unless the catalogue pins llama.cpp | safetensors is the faster path |
 
-The served model name is pinned with `--served-model-name <catalogue id>` in every
-case, so the chat client always addresses the model by the id the user picked
-rather than the path vLLM happened to load.
+The quantisation is picked from `Q4_K_M, Q5_K_M, Q4_K_S, …` by what the
+repository actually contains. The served model name is the catalogue id in every
+case (`--served-model-name` on vLLM, `--alias` on llama.cpp), so the chat client
+always addresses the model by the id the user picked.
+
+GGUF used to run on vLLM through `vllm-gguf-plugin`. That plugin is installed
+into the image at boot and its engine-core subprocess dies with
+`RuntimeError: Engine core initialization failed. See root cause above. Failed
+core proc(s): {}` — a traceback that names neither the plugin nor the model, and
+that cost a 20-minute boot plus a GPU hour every time. llama.cpp loads the
+quantised file directly, so that failure mode is gone rather than retried.
 
 ### How the instance is launched
 
-| Models | Vast runtype | Why |
+| Engine | Vast runtype | Why |
 | --- | --- | --- |
-| safetensors | `args` | The image entrypoint (`python3 -m vllm.entrypoints.openai.api_server`) is preserved and receives the vLLM flags as `args` |
-| GGUF | `ssh_direct` + `onstart` | The plugin has to be installed before vLLM starts. `onstart` is only executed by a shell under Vast's SSH/Jupyter entrypoint — with `runtype: "args"` the whole string becomes the container command and Docker fails with `exec: "uv pip install … || python3 …": executable file not found in $PATH` |
+| vLLM | `args` | The image entrypoint is preserved and receives the flags as `args` |
+| vLLM with an `onstart` script | `ssh_direct` + `onstart` | `onstart` is only executed by a shell under Vast's SSH/Jupyter entrypoint; with `runtype: "args"` the whole string becomes the container command |
+| llama.cpp | `args` | `llama-server` is the image's own entrypoint, nothing to install first |
 
-For GGUF the startup script is:
+llama.cpp arguments:
 
 ```sh
-uv pip install --system vllm-gguf-plugin || python3 -m pip install vllm-gguf-plugin;
-exec python3 -m vllm.entrypoints.openai.api_server --model repo:QUANT --port 8000 \
-  --served-model-name <catalogue id> --tokenizer <base repo> \
-  --max-model-len <fits this GPU> --gpu-memory-utilization 0.90 --max-num-seqs 4 \
-  --enforce-eager --disable-log-requests
+llama-server -hf <repo>:<QUANT> --host 0.0.0.0 --port 8000 \
+  --alias <catalogue id> -c <context that fits this GPU> -ngl 999 --jinja
 ```
+
+`--jinja` makes llama.cpp apply the model's own chat template (without it every
+chat request is refused) and `--ngl 999` offloads every layer to the GPU. The
+`HF_TOKEN` environment variable is passed as well: llama.cpp's downloader reads
+that name, while the vLLM images read `HUGGING_FACE_HUB_TOKEN` — both are set.
 
 The port still comes from the Docker flags in `env` (`-p 8000:8000`), never from
 the entrypoint arguments.

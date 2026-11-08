@@ -1,11 +1,18 @@
 import { isGgufOnlyRepository, type CatalogueModel, type ModelArtifact } from "@maia/contracts";
-import { baseModelCandidate, planVllmModel, type VllmModelPlan } from "./model-plan";
+import { baseModelCandidate } from "./model-plan";
+import { planLaunch, type LaunchEngine, type LaunchPlan } from "./launch-plan";
 
 export interface ModelPlanResolverOptions {
   artifacts(modelId: string): ModelArtifact[];
   /** Refreshes a model from the Hub; used when no artifacts are cached yet. */
   loadDetail(modelId: string): Promise<{ model: CatalogueModel; artifacts: ModelArtifact[] }>;
   get(modelId: string): CatalogueModel | null;
+  /**
+   * The engine the catalogue publishes for this model. Empty when the app is
+   * listing the Hub itself; a snapshot knows, and its verdict wins over the
+   * file-format guess.
+   */
+  engine?: ((modelId: string) => LaunchEngine | null) | undefined;
 }
 
 /**
@@ -21,7 +28,7 @@ export function createModelPlanResolver(options: ModelPlanResolverOptions) {
     modelId: string,
     offer: { gpuRamGb: number },
     contextScale?: number
-  ): Promise<VllmModelPlan> => {
+  ): Promise<LaunchPlan> => {
     let artifacts = options.artifacts(modelId);
     if (artifacts.length === 0) {
       artifacts = await options.loadDetail(modelId).then(
@@ -30,8 +37,8 @@ export function createModelPlanResolver(options: ModelPlanResolverOptions) {
       );
     }
 
-    // Only GGUF needs a tokenizer; vLLM's docs recommend the original repository
-    // over converting it out of the GGUF metadata.
+    // Only vLLM needs a tokenizer; the GGUF plugin borrows it from the original
+    // repository rather than converting it out of the GGUF metadata.
     const base = isGgufOnlyRepository(artifacts) ? baseModelCandidate(modelId) : null;
     const tokenizer = base
       ? await options.loadDetail(base).then(
@@ -42,14 +49,15 @@ export function createModelPlanResolver(options: ModelPlanResolverOptions) {
 
     const model = options.get(modelId);
 
-    return planVllmModel({
+    return planLaunch({
       modelId,
       artifacts,
       tokenizer,
       vramGb: offer.gpuRamGb,
       parameterCount: model?.parameterCount ?? null,
       contextWindow: model?.contextWindow ?? null,
-      contextScale: contextScale ?? null
+      contextScale: contextScale ?? null,
+      engine: options.engine?.(modelId) ?? null
     });
   };
 }

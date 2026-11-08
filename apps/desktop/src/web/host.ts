@@ -109,7 +109,8 @@ export async function createWebHost(options: WebHostOptions): Promise<WebHost> {
         getModelPlan: createModelPlanResolver({
           artifacts: (modelId) => catalogueRepository.getArtifacts(modelId),
           loadDetail: (modelId) => catalogue.detail(modelId),
-          get: (modelId) => catalogueRepository.get(modelId)
+          get: (modelId) => catalogueRepository.get(modelId),
+          engine: (modelId) => catalogue.supportFor(modelId)?.engine ?? null
         }),
         readyTimeoutMs: (options.readinessTimeoutMinutes ?? 20) * 60_000,
         logger

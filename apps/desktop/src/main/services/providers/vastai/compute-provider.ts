@@ -1,6 +1,6 @@
 import type { GpuFilters } from "@maia/contracts";
 import type { ComputeOffer, ComputeProvider } from "../../sessions/orchestrator";
-import type { VllmModelPlan } from "../../inference/model-plan";
+import { VLLM_IMAGE, type LaunchPlan } from "../../inference/launch-plan";
 import {
   buildSearchQuery,
   classifyOffer,
@@ -34,14 +34,14 @@ export interface VastComputeProviderOptions {
   /** Overrides the disk size derived from the model size. */
   diskGb?: number;
   /**
-   * How the model should be launched (safetensors vs GGUF). Falls back to
-   * passing the model id straight to `--model`.
+   * How the model should be launched: engine, image and full argument list.
+   * Falls back to handing the model id to vLLM's `--model`.
    */
   getModelPlan?: (
     modelId: string,
     offer: ComputeOffer,
     contextScale?: number
-  ) => Promise<VllmModelPlan>;
+  ) => Promise<LaunchPlan>;
   /**
    * Hard cap on the whole boot. Generous on purpose: pulling a multi-GB image
    * and then 10-25 GB of weights legitimately takes half an hour on a slow
@@ -247,46 +247,21 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
         context.modelId,
         offer,
         context.contextScale
-      )) ?? {
-        modelArg: context.modelId,
-        extraArgs: [],
-        env: {},
-        gguf: false
-      };
-
-      // vLLM renames the served model to whatever it loaded (a GGUF repo is
-      // exposed as `repo:QUANT`), so pin it to the catalogue id: the chat client
-      // sends that id in every request.
-      const servedModelName = ["--served-model-name", context.modelId];
-
-      // Only vLLM arguments: the port mapping belongs to the Docker flags in
-      // `env`, otherwise nothing is published and the model is unreachable.
-      const vllmArgs = [
-        "--model",
-        plan.modelArg,
-        "--port",
-        "8000",
-        ...servedModelName,
-        ...plan.extraArgs,
-        // Skip CUDA graph capture and per-request logging: both cost startup
-        // time, and the graphs matter less than answering sooner.
-        "--enforce-eager",
-        "--disable-log-requests"
-      ];
+      )) ?? fallbackVllmPlan(context.modelId);
 
       // `onstart` only runs as a shell script under Vast's SSH/Jupyter entrypoint.
       // With `runtype: "args"` the field becomes the container command verbatim,
       // which is how `uv pip install … || python3 -m pip …` ended up as a single
       // executable name and killed the container before vLLM started.
       const launchScript = plan.onstart
-        ? `${plan.onstart}; exec python3 -m vllm.entrypoints.openai.api_server ${vllmArgs
+        ? `${plan.onstart}; exec python3 -m vllm.entrypoints.openai.api_server ${plan.args
             .map(shellQuote)
             .join(" ")}`
         : null;
 
       const instanceId = await api.createInstance({
         offerId: offer.offerId,
-        image: options.containerImage ?? "vllm/vllm-openai:latest",
+        image: options.containerImage ?? plan.image,
         diskGb: options.diskGb ?? estimateDiskGb(parameterCount),
         label: context.label,
         env: {
@@ -294,21 +269,26 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
           // Hugging Face limits a single stream, so this is the difference
           // between minutes and tens of minutes on a fast host.
           HF_HUB_ENABLE_HF_TRANSFER: "1",
-          ...plan.env,
-          ...(hfToken ? { HUGGING_FACE_HUB_TOKEN: hfToken } : {})
+          // llama.cpp's own downloader reads HF_TOKEN; the vLLM images read the
+          // long form. Setting both costs nothing and gated repositories need
+          // whichever engine ends up running.
+          ...(hfToken ? { HF_TOKEN: hfToken, HUGGING_FACE_HUB_TOKEN: hfToken } : {}),
+          ...plan.env
         },
         ...(launchScript
           ? { runtype: "ssh_direct" as const, onstart: launchScript }
-          : { runtype: "args" as const, args: vllmArgs }),
+          : { runtype: "args" as const, args: plan.args }),
         port: 8000
       });
 
       options.logger?.info("vast.ai instance requested", {
         instanceId,
         offerId: offer.offerId,
-        modelArg: plan.modelArg,
-        gguf: plan.gguf,
-        quantization: plan.quantization ?? null
+        engine: plan.engine,
+        image: options.containerImage ?? plan.image,
+        quantization: plan.quantization ?? null,
+        contextLength: plan.limits?.maxModelLen ?? null,
+        weightsGb: Math.round(plan.weightsGb * 10) / 10
       });
       return { instanceId };
     },
@@ -578,6 +558,27 @@ async function waitForServing(
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Used when no plan resolver is wired (tests, or a very old composition root). */
+function fallbackVllmPlan(modelId: string): LaunchPlan {
+  return {
+    engine: "vllm",
+    image: VLLM_IMAGE,
+    args: [
+      "--model",
+      modelId,
+      "--port",
+      "8000",
+      "--served-model-name",
+      modelId,
+      "--enforce-eager",
+      "--disable-log-requests"
+    ],
+    env: {},
+    gguf: false,
+    weightsGb: 0
+  };
 }
 
 /**

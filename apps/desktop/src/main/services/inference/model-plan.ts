@@ -216,7 +216,7 @@ export function isAuxiliaryGguf(path: string): boolean {
   );
 }
 
-function pickGgufArtifact(artifacts: readonly ModelArtifact[]): ModelArtifact | null {
+export function pickGgufArtifact(artifacts: readonly ModelArtifact[]): ModelArtifact | null {
   const gguf = artifacts.filter(
     (artifact) =>
       artifact.format === "gguf" &&
