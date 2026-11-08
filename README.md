@@ -10,10 +10,10 @@
 </p>
 
 <p align="center">
-  <img alt="Platform" src="https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-0b7285" />
-  <img alt="Engines" src="https://img.shields.io/badge/engines-vLLM%20%C2%B7%20llama.cpp-1f6feb" />
-  <img alt="Weights" src="https://img.shields.io/badge/weights-GGUF%20%C2%B7%20safetensors-2f9e44" />
-  <img alt="Local API" src="https://img.shields.io/badge/local%20API-Ollama--compatible-6b46c1" />
+  <img alt="Platform" src="https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-0b7285?style=flat-square" />
+  <img alt="Engines" src="https://img.shields.io/badge/engines-vLLM%20%2B%20llama.cpp-1f6feb?style=flat-square" />
+  <img alt="Weights" src="https://img.shields.io/badge/weights-GGUF%20%2B%20safetensors-2f9e44?style=flat-square" />
+  <img alt="Local API" src="https://img.shields.io/badge/local%20API-Ollama--compatible-6b46c1?style=flat-square" />
 </p>
 
 ---
