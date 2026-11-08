@@ -44,14 +44,34 @@ jobs:
             electron-${{ runner.os }}-
       - name: Install dependencies
         shell: pwsh
+        env:
+          # Same files, same hashes, different CDN: used only when GitHub's
+          # release CDN refuses the binary (it answers 504 in bursts).
+          MIRROR_ELECTRON: https://npmmirror.com/mirrors/electron/
+          MIRROR_BUILDER: https://npmmirror.com/mirrors/electron-builder-binaries/
         run: |
-          for ($attempt = 1; $attempt -le 4; $attempt++) {
+          function Install-Deps {
             npm ci
-            if ($LASTEXITCODE -eq 0) { exit 0 }
-            if ($attempt -eq 4) { throw "npm ci failed after $attempt attempts" }
-            Write-Host "::warning::npm ci failed (attempt $attempt of 4); retrying"
+            return $LASTEXITCODE -eq 0
+          }
+
+          for ($attempt = 1; $attempt -le 2; $attempt++) {
+            if (Install-Deps) { exit 0 }
+            Write-Host "::warning::npm ci failed (attempt $attempt of 2) against GitHub; retrying"
             Start-Sleep -Seconds (15 * $attempt)
           }
+
+          Write-Host "::warning::Falling back to the npm mirror for the Electron binary"
+          $env:ELECTRON_MIRROR = $env:MIRROR_ELECTRON
+          $env:ELECTRON_BUILDER_BINARIES_MIRROR = $env:MIRROR_BUILDER
+
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            if (Install-Deps) { exit 0 }
+            Write-Host "::warning::npm ci failed (mirror attempt $attempt of 3)"
+            Start-Sleep -Seconds (15 * $attempt)
+          }
+
+          throw "npm ci failed: neither GitHub nor the mirror served the Electron download"
       - name: Prepare code-signing certificate
         shell: pwsh
         env:
