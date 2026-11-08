@@ -7,6 +7,7 @@ import type {
   ModelDetail,
   ModelSupport
 } from "@maia/contracts";
+import { isChatCapableModel } from "@maia/contracts";
 import type { CatalogueRepository } from "./repository";
 import { mapArtifacts, mapHuggingFaceModel, type HuggingFaceModelPayload, type HuggingFaceTreeEntry } from "./mapper";
 import { assessRepository, type RepositoryVerdict } from "./repository-check";
@@ -323,8 +324,10 @@ export function filterAndSort(
       return false;
     }
     // Only a known `false` is hidden: a Hub-sourced row has no verdict yet and
-    // must not disappear just because the backend has not spoken.
-    if (query.supportedOnly && model.supported === false) {
+    // must not disappear just because the backend has not spoken. Pipeline
+    // verdicts are local knowledge though — an embedding or reranking model is
+    // never runnable, however the catalogue scored it.
+    if (query.supportedOnly && (model.supported === false || !isChatCapableModel(model))) {
       return false;
     }
     if (query.capability && !model.capabilities.includes(query.capability)) {

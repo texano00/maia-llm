@@ -5,17 +5,42 @@
 <h1 align="center">Maia LLM</h1>
 
 <p align="center">
-  Run open-weight language models on a GPU you rent only for as long as you use it.
+  Run open-weight models on a GPU you rent for exactly as long as you use it —<br />
+  then use them from your own editor, scripts and AI agents.
+</p>
+
+<p align="center">
+  <img alt="Platform" src="https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-0b7285" />
+  <img alt="Engines" src="https://img.shields.io/badge/engines-vLLM%20%C2%B7%20llama.cpp-1f6feb" />
+  <img alt="Weights" src="https://img.shields.io/badge/weights-GGUF%20%C2%B7%20safetensors-2f9e44" />
+  <img alt="Local API" src="https://img.shields.io/badge/local%20API-Ollama--compatible-6b46c1" />
 </p>
 
 ---
 
 Maia LLM is a Windows desktop app for people who want to *use* open-weight
 models, not operate a cluster. It turns "I want to try this model" into a few
-clicks: browse the Hugging Face catalogue, see exactly what the run will cost
-before anything is created, let Maia rent a matching GPU on vast.ai, chat in a
-normal LLM interface, and release the GPU the moment you stop. No terminal, no
-YAML, no forgotten instances burning credit.
+clicks: browse the catalogue, see exactly what the run will cost before anything
+is created, let Maia rent a matching GPU on vast.ai, chat in a normal LLM
+interface, and release the GPU the moment you stop. No terminal, no YAML, no
+forgotten instances burning credit.
+
+> **The model you rent is also a local API for your agents.** While a session
+> runs, Maia serves it on `http://127.0.0.1:11434` as an **Ollama-compatible
+> endpoint** — the same one Ollama itself uses. VS Code assistants (Continue,
+> Cline), agent frameworks, RAG pipelines and your own scripts can then call the
+> model as if it were installed locally: no API keys, no per-token billing, just
+> the GPU you are already paying for by the hour. Loopback only, opt-in, and it
+> stops when the session does — see
+> [docs/ide-endpoint.md](docs/ide-endpoint.md).
+
+```bash
+# Settings → IDE endpoint → enable, start a session, then anything Ollama-shaped works
+curl -s http://127.0.0.1:11434/api/tags
+curl -s http://127.0.0.1:11434/api/chat -H 'content-type: application/json' \
+  -d '{"model":"<the model you started>","stream":false,
+       "messages":[{"role":"user","content":"Draft a commit message for this diff."}]}'
+```
 
 Three ideas shape everything in the app:
 
@@ -29,10 +54,14 @@ Three ideas shape everything in the app:
 
 ## What you get
 
+- **Your agents get the model, locally.** A running session is exposed on
+  `127.0.0.1:11434` through an Ollama-compatible API (`/api/tags`, `/api/chat`,
+  `/api/generate`, streaming, thinking output), so token-hungry tools talk to the
+  GPU you rent instead of a per-token provider. Edit your Continue/Cline config,
+  or point a script at it — no SDK, no key. Off until you enable it.
 - **A real catalogue** of open-weight models with license, size, context window,
   gated status, and feature filters (tool use, reasoning, vision, code, long
-  context). Search hits the Hugging Face API; order by downloads, newest, likes, or
-  size.
+  context). Order by downloads, newest, likes, or size.
 - **No surprise bills.** Every run starts with an estimate: GPU, hourly rate,
   minimum charge, expected total, and a range. Nothing is provisioned until you
   confirm it.
@@ -61,7 +90,7 @@ Three ideas shape everything in the app:
 
 ### Optional extras
 
-Both are off until you turn them on.
+Off until you turn it on.
 
 - **Archive models in your own S3 bucket.** Keep a copy of the open-weight models
   you use often — with checksums and a restore path — in storage you control
@@ -69,40 +98,44 @@ Both are off until you turn them on.
   disappears, a gated repo changes, or you simply do not want to re-download tens
   of gigabytes every session. Nothing is uploaded unless you pick a model and a
   destination.
-- **Serve the running model locally to your editor and agents.** Maia can expose
-  the active model on `127.0.0.1` through an **Ollama-compatible API**, so tools
-  such as VS Code assistants, Continue, Cline or your own agents can call it like a
-  local model. Loopback only (never reachable from the network), disabled by
-  default, and it shuts down when the session ends — see
-  [docs/ide-endpoint.md](docs/ide-endpoint.md).
 
 ## Demo
 
-A short recorded walkthrough is being prepared: catalogue → estimate →
-provisioning with the live log → first answer → release.
-
-> 🎬 **`docs/demo/maia-llm-demo.mp4`** — 2-minute quick demo *(coming soon)*
-
-What the recording covers, so it stays in sync with the app:
-
-1. Search the catalogue and open a model; read the estimate.
-2. Confirm it and watch the provisioning log through to *Running*.
-3. Ask a question, show the streamed answer and the live cost meter.
-4. Stop the model, then reopen the chat and continue it with another model.
-
-<!--
-Publishing the demo: drop `maia-llm-demo.mp4` (H.264/AAC, 1080p, < 20 MB) and a
-`demo-poster.png` frame into `docs/demo/`, then replace the line above with:
-
 <p align="center">
   <a href="docs/demo/maia-llm-demo.mp4">
-    <img src="docs/demo/demo-poster.png" alt="Watch the Maia LLM demo" width="720" />
+    <img src="docs/demo/maia-llm-demo.gif" alt="Pick a model, read the estimate, watch the GPU boot, then chat with the model" width="820" />
   </a>
 </p>
 
-For GitHub, upload the video to a release asset or an issue attachment and link
-that URL instead, because GitHub does not play repository-hosted video files.
--->
+Fourteen seconds at 2× speed: **pick a GGUF model and read the estimate → watch
+the provisioning log move through image pull, download and load → chat with the
+model that just came up**. Click the clip for the full-quality file.
+
+| Recording | Where |
+| --- | --- |
+| 14 s highlight (H.264, no audio) | [`docs/demo/maia-llm-demo.mp4`](docs/demo/maia-llm-demo.mp4) |
+| Same clip as an inline GIF | [`docs/demo/maia-llm-demo.gif`](docs/demo/maia-llm-demo.gif) |
+| Still frame | [`docs/demo/demo-poster.png`](docs/demo/demo-poster.png) |
+
+What it shows, so it stays in sync with the app:
+
+1. Catalogue with the runnable-only filter on: GGUF mirrors, weights, artifacts.
+2. The estimate: GPU, hourly rate and expected total, before anything is created.
+3. Provisioning: container pull, model download, load, then *Running*.
+4. Chat: an answer streaming in, with the live cost meter next to it.
+
+Regenerate the clip from a fresh recording with:
+
+```bash
+ffmpeg -i recording.mp4 -filter_complex \
+  "[0:v]trim=5.5:11.5,setpts=(PTS-STARTPTS)/2[a];\
+   [0:v]trim=12:16.5,setpts=(PTS-STARTPTS)/2[b];\
+   [0:v]trim=111:116,setpts=(PTS-STARTPTS)/2[c];\
+   [0:v]trim=126:138,setpts=(PTS-STARTPTS)/2[d];\
+   [a][b][c][d]concat=n=4:v=1:a=0[v]" -map "[v]" -an \
+  -c:v libx264 -crf 22 -preset slow -pix_fmt yuv420p \
+  -movflags +faststart docs/demo/maia-llm-demo.mp4
+```
 
 ## Install
 
