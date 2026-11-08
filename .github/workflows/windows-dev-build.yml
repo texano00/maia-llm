@@ -31,7 +31,27 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
+      # The Electron binary comes from GitHub's release CDN, which returns 504s
+      # often enough that a single download attempt regularly fails the build
+      # before a line is compiled. Cache it and retry the install.
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            ~\AppData\Local\electron\Cache
+            ~\AppData\Local\electron-builder\Cache
+          key: electron-${{ runner.os }}-${{ hashFiles('apps/desktop/package.json', 'package-lock.json') }}
+          restore-keys: |
+            electron-${{ runner.os }}-
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          for ($attempt = 1; $attempt -le 4; $attempt++) {
+            npm ci
+            if ($LASTEXITCODE -eq 0) { exit 0 }
+            if ($attempt -eq 4) { throw "npm ci failed after $attempt attempts" }
+            Write-Host "::warning::npm ci failed (attempt $attempt of 4); retrying"
+            Start-Sleep -Seconds (15 * $attempt)
+          }
       - name: Prepare code-signing certificate
         shell: pwsh
         env:
