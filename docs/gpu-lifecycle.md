@@ -39,16 +39,29 @@ llama.cpp arguments:
 
 ```sh
 llama-server -hf <repo>:<QUANT> --host 0.0.0.0 --port 8000 \
-  --alias <catalogue id> -c <context that fits this GPU> -ngl 999 --jinja
+  --alias <catalogue id> -c <context that fits this GPU> -ngl 999 \
+  --parallel 1 --no-mmproj --jinja
 ```
 
 `--jinja` makes llama.cpp apply the model's own chat template (without it every
-chat request is refused) and `--ngl 999` offloads every layer to the GPU. The
-`HF_TOKEN` environment variable is passed as well: llama.cpp's downloader reads
-that name, while the vLLM images read `HUGGING_FACE_HUB_TOKEN` — both are set.
+chat request is refused) and `--ngl 999` offloads every layer to the GPU.
+`--parallel 1` keeps `-c` meaning "total context": llama.cpp otherwise splits it
+across four slots, which quadruples the KV cache the planner budgeted for.
+`--no-mmproj` stops `-hf` from also loading the sibling `mmproj-*.gguf` vision
+projector — text chat does not use it, and it costs VRAM and load time.
+
+The `HF_TOKEN` environment variable is passed as well: llama.cpp's downloader
+reads that name, while the vLLM images read `HUGGING_FACE_HUB_TOKEN` — both are
+set.
 
 The port still comes from the Docker flags in `env` (`-p 8000:8000`), never from
 the entrypoint arguments.
+
+> **Known gap:** Vast publishes the mapped port publicly and neither engine
+authenticates by default (llama.cpp logs `security: no API key is set and CORS
+allows all origins`). Anyone with the host:port can use the rented GPU until the
+session ends. Closing that needs a per-session `--api-key` passed through the
+inference runtime.
 
 ### Launch limits (`--max-model-len`)
 

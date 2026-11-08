@@ -182,6 +182,13 @@ function planLlamaCpp(input: PlanLaunchInput & {
       String(context),
       "-ngl",
       LLAMACPP_GPU_LAYERS,
+      // One slot: `-c` is the context budget the planner sized against VRAM,
+      // and llama.cpp splits it across slots (default 4 × 32k ≈ 4× the cache).
+      "--parallel",
+      "1",
+      // `-hf` also fetches the sibling `mmproj-*.gguf` vision projector, which
+      // Maia's text chat never uses but which costs VRAM and load time.
+      "--no-mmproj",
       "--jinja"
     ],
     env: {},

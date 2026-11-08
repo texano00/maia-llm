@@ -58,6 +58,9 @@ describe("launch planning", () => {
       String(plan.limits?.maxModelLen),
       "-ngl",
       "999",
+      "--parallel",
+      "1",
+      "--no-mmproj",
       "--jinja"
     ]);
     // No `--model`, no tokenizer borrow, no plugin install: llama.cpp reads the

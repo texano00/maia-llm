@@ -397,10 +397,18 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
               options.fetchImpl,
               { now, pause },
               (elapsedMs) => {
-                // vLLM binds the port only after loading the weights, so this
-                // is the longest silent phase of a boot.
+                // The port opens only after the weights are downloaded and
+                // loaded, so this is the longest silent phase of a boot. Read
+                // the container log and say what it is doing instead of
+                // repeating the URL for twenty minutes.
                 lastReportAt = now();
-                onProgress?.({ status: "starting", message: endpoint, elapsedMs });
+                void readBootPhase(api, instanceId).then((phase) => {
+                  onProgress?.({
+                    status: "starting",
+                    message: phase ? `${endpoint} — ${phase}` : endpoint,
+                    elapsedMs
+                  });
+                });
               },
               progressIntervalMs,
               async (elapsedMs) => {
@@ -554,6 +562,87 @@ async function waitForServing(
 
     await clock.pause(5_000);
   }
+}
+
+/**
+ * What the container is doing right now, in one short sentence.
+ *
+ * Both engines are quiet while they work — llama.cpp downloads the GGUF and then
+ * loads it, vLLM does the same with safetensors — and the app used to show
+ * nothing but the endpoint for the whole boot. Reading the tail is cheap and
+ * turns "waiting" into "downloading the model (43%)".
+ */
+export function summarizeBootLog(logs: string | null | undefined): string | null {
+  if (!logs) {
+    return null;
+  }
+
+  const lines = logs
+    .split("\n")
+    .map((line) => stripAnsi(line).trim())
+    .filter((line) => line.length > 0);
+
+  const MATCHERS: ReadonlyArray<{
+    pattern: RegExp;
+    describe: (match: RegExpExecArray, line: string) => string;
+  }> = [
+    { pattern: /listening on https?:\/\//i, describe: () => "the server is listening now" },
+    {
+      pattern: /server_run_i: model loaded|Application startup complete|Uvicorn running on/i,
+      describe: () => "model loaded, the server is starting"
+    },
+    {
+      pattern: /load_tensors|Loading safetensors|llm_load_tensors/i,
+      describe: () => "moving the weights onto the GPU"
+    },
+    {
+      pattern: /load_model: loading model|Started server process|loading weights/i,
+      describe: () => "downloading the model and reading it"
+    },
+    {
+      pattern: /(\d{1,3}(?:\.\d+)?)\s*%/,
+      describe: (match) => `downloading the model (${match[1]}%)`
+    },
+    {
+      pattern: /Engine core initialization failed|llama_model_load: error|out of memory/i,
+      describe: (_match, line) => `container error: ${line.slice(0, 120)}`
+    }
+  ];
+
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const line = lines[index] ?? "";
+    for (const matcher of MATCHERS) {
+      const match = matcher.pattern.exec(line);
+      if (match) {
+        return matcher.describe(match, line);
+      }
+    }
+  }
+
+  return null;
+}
+
+async function readBootPhase(api: VastAiClient, instanceId: number): Promise<string | null> {
+  try {
+    return summarizeBootLog(await api.getInstanceLogs(instanceId, { tail: 80 }));
+  } catch {
+    // The log is a nicety; never let it break the wait.
+    return null;
+  }
+}
+
+/** Container logs arrive with SGR colour codes; they break every pattern. */
+function stripAnsi(value: string): string {
+  const escape = String.fromCharCode(27);
+  let result = value;
+
+  while (result.includes(escape)) {
+    const start = result.indexOf(escape);
+    const end = result.indexOf("m", start);
+    result = end === -1 ? result.slice(0, start) : result.slice(0, start) + result.slice(end + 1);
+  }
+
+  return result;
 }
 
 function sleep(ms: number): Promise<void> {
