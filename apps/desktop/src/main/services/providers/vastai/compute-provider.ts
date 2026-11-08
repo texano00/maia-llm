@@ -438,7 +438,7 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
             );
             if (served === null) {
               throw new InstanceStartTimeoutError(
-                "The model server did not become ready in time. The GPU was released — a cold start can take several minutes when the host is slow.",
+                await describeSilentServer(api, instanceId, endpoint),
                 instanceId
               );
             }
@@ -629,6 +629,34 @@ async function readBootPhase(api: VastAiClient, instanceId: number): Promise<str
     // The log is a nicety; never let it break the wait.
     return null;
   }
+}
+
+/**
+ * Why the endpoint never answered, told apart by the container's own log.
+ *
+ * "Still loading" and "listening inside the container but unreachable from
+ * here" look identical to an HTTP probe and have nothing to do with each other:
+ * the first is patience, the second is a host that does not publish the port
+ * (vast.ai shows such an instance as *running, but no web interface*). Naming
+ * the difference is what stops the next person from re-renting the same host.
+ */
+export async function describeSilentServer(
+  api: VastAiClient,
+  instanceId: number,
+  endpoint: string
+): Promise<string> {
+  let logs: string | null = null;
+  try {
+    logs = await api.getInstanceLogs(instanceId, { tail: 80 });
+  } catch {
+    logs = null;
+  }
+
+  if (logs && /listening on https?:\/\//i.test(stripAnsi(logs))) {
+    return `The model server is running inside the container, but ${endpoint} never answered from here: the host is not publishing port 8000 to the internet. The GPU was released — another host is needed.`;
+  }
+
+  return "The model server did not become ready in time. The GPU was released — a cold start can take several minutes when the host is slow.";
 }
 
 /** Container logs arrive with SGR colour codes; they break every pattern. */
