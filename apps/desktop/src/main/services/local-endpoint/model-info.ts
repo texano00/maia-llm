@@ -101,7 +101,7 @@ export function showBody(modelId: string, facts: ModelFacts, alias: string) {
     license: facts.license ?? "",
     modelfile: `# Served remotely by Maia LLM\nFROM ${modelId}\n`,
     parameters: "",
-    template: "Chat template is applied by the remote model server (vLLM).",
+    template: "Chat template is applied by the model server that runs the weights.",
     details: modelDetails(modelId, facts),
     model_info: modelInfo,
     capabilities: ["completion"],

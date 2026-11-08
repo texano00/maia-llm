@@ -255,6 +255,14 @@ export async function startLocalEndpoint(
         prompt_eval_count: result.promptTokens ?? 0,
         eval_count: result.tokens,
         eval_duration: result.durationNs
+      }),
+      nonStream: ({ body, answer, thinking }) => ({
+        ...body,
+        message: {
+          role: "assistant",
+          content: answer,
+          ...(thinking ? { thinking } : {})
+        }
       })
     });
   }
@@ -312,6 +320,11 @@ export async function startLocalEndpoint(
         prompt_eval_count: result.promptTokens ?? 0,
         eval_count: result.tokens,
         eval_duration: result.durationNs
+      }),
+      nonStream: ({ body, answer, thinking }) => ({
+        ...body,
+        response: answer,
+        ...(thinking ? { thinking } : {})
       })
     });
   }
@@ -324,6 +337,16 @@ export async function startLocalEndpoint(
     stream: boolean;
     flatten: (delta: { content: string; thinking: string }) => Record<string, unknown>;
     done: (result: CompletionResult) => Record<string, unknown>;
+    /**
+     * Body for `stream: false`. Each endpoint has its own shape: `/api/chat`
+     * answers with `message`, `/api/generate` with `response`, and mixing the
+     * two makes strict clients read an empty answer.
+     */
+    nonStream: (final: {
+      body: Record<string, unknown>;
+      answer: string;
+      thinking: string;
+    }) => Record<string, unknown>;
   }
 
   interface CompletionResult {
@@ -423,7 +446,7 @@ export async function startLocalEndpoint(
           input.response.end(`${JSON.stringify(final)}\n`);
         }
       } else {
-        const body = { ...final, message: { role: "assistant", content: answer }, response: answer };
+        const body = input.nonStream({ body: final, answer, thinking });
         sendJson(input.response, 200, body, headers);
       }
 
