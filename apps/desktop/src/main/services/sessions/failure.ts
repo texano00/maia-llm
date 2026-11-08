@@ -64,6 +64,12 @@ const MODEL_FAILURE_SIGNS: ReadonlyArray<{ pattern: RegExp; reason: string }> = 
     reason: "the GGUF file carries no usable chat template, so chat requests cannot be templated"
   },
   {
+    // A flag the image does not know: the container exits in seconds and every
+    // host would do the same, so retrying only rents more GPUs.
+    pattern: /error: invalid argument|unrecognized argument|unknown argument|invalid option/i,
+    reason: "the inference server rejected the launch arguments, so the image does not support this model reference"
+  },
+  {
     // The container's startup script was exec'd instead of run by a shell (the
     // `runtype: "args"` mistake), or its interpreter is missing from the image.
     pattern: /exec: .*vllm-gguf-plugin.*executable file not found|exec: ".*pip install.*" ?: executable file not found/i,
