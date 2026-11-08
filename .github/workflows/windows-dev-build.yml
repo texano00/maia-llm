@@ -64,6 +64,10 @@ jobs:
           Write-Host "::warning::Falling back to the npm mirror for the Electron binary"
           $env:ELECTRON_MIRROR = $env:MIRROR_ELECTRON
           $env:ELECTRON_BUILDER_BINARIES_MIRROR = $env:MIRROR_BUILDER
+          # `dist:win` downloads winCodeSign/nsis from the same CDN, so the
+          # choice has to outlive this step.
+          "ELECTRON_MIRROR=$env:MIRROR_ELECTRON" >> $env:GITHUB_ENV
+          "ELECTRON_BUILDER_BINARIES_MIRROR=$env:MIRROR_BUILDER" >> $env:GITHUB_ENV
 
           for ($attempt = 1; $attempt -le 3; $attempt++) {
             if (Install-Deps) { exit 0 }
