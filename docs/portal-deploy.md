@@ -8,7 +8,8 @@ named volume, so there is nothing else to install.
 | Piece          | Where it comes from                                                         | Runs on            |
 | -------------- | --------------------------------------------------------------------------- | ------------------ |
 | Portal image   | `ghcr.io/texano00/maia-llm:latest` (built by CI, never built on the server) | the server         |
-| TLS            | Caddy in the `tls` Compose profile, or a proxy you already run              | the server         |
+| Landing page   | `infra/landing/` (static HTML + logo)                                       | the server         |
+| Reverse proxy  | your nginx (three hostnames), or the optional Caddy profile                 | the server         |
 | Auto-update    | Watchtower, polling `ghcr.io` every N seconds                               | the server         |
 | Desktop client | reads this deployment when `MAIA_PORTAL_URL` is set                         | the user's machine |
 
@@ -134,7 +135,7 @@ services:
       - caddyconfig:/config
 
   watchtower:
-    image: containrrr/watchtower:1.7.1
+    image: nickfedor/watchtower:1.24.0 # maintained fork; see below
     restart: unless-stopped
     environment:
       WATCHTOWER_POLL_INTERVAL: ${WATCHTOWER_POLL_INTERVAL:-300}
@@ -166,24 +167,71 @@ maia() { docker compose --env-file "$PWD/infra/.env.production" -f "$PWD/infra/d
 maia ps && maia logs -f portal
 ```
 
-### TLS
+### Reverse proxy and TLS
 
-Two supported shapes, pick one:
+The portal listens on `127.0.0.1:8787` in plain HTTP. It never terminates TLS and
+does not care who fronts it: nginx, Caddy, or a cloud load balancer. Three
+hostnames share that one upstream and are separated by path:
 
-- **Bundled Caddy** (recommended): add the profile to the Compose invocation
-  (the flag belongs before the subcommand):
+| Hostname                          | Serves                  | Backend routes                                        |
+| --------------------------------- | ----------------------- | ----------------------------------------------------- |
+| `maiallm.com` / `www.maiallm.com` | static landing page     | `/var/www/maiallm` on the host                        |
+| `api.maiallm.com`                 | API for the desktop app | `/v1/...` and `/health`; `/v1/admin/*` answers 404    |
+| `pvt.maiallm.com`                 | private backoffice      | `/admin` (SPA) and `/v1/admin/*`; everything else 404 |
 
-  ```bash
-  docker compose --env-file infra/.env.production -f infra/docker-compose.prod.yml --profile tls up -d
-  ```
+The split is deliberate: the backoffice session cookie is issued by the host the
+SPA is served from, so it only ever exists on `pvt.maiallm.com`, and the public
+API host has no route to `/v1/admin`.
 
-  `infra/Caddyfile` proxies `{$MAIA_DOMAIN}` to `portal:8787`, sets HSTS and
-  basic security headers, and lets Caddy obtain and renew the certificate. Ports
-  80/443 must be free on the host.
+#### nginx (already installed)
 
-- **Your own proxy**: leave the profile off and point it at
-  `http://127.0.0.1:8787`; the portal publishes only on loopback for exactly
-  this reason.
+```bash
+sudo mkdir -p /var/www/certbot /var/www/maiallm /etc/nginx/snippets
+sudo cp infra/nginx/maiallm.conf /etc/nginx/conf.d/maiallm.conf
+sudo cp infra/nginx/maia-proxy.conf /etc/nginx/snippets/maia-proxy.conf
+sudo rsync -a --delete infra/landing/ /var/www/maiallm/
+
+# one certificate for all four names, renewed by the existing certbot timer
+sudo certbot certonly --webroot -w /var/www/certbot \
+  -d maiallm.com -d www.maiallm.com -d api.maiallm.com -d pvt.maiallm.com
+
+sudo nginx -t && sudo systemctl reload nginx
+curl -s https://api.maiallm.com/health   # {"status":"ok","storage":"sqlite"}
+curl -sI https://pvt.maiallm.com         # 302 → /admin
+```
+
+`infra/nginx/maiallm.conf` is the complete file, commented:
+
+- HTTP :80 serves only `/.well-known/acme-challenge/` and redirects everything
+  else to HTTPS
+- every proxying location shares `maia-proxy.conf`, which forwards `Host`,
+  `X-Real-IP`, `X-Forwarded-For`, `X-Forwarded-Proto` and keeps the upstream
+  connection alive
+- `/v1/installations` is rate-limited (20 requests/minute per address); it is the
+  only unauthenticated write
+- the long-form nginx config is deliberately version-tolerant: `listen 443 ssl
+http2` works on every nginx from 1.9 to 1.29 (1.25+ only warns about the
+  deprecated spelling)
+
+Because nginx is the only client that reaches `127.0.0.1:8787`, keep
+`MAIA_TRUST_PROXY` at its default (`true`) so the container logs the real client
+address instead of the proxy's.
+
+To keep the backoffice off the public internet, uncomment the `allow`/`deny`
+block in the `pvt` server block.
+
+#### Caddy instead (optional profile)
+
+If nginx is not already running, the bundled Caddy can do the same job for one
+hostname — add the profile before the subcommand:
+
+```bash
+docker compose --env-file infra/.env.production -f infra/docker-compose.prod.yml --profile tls up -d
+```
+
+`infra/Caddyfile` proxies `{$MAIA_DOMAIN}` to `portal:8787`, sets HSTS and basic
+security headers, and renews its own certificate. It is not needed when nginx
+owns ports 80/443.
 
 Admin cookies are `Secure` when `NODE_ENV=production`, so `/admin` must be
 reached over HTTPS; plain HTTP hides the login form's response.
@@ -232,25 +280,30 @@ the cost of unattended updates. If that trade is unacceptable, drop the
 `watchtower` service and update with `maia pull && maia up -d` on a schedule you
 control.
 
+The image is `nickfedor/watchtower`, the maintained fork. The original
+`containrrr/watchtower` was archived and fails against current daemons with
+`client version 1.25 is too old`; the fork is a drop-in with the same variables.
+
 ## Environment
 
-| Variable                                   | Default                     | Purpose                                                                 |
-| ------------------------------------------ | --------------------------- | ----------------------------------------------------------------------- |
-| `MAIA_IMAGE`                               | `ghcr.io/texano00/maia-llm` | Image repository                                                        |
-| `MAIA_IMAGE_TAG`                           | `latest`                    | Pin a version to freeze the deployment                                  |
-| `WATCHTOWER_POLL_INTERVAL`                 | `300`                       | Seconds between registry checks                                         |
-| `MAIA_DOMAIN`                              | `maiallm.com`               | Certificate name for the `tls` profile                                  |
-| `MAIA_PORTAL_TOKEN_SECRET`                 | —                           | HMAC key for installation access tokens; keep it stable across restarts |
-| `MAIA_ADMIN_EMAIL` / `MAIA_ADMIN_PASSWORD` | —                           | First-boot administrator account                                        |
-| `MAIA_PORTAL_HF_TOKEN` (or `HF_TOKEN`)     | —                           | Service token for building the catalogue snapshot                       |
-| `MAIA_CATALOGUE_REFRESH_HOURS`             | `6`                         | Snapshot refresh interval                                               |
-| `MAIA_CATALOGUE_LIMIT`                     | `300`                       | Models per snapshot pass                                                |
-| `MAIA_PORTAL_ACCESS_TTL_MINUTES`           | `60`                        | Installation access-token lifetime                                      |
-| `MAIA_PORTAL_REFRESH_TTL_DAYS`             | `30`                        | Installation refresh-token lifetime                                     |
-| `MAIA_ADMIN_SESSION_HOURS`                 | `12`                        | Backoffice session lifetime                                             |
-| `MAIA_TELEMETRY_RETENTION_DAYS`            | `30`                        | Diagnostics retention                                                   |
-| `MAIA_UNSTABLE_TTL_HOURS`                  | `6`                         | How long a failed GPU stays flagged                                     |
-| `MAIA_REQUIRE_CLIENT_AUTH`                 | `false`                     | Require installation tokens on ingestion routes                         |
+| Variable                                   | Default                     | Purpose                                                                           |
+| ------------------------------------------ | --------------------------- | --------------------------------------------------------------------------------- |
+| `MAIA_IMAGE`                               | `ghcr.io/texano00/maia-llm` | Image repository                                                                  |
+| `MAIA_IMAGE_TAG`                           | `latest`                    | Pin a version to freeze the deployment                                            |
+| `WATCHTOWER_POLL_INTERVAL`                 | `300`                       | Seconds between registry checks                                                   |
+| `MAIA_DOMAIN`                              | `maiallm.com`               | Certificate name for the `tls` profile                                            |
+| `MAIA_PORTAL_TOKEN_SECRET`                 | —                           | HMAC key for installation access tokens; keep it stable across restarts           |
+| `MAIA_ADMIN_EMAIL` / `MAIA_ADMIN_PASSWORD` | —                           | First-boot administrator account                                                  |
+| `MAIA_PORTAL_HF_TOKEN` (or `HF_TOKEN`)     | —                           | Service token for building the catalogue snapshot                                 |
+| `MAIA_CATALOGUE_REFRESH_HOURS`             | `6`                         | Snapshot refresh interval                                                         |
+| `MAIA_CATALOGUE_LIMIT`                     | `300`                       | Models per snapshot pass                                                          |
+| `MAIA_PORTAL_ACCESS_TTL_MINUTES`           | `60`                        | Installation access-token lifetime                                                |
+| `MAIA_PORTAL_REFRESH_TTL_DAYS`             | `30`                        | Installation refresh-token lifetime                                               |
+| `MAIA_ADMIN_SESSION_HOURS`                 | `12`                        | Backoffice session lifetime                                                       |
+| `MAIA_TELEMETRY_RETENTION_DAYS`            | `30`                        | Diagnostics retention                                                             |
+| `MAIA_UNSTABLE_TTL_HOURS`                  | `6`                         | How long a failed GPU stays flagged                                               |
+| `MAIA_REQUIRE_CLIENT_AUTH`                 | `false`                     | Require installation tokens on ingestion routes                                   |
+| `MAIA_TRUST_PROXY`                         | `true`                      | Believe `X-Forwarded-For` from the proxy; set `false` if 8787 is exposed directly |
 
 Keep `MAIA_REQUIRE_CLIENT_AUTH` off until every desktop build in the field
 enrolls itself: older clients post diagnostics without a token and would be
@@ -258,14 +311,27 @@ rejected otherwise.
 
 ## First boot
 
-1. Confirm `GET /health` returns `200` (`curl https://maiallm.com/health`).
-2. Visit `/admin` over HTTPS and sign in with the bootstrap credentials.
+1. Confirm `GET /health` returns `200` (`curl https://api.maiallm.com/health`).
+2. Open `https://pvt.maiallm.com` (it redirects to `/admin`) and sign in with the
+   bootstrap credentials.
 3. **Operations → Force refresh** builds the first model catalogue snapshot. Until
    it succeeds, `GET /v1/config/catalogue` returns `503 no_snapshot`.
 4. In **Use cases**, create the basic-mode cards in the order the desktop should
    prefer them.
-5. Set the desktop's `MAIA_PORTAL_URL=https://maiallm.com` and check that
+5. Set the desktop's `MAIA_PORTAL_URL=https://api.maiallm.com` and check that
    **Operations → Installations** lists it.
+
+### Landing page
+
+`infra/landing/` is a self-contained page (logo, motto, GitHub link, no build
+step). Deploy it after editing and whenever the logo changes:
+
+```bash
+sudo rsync -a --delete infra/landing/ /var/www/maiallm/
+```
+
+nginx serves it from `maiallm.com` and `www.maiallm.com`; it makes no API calls,
+so it keeps working while the container restarts.
 
 ## Operations
 
@@ -291,12 +357,16 @@ valid with the same secret.
 
 ## Troubleshooting
 
-| Symptom                                                   | Check                                                                                                          |
-| --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `pull access denied … ghcr.io`                            | Package is private: `docker login ghcr.io` with `read:packages`, or make it public in GitHub → Packages        |
-| Container restarts in a loop                              | `maia logs --tail 50 portal`; a missing `MAIA_PORTAL_TOKEN_SECRET` or an unwritable `/data` is the usual cause |
-| `/admin` shows the login form but signing in does nothing | You are on plain HTTP: secure cookies are dropped. Use the `tls` profile or your proxy                         |
-| `GET /v1/config/catalogue` returns `503 no_snapshot`      | No successful snapshot yet: set `MAIA_PORTAL_HF_TOKEN` and press **Operations → Force refresh**                |
-| Watchtower logs "No new images found" after a release     | The release did not publish (`Actions → portal-ci`), or this host is pinned with `MAIA_IMAGE_TAG`              |
-| Logins invalidated after a restart                        | `MAIA_PORTAL_TOKEN_SECRET` changed; restore the previous value                                                 |
-| Disk filling with logs                                    | `logging.options.max-size` in the Compose file; also `docker image prune`                                      |
+| Symptom                                                   | Check                                                                                                                |
+| --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `pull access denied … ghcr.io`                            | Package is private: `docker login ghcr.io` with `read:packages`, or make it public in GitHub → Packages              |
+| Container restarts in a loop                              | `maia logs --tail 50 portal`; a missing `MAIA_PORTAL_TOKEN_SECRET` or an unwritable `/data` is the usual cause       |
+| `/admin` shows the login form but signing in does nothing | You are on plain HTTP: secure cookies are dropped. Reach it through the HTTPS vhost                                  |
+| `api.maiallm.com/v1/admin/…` returns 404                  | By design: the backoffice API only exists on `pvt.maiallm.com`                                                       |
+| `pvt.maiallm.com/` returns 404 instead of the backoffice  | The `location = / { return 302 /admin; }` block is missing, or `pvt` reaches the container directly instead of nginx |
+| `502 Bad Gateway` on every vhost                          | `curl -s http://127.0.0.1:8787/health` on the host; if that fails the container is down (`maia ps`)                  |
+| Every log line shows `127.0.0.1` as the client            | `MAIA_TRUST_PROXY=false`, or `maia-proxy.conf` is not installed in `/etc/nginx/snippets/`                            |
+| `GET /v1/config/catalogue` returns `503 no_snapshot`      | No successful snapshot yet: set `MAIA_PORTAL_HF_TOKEN` and press **Operations → Force refresh**                      |
+| Watchtower logs "No new images found" after a release     | The release did not publish (`Actions → portal-ci`), or this host is pinned with `MAIA_IMAGE_TAG`                    |
+| Logins invalidated after a restart                        | `MAIA_PORTAL_TOKEN_SECRET` changed; restore the previous value                                                       |
+| Disk filling with logs                                    | `logging.options.max-size` in the Compose file; also `docker image prune`                                            |

@@ -42,7 +42,13 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
       ...(options.now ? { now: options.now } : {}),
     }));
 
-  const app = Fastify({ logger: process.env.NODE_ENV !== "test" });
+  const app = Fastify({
+    logger: process.env.NODE_ENV !== "test",
+    // Behind nginx (or Caddy) the socket peer is the proxy itself; without this
+    // every request in the log comes from 127.0.0.1. Set MAIA_TRUST_PROXY=false
+    // only when the port is reachable without a proxy in front of it.
+    trustProxy: process.env.MAIA_TRUST_PROXY !== "false",
+  });
 
   app.get("/health", async () => ({ status: "ok", storage: context.db.dialect }));
 
