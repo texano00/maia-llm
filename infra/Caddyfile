@@ -1,0 +1,25 @@
+# Caddy in front of the portal container (compose profile "tls").
+#
+# The domain comes from MAIA_DOMAIN; Caddy requests a Let's Encrypt certificate
+# the first time it sees the name, then renews it without a cron job. Ports 80
+# and 443 must be reachable from the internet for the HTTP-01 challenge.
+
+{$MAIA_DOMAIN:maiallm.com} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# The backoffice is a single-origin app; no third-party embeds needed.
+		X-Frame-Options "DENY"
+	}
+
+	# API, /admin bundle and /health all live in the portal process.
+	reverse_proxy portal:8787
+
+	log {
+		output stdout
+		format console
+	}
+}

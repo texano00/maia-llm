@@ -1,0 +1,99 @@
+# Production stack for maiallm.com.
+#
+#   cp infra/.env.production.example infra/.env.production   # then edit secrets
+#   docker compose --env-file infra/.env.production -f infra/docker-compose.prod.yml pull
+#   docker compose --env-file infra/.env.production -f infra/docker-compose.prod.yml up -d
+#
+# Everything is pull-only: CI builds the image, this host runs it. `latest` moves
+# on every green build, and Watchtower re-checks the registry every N seconds, so
+# a release lands here without anyone logging in. See docs/portal-deploy.md.
+
+name: maiallm
+
+services:
+  portal:
+    image: ${MAIA_IMAGE:-ghcr.io/texano00/maia-llm}:${MAIA_IMAGE_TAG:-latest}
+    container_name: maia-portal
+    restart: unless-stopped
+    # `docker compose up -d` should also pick up a moved `latest` tag.
+    pull_policy: always
+    env_file:
+      - ./.env.production
+    environment:
+      NODE_ENV: production
+      MAIA_DATABASE_FILE: /data/maia.sqlite
+      TELEMETRY_HOST: 0.0.0.0
+      TELEMETRY_PORT: "8787"
+    # Only the reverse proxy on this host may reach the API.
+    ports:
+      - "127.0.0.1:8787:8787"
+    volumes:
+      - portaldata:/data
+    # SQLite is a file: give Fastify the time to close it on SIGTERM.
+    stop_grace_period: 20s
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:8787/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
+
+  # TLS in front of the portal: Caddy obtains and renews the certificate for
+  # MAIA_DOMAIN on its own, so no certbot timers are involved.
+  # Enable it with `--profile tls`; skip it if a proxy already runs on the host.
+  caddy:
+    image: caddy:2-alpine
+    profiles: ["tls"]
+    restart: unless-stopped
+    depends_on:
+      portal:
+        condition: service_started
+    environment:
+      MAIA_DOMAIN: ${MAIA_DOMAIN:-maiallm.com}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+      - caddyconfig:/config
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  # Checks ghcr.io for a new `latest` every WATCHTOWER_POLL_INTERVAL seconds
+  # (300 = 5 minutes) and recreates the labelled containers in place.
+  watchtower:
+    image: containrrr/watchtower:1.7.1
+    restart: unless-stopped
+    environment:
+      WATCHTOWER_POLL_INTERVAL: ${WATCHTOWER_POLL_INTERVAL:-300}
+      WATCHTOWER_LABEL_ENABLE: "true"
+      WATCHTOWER_CLEANUP: "true"
+      TZ: ${TZ:-UTC}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+volumes:
+  portaldata:
+  caddydata:
+  caddyconfig:

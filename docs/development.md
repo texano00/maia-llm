@@ -15,6 +15,10 @@ cp .env.example .env
 docker compose -f infra/docker-compose.yml up -d
 ```
 
+That Compose file builds the portal from source for local use. The production
+deployment (GHCR images, TLS, unattended updates) is documented in
+[docs/portal-deploy.md](portal-deploy.md).
+
 `.env` is for the telemetry backend only. Provider credentials belong in the
 desktop app's OS-protected credential vault and must never be committed.
 

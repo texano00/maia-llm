@@ -1,78 +1,302 @@
-# Deploying the MaiaLLM portal
+# Deploying maiallm.com (web + backend)
 
-One process serves everything the desktop and the backoffice need: the
-catalogue snapshot, the configs API, installation auth, admin API and the React
-backoffice at `/admin`. It keeps its state in a single SQLite file, so a
-deployment is an image, a volume and a handful of secrets.
+One container runs the whole server side: the API the desktop talks to
+(`/v1/...`), the React backoffice at `/admin`, telemetry ingestion, the GPU
+reputation endpoints and the failure reports. The database is a SQLite file on a
+named volume, so there is nothing else to install.
 
-## Build
+| Piece          | Where it comes from                                                         | Runs on            |
+| -------------- | --------------------------------------------------------------------------- | ------------------ |
+| Portal image   | `ghcr.io/texano00/maia-llm:latest` (built by CI, never built on the server) | the server         |
+| TLS            | Caddy in the `tls` Compose profile, or a proxy you already run              | the server         |
+| Auto-update    | Watchtower, polling `ghcr.io` every N seconds                               | the server         |
+| Desktop client | reads this deployment when `MAIA_PORTAL_URL` is set                         | the user's machine |
+
+The server needs no Node install and no build step: Docker, the `infra/`
+directory from this repository, and network access to GHCR are enough.
+
+## Images and tags
+
+Every push to `main` that passes `portal-ci` publishes the same image twice:
+
+| Tag      | Example                            | Meaning                                              |
+| -------- | ---------------------------------- | ---------------------------------------------------- |
+| version  | `ghcr.io/texano00/maia-llm:0.8.3`  | immutable, taken from the root `package.json`        |
+| `latest` | `ghcr.io/texano00/maia-llm:latest` | the most recent green build; what production follows |
+
+The workflow (`.github/workflows/portal-ci.yml`) runs the type check, the
+integration tests, the server build and the backoffice build first, then logs in
+with `GITHUB_TOKEN`, builds `apps/portal/Dockerfile` for `linux/amd64`, and
+pushes both tags with `cache-from/cache-to: type=gha`. It can also be started by
+hand (**Actions → portal-ci → Run workflow**) to rebuild `latest` without a
+source change; pull requests never publish.
+
+Each image carries `org.opencontainers.image.version` and `…revision`, so the
+version actually running is one command away:
 
 ```bash
-docker build -f apps/portal/Dockerfile -t maia-portal:0.1.0 .
+docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' maia-portal
 ```
 
-The image builds the TypeScript output and the backoffice bundle in one stage and
-ships only what runtime needs. `apps/portal/public/admin` is generated, so it is
-never committed — a source checkout without that folder serves a page telling you
-to run the build.
+### Retrieving from GHCR
 
-## Run
+Public package: nothing to do, `docker pull` works anonymously.
 
 ```bash
-docker run -d --name maia-portal \
-  -p 8787:8787 \
-  -v maia-portal-data:/data \
-  -e MAIA_ADMIN_EMAIL=owner@maiallm.com \
-  -e MAIA_ADMIN_PASSWORD='<generated>' \
-  -e MAIA_PORTAL_TOKEN_SECRET='<32+ random bytes>' \
-  -e MAIA_PORTAL_HF_TOKEN='<hugging face service token>' \
-  maia-portal:0.1.0
+docker pull ghcr.io/texano00/maia-llm:latest
+docker pull ghcr.io/texano00/maia-llm:0.8.3
 ```
 
-Or through compose, which also exposes the local Postgres and MinIO used by the
-backup path:
+Private package: sign in once on the server with a GitHub token that has
+`read:packages`. Docker stores the credential in `~/.docker/config.json`, and
+Watchtower reuses it for its pulls.
 
 ```bash
-cd infra && docker compose up -d telemetry
+echo '<GHCR_READ_TOKEN>' | docker login ghcr.io -u '<GITHUB_USER>' --password-stdin
 ```
 
-### Environment
+Never put that token in the Compose file or in `infra/.env.production`.
 
-| Variable | Purpose |
-| --- | --- |
-| `MAIA_DATABASE_FILE` | SQLite file; `/data/maia.sqlite` in the image |
-| `MAIA_PORTAL_TOKEN_SECRET` | HMAC key for installation access tokens |
-| `MAIA_ADMIN_EMAIL` / `MAIA_ADMIN_PASSWORD` | Bootstrap administrator, seeded on first boot |
-| `MAIA_PORTAL_HF_TOKEN` | Service token used to build the catalogue snapshot |
-| `MAIA_CATALOGUE_REFRESH_HOURS` | Snapshot rebuild interval (default 6) |
-| `MAIA_CATALOGUE_LIMIT` | Models per snapshot pass (default 300) |
-| `MAIA_REQUIRE_CLIENT_AUTH` | Enforce installation tokens on ingestion |
-| `TELEMETRY_HOST` / `TELEMETRY_PORT` | Listen address; `0.0.0.0:8787` in the image |
+To pin an exact digest instead of a tag, `docker inspect --format '{{index .RepoDigests 0}}'`
+on a pulled image and put the `@sha256:…` form in `MAIA_IMAGE`; that is the only
+way to make a deployment fully immune to a re-push.
 
-### Health and TLS
+## Prepare the server
 
-The image declares a healthcheck against `GET /health`. Terminate TLS in front
-of it (Caddy, nginx, a load balancer) and keep `MAIA_REQUIRE_CLIENT_AUTH=false`
-until the desktop release that enrolls itself is out, so older clients keep
-sending diagnostics without a credential.
+Point the `maiallm.com` DNS record at the server and allow inbound 80/443 (TLS
+profile) or whatever port your own proxy uses. Install Docker Engine with the
+Compose plugin, clone this repository (or copy `infra/`), then create the
+environment file:
 
-Admin cookies are `Secure` when `NODE_ENV=production`, which the image sets — the
-backoffice therefore has to be reached over HTTPS.
+```bash
+cp infra/.env.production.example infra/.env.production
+openssl rand -base64 48
+```
 
-## First boot checklist
+Set the generated value as `MAIA_PORTAL_TOKEN_SECRET` and replace
+`MAIA_ADMIN_PASSWORD` with a strong password. `MAIA_ADMIN_EMAIL` and
+`MAIA_ADMIN_PASSWORD` seed the first administrator only — later changes go
+through the backoffice. `MAIA_PORTAL_HF_TOKEN` is a Hugging Face service token
+used to build the catalogue snapshot; without it a refresh cannot complete.
 
-1. `GET /health` answers `200`.
-2. `GET /admin` serves the sign-in page; sign in with the bootstrap credentials.
-3. **Operations → Force refresh** builds the first snapshot (needs the HF token).
-   Until it succeeds, `GET /v1/config/catalogue` answers `503 no_snapshot`.
-4. **Use cases** → create the basic-mode cards, in the order the desktop should
+Keep `infra/.env.production` private and backed up. Compose reads it twice:
+`env_file:` gives the variables to the container, and the `--env-file` flag in
+the commands below resolves `${MAIA_IMAGE_TAG}`, `${WATCHTOWER_POLL_INTERVAL}`
+and `${MAIA_DOMAIN}` in the Compose file itself.
+
+## Start the stack
+
+`infra/docker-compose.prod.yml`, with the logging blocks elided (the file in the
+repository is authoritative and is what you should edit):
+
+```yaml
+name: maiallm
+
+services:
+  portal:
+    image: ${MAIA_IMAGE:-ghcr.io/texano00/maia-llm}:${MAIA_IMAGE_TAG:-latest}
+    container_name: maia-portal
+    restart: unless-stopped
+    pull_policy: always # `up -d` also picks up a moved latest
+    env_file: [./.env.production]
+    environment:
+      NODE_ENV: production
+      MAIA_DATABASE_FILE: /data/maia.sqlite
+      TELEMETRY_HOST: 0.0.0.0
+      TELEMETRY_PORT: "8787"
+    ports: ["127.0.0.1:8787:8787"] # reachable only from this host
+    volumes: [portaldata:/data]
+    stop_grace_period: 20s # let Fastify close the SQLite file
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:8787/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
+
+  caddy: # `--profile tls`
+    image: caddy:2-alpine
+    profiles: ["tls"]
+    restart: unless-stopped
+    environment: { MAIA_DOMAIN: "${MAIA_DOMAIN:-maiallm.com}" }
+    ports: ["80:80", "443:443", "443:443/udp"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+      - caddyconfig:/config
+
+  watchtower:
+    image: containrrr/watchtower:1.7.1
+    restart: unless-stopped
+    environment:
+      WATCHTOWER_POLL_INTERVAL: ${WATCHTOWER_POLL_INTERVAL:-300}
+      WATCHTOWER_LABEL_ENABLE: "true"
+      WATCHTOWER_CLEANUP: "true"
+    volumes: ["/var/run/docker.sock:/var/run/docker.sock"]
+
+volumes:
+  portaldata:
+  caddydata:
+  caddyconfig:
+```
+
+`infra/docker-compose.yml` is the local development twin: it builds from source
+instead of pulling, and publishes 8787 on every interface.
+
+Start it:
+
+```bash
+docker compose --env-file infra/.env.production -f infra/docker-compose.prod.yml pull
+docker compose --env-file infra/.env.production -f infra/docker-compose.prod.yml up -d
+docker compose --env-file infra/.env.production -f infra/docker-compose.prod.yml ps
+```
+
+Typing that every time is tedious; a shell function keeps it short:
+
+```bash
+maia() { docker compose --env-file "$PWD/infra/.env.production" -f "$PWD/infra/docker-compose.prod.yml" "$@"; }
+maia ps && maia logs -f portal
+```
+
+### TLS
+
+Two supported shapes, pick one:
+
+- **Bundled Caddy** (recommended): add the profile to the Compose invocation
+  (the flag belongs before the subcommand):
+
+  ```bash
+  docker compose --env-file infra/.env.production -f infra/docker-compose.prod.yml --profile tls up -d
+  ```
+
+  `infra/Caddyfile` proxies `{$MAIA_DOMAIN}` to `portal:8787`, sets HSTS and
+  basic security headers, and lets Caddy obtain and renew the certificate. Ports
+  80/443 must be free on the host.
+
+- **Your own proxy**: leave the profile off and point it at
+  `http://127.0.0.1:8787`; the portal publishes only on loopback for exactly
+  this reason.
+
+Admin cookies are `Secure` when `NODE_ENV=production`, so `/admin` must be
+reached over HTTPS; plain HTTP hides the login form's response.
+
+## Automatic image updates
+
+Watchtower polls GHCR every `WATCHTOWER_POLL_INTERVAL` seconds — the default in
+`infra/.env.production` is `300` (5 minutes); use `900` for a quarter of an hour,
+`60` while you are testing a release. When the digest behind `latest` changes it
+pulls the new image, recreates `maia-portal` in place (the `/data` volume
+survives), waits for the healthcheck and removes the superseded image
+(`WATCHTOWER_CLEANUP`). Only containers carrying
+`com.centurylinklabs.watchtower.enable: "true"` are touched, which is why
+Postgres/MinIO from the development file are never restarted.
+
+```bash
+docker logs --tail 20 watchtower     # "Found new image" → "Stopping/Starting"
+```
+
+A release therefore has to land on the server only once — no SSH needed:
+
+```
+push to main → portal-ci (verify) → publish :<version> and :latest
+             → watchtower (≤ N minutes) → container recreated
+```
+
+To skip the wait, run `maia pull && maia up -d`; to freeze the deployment, set
+`MAIA_IMAGE_TAG=0.8.3` in `infra/.env.production` (Watchtower then has nothing to
+do, because that tag never moves).
+
+### Rollback
+
+```bash
+MAIA_IMAGE_TAG=0.8.2 maia up -d       # one-off, back to a known version
+docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' maia-portal
+```
+
+Leave the tag pinned until the next release is verified; SQLite migrations are
+additive, so a rollback within the same schema generation reads the same file.
+Restore the volume only if a release changed the schema in a way the older image
+cannot read.
+
+Watchtower needs `/var/run/docker.sock`, which is root-equivalent on the host.
+Keep this host and its Compose file restricted to trusted administrators; that is
+the cost of unattended updates. If that trade is unacceptable, drop the
+`watchtower` service and update with `maia pull && maia up -d` on a schedule you
+control.
+
+## Environment
+
+| Variable                                   | Default                     | Purpose                                                                 |
+| ------------------------------------------ | --------------------------- | ----------------------------------------------------------------------- |
+| `MAIA_IMAGE`                               | `ghcr.io/texano00/maia-llm` | Image repository                                                        |
+| `MAIA_IMAGE_TAG`                           | `latest`                    | Pin a version to freeze the deployment                                  |
+| `WATCHTOWER_POLL_INTERVAL`                 | `300`                       | Seconds between registry checks                                         |
+| `MAIA_DOMAIN`                              | `maiallm.com`               | Certificate name for the `tls` profile                                  |
+| `MAIA_PORTAL_TOKEN_SECRET`                 | —                           | HMAC key for installation access tokens; keep it stable across restarts |
+| `MAIA_ADMIN_EMAIL` / `MAIA_ADMIN_PASSWORD` | —                           | First-boot administrator account                                        |
+| `MAIA_PORTAL_HF_TOKEN` (or `HF_TOKEN`)     | —                           | Service token for building the catalogue snapshot                       |
+| `MAIA_CATALOGUE_REFRESH_HOURS`             | `6`                         | Snapshot refresh interval                                               |
+| `MAIA_CATALOGUE_LIMIT`                     | `300`                       | Models per snapshot pass                                                |
+| `MAIA_PORTAL_ACCESS_TTL_MINUTES`           | `60`                        | Installation access-token lifetime                                      |
+| `MAIA_PORTAL_REFRESH_TTL_DAYS`             | `30`                        | Installation refresh-token lifetime                                     |
+| `MAIA_ADMIN_SESSION_HOURS`                 | `12`                        | Backoffice session lifetime                                             |
+| `MAIA_TELEMETRY_RETENTION_DAYS`            | `30`                        | Diagnostics retention                                                   |
+| `MAIA_UNSTABLE_TTL_HOURS`                  | `6`                         | How long a failed GPU stays flagged                                     |
+| `MAIA_REQUIRE_CLIENT_AUTH`                 | `false`                     | Require installation tokens on ingestion routes                         |
+
+Keep `MAIA_REQUIRE_CLIENT_AUTH` off until every desktop build in the field
+enrolls itself: older clients post diagnostics without a token and would be
+rejected otherwise.
+
+## First boot
+
+1. Confirm `GET /health` returns `200` (`curl https://maiallm.com/health`).
+2. Visit `/admin` over HTTPS and sign in with the bootstrap credentials.
+3. **Operations → Force refresh** builds the first model catalogue snapshot. Until
+   it succeeds, `GET /v1/config/catalogue` returns `503 no_snapshot`.
+4. In **Use cases**, create the basic-mode cards in the order the desktop should
    prefer them.
-5. Point a desktop at it with `MAIA_PORTAL_URL=https://<host>` and check that
+5. Set the desktop's `MAIA_PORTAL_URL=https://maiallm.com` and check that
    **Operations → Installations** lists it.
+
+## Operations
+
+```bash
+maia ps                                  # state + health of portal, caddy, watchtower
+maia logs -f --tail 100 portal           # structured JSON access/error log
+maia restart portal                      # planned restart, volume untouched
+docker inspect maia-portal --format '{{ json .State.Health.Status }}'
+```
 
 ## Backups
 
-The whole state is the SQLite file. Stop the container, copy `/data/maia.sqlite`
-(or take a consistent snapshot with `sqlite3 maia.sqlite ".backup …"`), and keep
-the deployment secret alongside it: tokens in an old file are only valid with the
-same `MAIA_PORTAL_TOKEN_SECRET`.
+The named `portaldata` volume contains the SQLite database. Stop the stack before
+copying it, or take a consistent copy while it runs:
+
+```bash
+docker exec maia-portal node --no-warnings -e "const {DatabaseSync}=require('node:sqlite');new DatabaseSync('/data/maia.sqlite').exec(\"VACUUM INTO '/data/backup.sqlite'\")"
+docker cp maia-portal:/data/backup.sqlite ./maia-$(date +%F).sqlite
+```
+
+Keep `MAIA_PORTAL_TOKEN_SECRET` with the backup: existing access tokens are only
+valid with the same secret.
+
+## Troubleshooting
+
+| Symptom                                                   | Check                                                                                                          |
+| --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `pull access denied … ghcr.io`                            | Package is private: `docker login ghcr.io` with `read:packages`, or make it public in GitHub → Packages        |
+| Container restarts in a loop                              | `maia logs --tail 50 portal`; a missing `MAIA_PORTAL_TOKEN_SECRET` or an unwritable `/data` is the usual cause |
+| `/admin` shows the login form but signing in does nothing | You are on plain HTTP: secure cookies are dropped. Use the `tls` profile or your proxy                         |
+| `GET /v1/config/catalogue` returns `503 no_snapshot`      | No successful snapshot yet: set `MAIA_PORTAL_HF_TOKEN` and press **Operations → Force refresh**                |
+| Watchtower logs "No new images found" after a release     | The release did not publish (`Actions → portal-ci`), or this host is pinned with `MAIA_IMAGE_TAG`              |
+| Logins invalidated after a restart                        | `MAIA_PORTAL_TOKEN_SECRET` changed; restore the previous value                                                 |
+| Disk filling with logs                                    | `logging.options.max-size` in the Compose file; also `docker image prune`                                      |
