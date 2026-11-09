@@ -1,8 +1,11 @@
 # Production stack for maiallm.com.
 #
-#   cp infra/.env.production.example infra/.env.production   # then edit secrets
-#   docker compose --env-file infra/.env.production -f infra/docker-compose.prod.yml pull
-#   docker compose --env-file infra/.env.production -f infra/docker-compose.prod.yml up -d
+#   cp infra/.env.production.example infra/.env   # then edit secrets
+#   docker compose -f infra/docker-compose.prod.yml pull
+#   docker compose -f infra/docker-compose.prod.yml up -d
+#
+# Compose loads infra/.env for ${VARS} substitution and hands the same file to
+# the container through env_file.
 #
 # Everything is pull-only: CI builds the image, this host runs it. `latest` moves
 # on every green build, and Watchtower re-checks the registry every N seconds, so
@@ -18,7 +21,7 @@ services:
     # `docker compose up -d` should also pick up a moved `latest` tag.
     pull_policy: always
     env_file:
-      - ./.env.production
+      - ./.env
     environment:
       NODE_ENV: production
       MAIA_DATABASE_FILE: /data/maia.sqlite
@@ -49,32 +52,6 @@ services:
     labels:
       com.centurylinklabs.watchtower.enable: "true"
 
-  # TLS in front of the portal: Caddy obtains and renews the certificate for
-  # MAIA_DOMAIN on its own, so no certbot timers are involved.
-  # Enable it with `--profile tls`; skip it if a proxy already runs on the host.
-  caddy:
-    image: caddy:2-alpine
-    profiles: ["tls"]
-    restart: unless-stopped
-    depends_on:
-      portal:
-        condition: service_started
-    environment:
-      MAIA_DOMAIN: ${MAIA_DOMAIN:-maiallm.com}
-    ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddydata:/data
-      - caddyconfig:/config
-    logging:
-      driver: json-file
-      options:
-        max-size: 10m
-        max-file: "3"
-
   # Checks ghcr.io for a new `latest` every WATCHTOWER_POLL_INTERVAL seconds
   # (300 = 5 minutes) and recreates the labelled containers in place.
   # Maintained fork: the original containrrr image is archived and refuses to
@@ -97,5 +74,3 @@ services:
 
 volumes:
   portaldata:
-  caddydata:
-  caddyconfig:

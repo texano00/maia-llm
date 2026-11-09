@@ -9,7 +9,7 @@ named volume, so there is nothing else to install.
 | -------------- | --------------------------------------------------------------------------- | ------------------ |
 | Portal image   | `ghcr.io/texano00/maia-llm:latest` (built by CI, never built on the server) | the server         |
 | Landing page   | `infra/landing/` (static HTML + logo)                                       | the server         |
-| Reverse proxy  | your nginx (three hostnames), or the optional Caddy profile                 | the server         |
+| Reverse proxy  | your nginx (port 80, three hostnames) behind a Cloudflare Tunnel            | the server         |
 | Auto-update    | Watchtower, polling `ghcr.io` every N seconds                               | the server         |
 | Desktop client | reads this deployment when `MAIA_PORTAL_URL` is set                         | the user's machine |
 
@@ -56,7 +56,7 @@ Watchtower reuses it for its pulls.
 echo '<GHCR_READ_TOKEN>' | docker login ghcr.io -u '<GITHUB_USER>' --password-stdin
 ```
 
-Never put that token in the Compose file or in `infra/.env.production`.
+Never put that token in the Compose file or in `infra/.env`.
 
 To pin an exact digest instead of a tag, `docker inspect --format '{{index .RepoDigests 0}}'`
 on a pulled image and put the `@sha256:…` form in `MAIA_IMAGE`; that is the only
@@ -70,7 +70,7 @@ Compose plugin, clone this repository (or copy `infra/`), then create the
 environment file:
 
 ```bash
-cp infra/.env.production.example infra/.env.production
+cp infra/.env.production.example infra/.env
 openssl rand -base64 48
 ```
 
@@ -80,10 +80,10 @@ Set the generated value as `MAIA_PORTAL_TOKEN_SECRET` and replace
 through the backoffice. `MAIA_PORTAL_HF_TOKEN` is a Hugging Face service token
 used to build the catalogue snapshot; without it a refresh cannot complete.
 
-Keep `infra/.env.production` private and backed up. Compose reads it twice:
-`env_file:` gives the variables to the container, and the `--env-file` flag in
-the commands below resolves `${MAIA_IMAGE_TAG}`, `${WATCHTOWER_POLL_INTERVAL}`
-and `${MAIA_DOMAIN}` in the Compose file itself.
+Keep `infra/.env` private and backed up. Compose reads it twice: it is loaded
+automatically for `${MAIA_IMAGE_TAG}`, `${WATCHTOWER_POLL_INTERVAL}` and
+`${MAIA_DOMAIN}` substitution, and `env_file:` hands the same values to the
+container.
 
 ## Start the stack
 
@@ -99,7 +99,7 @@ services:
     container_name: maia-portal
     restart: unless-stopped
     pull_policy: always # `up -d` also picks up a moved latest
-    env_file: [./.env.production]
+    env_file: [./.env]
     environment:
       NODE_ENV: production
       MAIA_DATABASE_FILE: /data/maia.sqlite
@@ -123,17 +123,6 @@ services:
     labels:
       com.centurylinklabs.watchtower.enable: "true"
 
-  caddy: # `--profile tls`
-    image: caddy:2-alpine
-    profiles: ["tls"]
-    restart: unless-stopped
-    environment: { MAIA_DOMAIN: "${MAIA_DOMAIN:-maiallm.com}" }
-    ports: ["80:80", "443:443", "443:443/udp"]
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddydata:/data
-      - caddyconfig:/config
-
   watchtower:
     image: nickfedor/watchtower:1.24.0 # maintained fork; see below
     restart: unless-stopped
@@ -145,8 +134,6 @@ services:
 
 volumes:
   portaldata:
-  caddydata:
-  caddyconfig:
 ```
 
 `infra/docker-compose.yml` is the local development twin: it builds from source
@@ -155,23 +142,26 @@ instead of pulling, and publishes 8787 on every interface.
 Start it:
 
 ```bash
-docker compose --env-file infra/.env.production -f infra/docker-compose.prod.yml pull
-docker compose --env-file infra/.env.production -f infra/docker-compose.prod.yml up -d
-docker compose --env-file infra/.env.production -f infra/docker-compose.prod.yml ps
+docker compose -f infra/docker-compose.prod.yml pull
+docker compose -f infra/docker-compose.prod.yml up -d
+docker compose -f infra/docker-compose.prod.yml ps
 ```
 
 Typing that every time is tedious; a shell function keeps it short:
 
 ```bash
-maia() { docker compose --env-file "$PWD/infra/.env.production" -f "$PWD/infra/docker-compose.prod.yml" "$@"; }
+maia() { docker compose -f "$PWD/infra/docker-compose.prod.yml" "$@"; }
 maia ps && maia logs -f portal
 ```
 
-### Reverse proxy and TLS
+### Reverse proxy (nginx behind a Cloudflare Tunnel)
 
-The portal listens on `127.0.0.1:8787` in plain HTTP. It never terminates TLS and
-does not care who fronts it: nginx, Caddy, or a cloud load balancer. Three
-hostnames share that one upstream and are separated by path:
+The portal listens on `127.0.0.1:8787` in plain HTTP and never terminates TLS.
+Cloudflare does that, and `cloudflared` forwards to nginx on port 80, so **nginx
+needs no certificate, no ACME challenge and no redirect to HTTPS** — a redirect
+there would fight the tunnel.
+
+Three hostnames share one upstream and are separated by path:
 
 | Hostname                          | Serves                  | Backend routes                                        |
 | --------------------------------- | ----------------------- | ----------------------------------------------------- |
@@ -183,63 +173,76 @@ The split is deliberate: the backoffice session cookie is issued by the host the
 SPA is served from, so it only ever exists on `pvt.maiallm.com`, and the public
 API host has no route to `/v1/admin`.
 
-#### nginx (already installed)
+#### Install
 
 ```bash
-sudo mkdir -p /var/www/certbot /var/www/maiallm /etc/nginx/snippets
+sudo mkdir -p /var/www/maiallm /etc/nginx/snippets
 sudo cp infra/nginx/maiallm.conf /etc/nginx/conf.d/maiallm.conf
 sudo cp infra/nginx/maia-proxy.conf /etc/nginx/snippets/maia-proxy.conf
 sudo rsync -a --delete infra/landing/ /var/www/maiallm/
-
-# one certificate for all four names, renewed by the existing certbot timer
-sudo certbot certonly --webroot -w /var/www/certbot \
-  -d maiallm.com -d www.maiallm.com -d api.maiallm.com -d pvt.maiallm.com
-
 sudo nginx -t && sudo systemctl reload nginx
+```
+
+Point the tunnel's ingress at the same port for each public hostname — the
+`Host` header is preserved, which is what lets nginx pick the right block:
+
+```yaml
+# ~/.cloudflared/config.yml (or the dashboard's public hostnames)
+ingress:
+  - hostname: maiallm.com
+    service: http://localhost:80
+  - hostname: www.maiallm.com # needed for the www block below
+    service: http://localhost:80
+  - hostname: api.maiallm.com
+    service: http://localhost:80
+  - hostname: pvt.maiallm.com
+    service: http://localhost:80
+  - service: http_status:404
+```
+
+Enable **SSL/TLS → Edge Certificates → Always Use HTTPS** on the zone. The
+origin deliberately does not redirect: without this switch `http://maiallm.com`
+answers 200 over plain HTTP, and a backoffice visit over HTTP silently loses its
+`Secure` session cookie.
+
+Then verify through the tunnel, not on the origin:
+
+```bash
 curl -s https://api.maiallm.com/health   # {"status":"ok","storage":"sqlite"}
 curl -sI https://pvt.maiallm.com         # 302 → /admin
 ```
 
-`infra/nginx/maiallm.conf` is the complete file, commented:
+What the config does:
 
-- HTTP :80 serves only `/.well-known/acme-challenge/` and redirects everything
-  else to HTTPS
-- every proxying location shares `maia-proxy.conf`, which forwards `Host`,
-  `X-Real-IP`, `X-Forwarded-For`, `X-Forwarded-Proto` and keeps the upstream
-  connection alive
+- every hostname listens on `:80` only; nothing else is exposed
+- `maia-proxy.conf` forwards `Host`, `X-Real-IP`, `X-Forwarded-For`,
+  `X-Forwarded-Proto` and keeps the upstream connection alive. Client address
+  and scheme come from `CF-Connecting-IP` and `X-Forwarded-Proto`, with the
+  socket values as fallback for a direct `curl` on the host
 - `/v1/installations` is rate-limited (20 requests/minute per address); it is the
   only unauthenticated write
-- the long-form nginx config is deliberately version-tolerant: `listen 443 ssl
-http2` works on every nginx from 1.9 to 1.29 (1.25+ only warns about the
-  deprecated spelling)
+- HSTS, TLS versions and the edge certificate belong to the Cloudflare zone
+  (SSL/TLS → Edge Certificates), not to this file
 
 Because nginx is the only client that reaches `127.0.0.1:8787`, keep
 `MAIA_TRUST_PROXY` at its default (`true`) so the container logs the real client
-address instead of the proxy's.
+address instead of the tunnel's.
 
-To keep the backoffice off the public internet, uncomment the `allow`/`deny`
-block in the `pvt` server block.
+#### Keeping the backoffice private
 
-#### Caddy instead (optional profile)
+IP allow-lists do not work behind the tunnel — every request arrives from
+`cloudflared`. Use a **Cloudflare Access** policy on `pvt.maiallm.com` instead
+(Zero Trust → Access → Applications). The `allow`/`deny` block in the file stays
+commented for the case where nginx is reached directly, without the tunnel.
 
-If nginx is not already running, the bundled Caddy can do the same job for one
-hostname — add the profile before the subcommand:
-
-```bash
-docker compose --env-file infra/.env.production -f infra/docker-compose.prod.yml --profile tls up -d
-```
-
-`infra/Caddyfile` proxies `{$MAIA_DOMAIN}` to `portal:8787`, sets HSTS and basic
-security headers, and renews its own certificate. It is not needed when nginx
-owns ports 80/443.
-
-Admin cookies are `Secure` when `NODE_ENV=production`, so `/admin` must be
-reached over HTTPS; plain HTTP hides the login form's response.
+Admin cookies are `Secure` when `NODE_ENV=production`. Through the tunnel the
+browser is always on HTTPS, so this works; opening the origin over plain HTTP
+directly (`http://<server-ip>/admin`) will silently drop the cookie.
 
 ## Automatic image updates
 
 Watchtower polls GHCR every `WATCHTOWER_POLL_INTERVAL` seconds — the default in
-`infra/.env.production` is `300` (5 minutes); use `900` for a quarter of an hour,
+`infra/.env` is `300` (5 minutes); use `900` for a quarter of an hour,
 `60` while you are testing a release. When the digest behind `latest` changes it
 pulls the new image, recreates `maia-portal` in place (the `/data` volume
 survives), waits for the healthcheck and removes the superseded image
@@ -259,7 +262,7 @@ push to main → portal-ci (verify) → publish :<version> and :latest
 ```
 
 To skip the wait, run `maia pull && maia up -d`; to freeze the deployment, set
-`MAIA_IMAGE_TAG=0.8.3` in `infra/.env.production` (Watchtower then has nothing to
+`MAIA_IMAGE_TAG=0.8.3` in `infra/.env` (Watchtower then has nothing to
 do, because that tag never moves).
 
 ### Rollback
@@ -336,7 +339,7 @@ so it keeps working while the container restarts.
 ## Operations
 
 ```bash
-maia ps                                  # state + health of portal, caddy, watchtower
+maia ps                                  # state + health of portal and watchtower
 maia logs -f --tail 100 portal           # structured JSON access/error log
 maia restart portal                      # planned restart, volume untouched
 docker inspect maia-portal --format '{{ json .State.Health.Status }}'
@@ -361,7 +364,13 @@ valid with the same secret.
 | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
 | `pull access denied … ghcr.io`                            | Package is private: `docker login ghcr.io` with `read:packages`, or make it public in GitHub → Packages              |
 | Container restarts in a loop                              | `maia logs --tail 50 portal`; a missing `MAIA_PORTAL_TOKEN_SECRET` or an unwritable `/data` is the usual cause       |
-| `/admin` shows the login form but signing in does nothing | You are on plain HTTP: secure cookies are dropped. Reach it through the HTTPS vhost                                  |
+| `/admin` shows the login form but signing in does nothing | You opened the origin over plain HTTP instead of the tunnel hostname: `Secure` cookies are dropped                   |
+| `www.maiallm.com` does not resolve                        | Add the proxied DNS record and a tunnel ingress entry for `www`, or a Cloudflare redirect rule `www → apex`          |
+| `http://maiallm.com` answers 200 instead of redirecting   | Cloudflare **Always Use HTTPS** is off; the origin must not redirect behind a tunnel                                 |
+| Security headers missing on one hostname only             | Two vhosts claim that name; `sudo nginx -T \| grep -n "server_name maiallm.com"` and keep one                        |
+| Cloudflare answers `502` / `1033`                         | The tunnel cannot reach nginx: `sudo systemctl status cloudflared` and `curl -I http://localhost/` on the host       |
+| Cloudflare `404` for a hostname that works on the origin  | That public hostname is missing from the tunnel ingress, or `server_name` in the nginx block does not match it       |
+| `redirect loop` after adding the tunnel                   | Something still forces HTTPS at the origin; the nginx config must not redirect on port 80                            |
 | `api.maiallm.com/v1/admin/…` returns 404                  | By design: the backoffice API only exists on `pvt.maiallm.com`                                                       |
 | `pvt.maiallm.com/` returns 404 instead of the backoffice  | The `location = / { return 302 /admin; }` block is missing, or `pvt` reaches the container directly instead of nginx |
 | `502 Bad Gateway` on every vhost                          | `curl -s http://127.0.0.1:8787/health` on the host; if that fails the container is down (`maia ps`)                  |
