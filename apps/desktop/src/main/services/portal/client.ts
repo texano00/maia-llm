@@ -101,6 +101,11 @@ export interface PortalClient {
   configured(): boolean;
   catalogue(): Promise<PortalCatalogue>;
   useCases(): Promise<PortalUseCase[]>;
+  /**
+   * The installation credential, enrolling on first use. Telemetry posts the
+   * same token so `MAIA_REQUIRE_CLIENT_AUTH` does not silence an install.
+   */
+  accessToken(): Promise<string>;
 }
 
 const REFRESH_SKEW_MS = 60_000;
@@ -280,6 +285,8 @@ export function createPortalClient(options: PortalClientOptions): PortalClient {
 
   return {
     configured: () => Boolean(options.baseUrl()?.trim()),
+
+    accessToken,
 
     catalogue: () => json<PortalCatalogue>("/v1/config/catalogue"),
 

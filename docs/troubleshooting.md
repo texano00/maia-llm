@@ -16,8 +16,9 @@ Start the telemetry API locally and point the app at it:
 TELEMETRY_HOST=0.0.0.0 npm run -w @maia/portal dev
 ```
 
-In the app: **Settings → Telemetry and diagnostics host** (default
-`http://localhost:8787`). The terminal then echoes every line as
+In the app: **Settings → Telemetry and diagnostics host** (the hosted default is
+`https://api.maiallm.com`; use `http://localhost:8787` for a local portal). The
+terminal then echoes every line as
 `[diag] <time> <level> <message> {context}` and
 `GET /v1/diagnostics/logs?limit=200` returns the buffered events, so a session can
 be reviewed after the fact. `MAIA_DIAGNOSTIC_LOG_URL` overrides the stored value

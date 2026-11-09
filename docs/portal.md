@@ -96,5 +96,9 @@ instead of listing the Hub:
 - `GET /v1/config/use-cases` powers basic mode; the desktop picks the first
   curated entry the snapshot marks supported and explains a card when none is.
 
-The variable is **empty by default**, so a release keeps working before the
-hosted portal exists.
+The variable defaults to the hosted backend, `https://api.maiallm.com`, so a
+shipped build reads the shared snapshot out of the box; `MAIA_PORTAL_URL=`
+(empty) falls back to the Hub listing and
+`MAIA_PORTAL_URL=http://127.0.0.1:8791` points a dev build at a local portal.
+Telemetry and GPU reputation default to the same host, and their overrides
+(`MAIA_DIAGNOSTIC_LOG_URL`, `MAIA_REPUTATION_URL`) outrank the stored setting.

@@ -15,6 +15,11 @@ export interface DiagnosticForwarderOptions {
   flushIntervalMs?: number;
   timeoutMs?: number;
   fetchImpl?: typeof fetch;
+  /**
+   * Extra headers per flush, used to attach the installation credential when
+   * the backend requires authenticated clients. Never throws into the log path.
+   */
+  getHeaders?: (() => Promise<Record<string, string>>) | undefined;
   onFailure?: ((error: unknown) => void) | undefined;
 }
 
@@ -44,6 +49,7 @@ export class DiagnosticForwarder extends Writable {
   >;
   private readonly fetchImpl: typeof fetch;
   private readonly onFailure: ((error: unknown) => void) | undefined;
+  private readonly getHeaders: (() => Promise<Record<string, string>>) | undefined;
   private buffer: DiagnosticEvent[] = [];
   private timer: NodeJS.Timeout | null = null;
   private sending = false;
@@ -63,6 +69,7 @@ export class DiagnosticForwarder extends Writable {
     this.url = options.url;
     this.fetchImpl = options.fetchImpl ?? ((...args) => fetch(...args));
     this.onFailure = options.onFailure;
+    this.getHeaders = options.getHeaders;
 
     this.timer = setInterval(() => {
       void this.flush();
@@ -97,6 +104,22 @@ export class DiagnosticForwarder extends Writable {
     if (url !== this.url) {
       this.url = url;
       this.buffer = [];
+    }
+  }
+
+  /**
+   * A missing or stale credential must cost the batch, not the application:
+   * telemetry is optional and the server may not require clients at all.
+   */
+  private async authorization(): Promise<Record<string, string>> {
+    if (!this.getHeaders) {
+      return {};
+    }
+
+    try {
+      return await this.getHeaders();
+    } catch {
+      return {};
     }
   }
 
@@ -144,9 +167,14 @@ export class DiagnosticForwarder extends Writable {
     this.sending = true;
 
     try {
+      const headers: Record<string, string> = {
+        "content-type": "application/json",
+        ...(await this.authorization())
+      };
+
       const response = await this.fetchImpl(this.url, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers,
         body: JSON.stringify({
           app: "maia-llm",
           version: this.options.appVersion,

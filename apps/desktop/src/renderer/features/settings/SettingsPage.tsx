@@ -542,8 +542,9 @@ export function SettingsPage() {
         <div>
           <h2>Telemetry and diagnostics host</h2>
           <p className="lede">
-            While testing, Maia mirrors its log to this host so the app can be observed live. Logs
-            never include prompts, responses, or credentials.
+            Maia mirrors its log to the MaiaLLM telemetry service on the configured host, so a
+            packaged build can be observed live. Logs never include prompts, responses, or
+            credentials. Point this at your own backend when you self-host one.
           </p>
           <label className="field">
             <span>Host</span>

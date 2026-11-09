@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DEFAULT_API_BASE_URL } from "./ipc";
 
 /** A machine is either known-good, known-bad, or has no history yet. */
 export const gpuStatusSchema = z.enum(["good", "unstable", "unknown"]);
@@ -47,4 +48,4 @@ export type GpuList = z.infer<typeof gpuListSchema>;
 export type GpuUpsert = z.infer<typeof gpuUpsertSchema>;
 
 /** Default base URL of the shared service that owns this data. */
-export const DEFAULT_REPUTATION_URL = "http://localhost:8787";
+export const DEFAULT_REPUTATION_URL = DEFAULT_API_BASE_URL;

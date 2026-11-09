@@ -137,9 +137,11 @@ TELEMETRY_HOST=0.0.0.0 npm run -w @maia/portal dev
 ```
 
 Then open **Settings → Telemetry and diagnostics host** in the app and confirm the
-host (default `http://localhost:8787`). Every app log line is mirrored there, so
-any Windows install can be observed live without editing environment variables.
-`MAIA_DIAGNOSTIC_LOG_URL` still overrides the stored value at startup.
+host (default `https://api.maiallm.com`, the hosted backend; use
+`http://localhost:8787` when running `npm run -w @maia/portal dev`). Every app
+log line is mirrored there, so any Windows install can be observed live without
+editing environment variables. `MAIA_DIAGNOSTIC_LOG_URL` still overrides the
+stored value at startup.
 
 The endpoint echoes events as `[diag] <time> <level> <message>`, keeps the last
 1000 lines in memory, and returns them from
@@ -148,9 +150,9 @@ likewise overrides the update feed when testing a mirror.
 
 ### Pointing the desktop at a local portal
 
-The catalogue ships from the portal (see `docs/portal.md`), and the app falls
-back to listing the Hub when `MAIA_PORTAL_URL` is empty — which is the default
-until the hosted portal is live. To develop against a local one:
+The catalogue ships from the portal (see `docs/portal.md`), and the app defaults
+to the hosted one at `https://api.maiallm.com`; `MAIA_PORTAL_URL=` (empty) falls
+back to listing the Hub. To develop against a local one:
 
 ```bash
 # terminal 1: the portal (seeds an admin and refreshes on boot)

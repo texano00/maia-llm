@@ -321,8 +321,11 @@ rejected otherwise.
    it succeeds, `GET /v1/config/catalogue` returns `503 no_snapshot`.
 4. In **Use cases**, create the basic-mode cards in the order the desktop should
    prefer them.
-5. Set the desktop's `MAIA_PORTAL_URL=https://api.maiallm.com` and check that
-   **Operations → Installations** lists it.
+5. A released desktop build already points at `https://api.maiallm.com`
+   (catalogue, telemetry and GPU reputation), so it is enough to check that
+   **Operations → Installations** lists the new row; `MAIA_PORTAL_URL`,
+   `MAIA_DIAGNOSTIC_LOG_URL` and `MAIA_REPUTATION_URL` exist only to override
+   that when testing against a local stack.
 
 ### Landing page
 

@@ -29,7 +29,7 @@ describe("SettingsStore", () => {
       ideEndpointEnabled: false,
       ideEndpointPort: DEFAULT_IDE_ENDPOINT_PORT
     });
-    expect(DEFAULT_DIAGNOSTICS_URL).toBe("http://localhost:8787");
+    expect(DEFAULT_DIAGNOSTICS_URL).toBe("https://api.maiallm.com");
     expect(DEFAULT_GPU_FILTERS).toEqual({
       countries: [],
       datacenters: [],
@@ -41,6 +41,30 @@ describe("SettingsStore", () => {
       minUploadMbps: 200,
       minDiskBandwidthMBps: 500
     });
+  });
+
+  it("moves an install that still holds the old localhost default", () => {
+    db.prepare(
+      "INSERT INTO preferences (key, value_json, updated_at) VALUES (?, ?, ?)"
+    ).run(
+      "app_settings",
+      JSON.stringify({
+        diagnosticsUrl: "http://localhost:8787",
+        gpuFilters: DEFAULT_GPU_FILTERS,
+        gpuStartupRetries: DEFAULT_GPU_STARTUP_RETRIES,
+        ideEndpointEnabled: false,
+        ideEndpointPort: DEFAULT_IDE_ENDPOINT_PORT
+      }),
+      "2026-11-03T00:00:00.000Z"
+    );
+
+    expect(store.get().diagnosticsUrl).toBe(DEFAULT_DIAGNOSTICS_URL);
+  });
+
+  it("keeps a diagnostics host the user chose", () => {
+    store.update({ diagnosticsUrl: "http://localhost:9000" });
+
+    expect(store.get().diagnosticsUrl).toBe("http://localhost:9000");
   });
 
   it("persists a new diagnostics host", () => {

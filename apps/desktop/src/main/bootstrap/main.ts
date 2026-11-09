@@ -21,7 +21,7 @@ import { CatalogueRepository } from "../services/catalogue/repository";
 import { CatalogueService } from "../services/catalogue/service";
 import { createFixtureCatalogueSource } from "../services/catalogue/fixture-source";
 import { createPortalCatalogueSource } from "../services/catalogue/portal-source";
-import { createPortalClient } from "../services/portal/client";
+import { createPortalClient, type PortalClient } from "../services/portal/client";
 import { PortalCredentialStore } from "../services/portal/credentials";
 import { createHuggingFaceSource, testHuggingFaceToken } from "../services/catalogue/huggingface-source";
 import { assertChatRunnable } from "../services/catalogue/runnable";
@@ -55,6 +55,8 @@ let registry: IpcRegistry | null = null;
 let updates: UpdateService | null = null;
 let updateTimer: NodeJS.Timeout | null = null;
 let diagnostics: DiagnosticForwarder | null = null;
+/** Set once the portal client exists; telemetry attaches its installation token. */
+let portalClient: PortalClient | null = null;
 let appLogger: ReturnType<typeof createLogger>["logger"] | null = null;
 let logFlush: (() => void) | null = null;
 
@@ -199,11 +201,30 @@ async function bootstrap(): Promise<void> {
   const diagnosticsEndpoint = resolveDiagnosticsEndpoint(
     config.diagnosticLogUrl ?? settings.get().diagnosticsUrl
   );
+  /**
+   * Telemetry is anonymous while the backend tolerates it, but the installation
+   * credential is attached whenever the app has one, so switching
+   * `MAIA_REQUIRE_CLIENT_AUTH` on never silences an existing install.
+   */
+  async function installationHeaders(): Promise<Record<string, string>> {
+    const client = portalClient;
+
+    if (!client?.configured()) {
+      return {};
+    }
+
+    try {
+      return { authorization: `Bearer ${await client.accessToken()}` };
+    } catch {
+      return {};
+    }
+  }
   diagnostics = diagnosticsEndpoint
     ? new DiagnosticForwarder({
         url: diagnosticsEndpoint,
         appVersion: app.getVersion(),
-        platform: process.platform
+        platform: process.platform,
+        getHeaders: installationHeaders
       })
     : null;
 
@@ -214,9 +235,13 @@ async function bootstrap(): Promise<void> {
   // Start-up failures carry the only copy of the container log, so they are
   // reported to the diagnostics service before the instance is destroyed.
   const reportFailure = createFailureReporter({
-    url: () => resolveDiagnosticsEndpoint(settings.get().diagnosticsUrl) ?? settings.get().diagnosticsUrl,
+    url: () =>
+      config.diagnosticLogUrl ??
+      resolveDiagnosticsEndpoint(settings.get().diagnosticsUrl) ??
+      settings.get().diagnosticsUrl,
     appVersion: app.getVersion(),
     platform: process.platform,
+    getHeaders: installationHeaders,
     logger
   });
 
@@ -235,6 +260,7 @@ async function bootstrap(): Promise<void> {
     platform: process.platform,
     logger
   });
+  portalClient = portal;
 
   const catalogue = new CatalogueService({
     repository: catalogueRepository,

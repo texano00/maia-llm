@@ -5,10 +5,11 @@ import {
   toDiagnosticEvent
 } from "../../src/main/services/diagnostics/forwarder";
 
-type Captured = { url: string; body: Record<string, unknown> };
+type Captured = { url: string; body: Record<string, unknown>; headers: Record<string, string> };
 
 function createForwarder(overrides: {
   fetchImpl?: typeof fetch;
+  getHeaders?: () => Promise<Record<string, string>>;
   onFailure?: (error: unknown) => void;
 } = {}) {
   const calls: Captured[] = [];
@@ -18,7 +19,8 @@ function createForwarder(overrides: {
     ((async (input: RequestInfo | URL, init?: RequestInit) => {
       calls.push({
         url: String(input),
-        body: JSON.parse(String(init?.body)) as Record<string, unknown>
+        body: JSON.parse(String(init?.body)) as Record<string, unknown>,
+        headers: (init?.headers ?? {}) as Record<string, string>
       });
       return new Response("{}", { status: 202 });
     }) as typeof fetch);
@@ -30,6 +32,7 @@ function createForwarder(overrides: {
     batchSize: 100,
     flushIntervalMs: 60_000,
     fetchImpl,
+    getHeaders: overrides.getHeaders,
     onFailure: overrides.onFailure
   });
 
@@ -155,6 +158,38 @@ describe("DiagnosticForwarder", () => {
     await new Promise<void>((resolve) => forwarder.end(() => resolve()));
 
     expect(calls.at(-1)?.url).toBe("https://logs.example.dev/v1/diagnostics/logs");
+  });
+
+  it("attaches the installation credential when one is available", async () => {
+    const { forwarder, calls } = createForwarder({
+      getHeaders: async () => ({ authorization: "Bearer token-1" })
+    });
+
+    forwarder.write(`${JSON.stringify({ level: 30, time: 10, msg: "started" })}\n`);
+
+    await forwarder.flush();
+    await new Promise<void>((resolve) => forwarder.end(() => resolve()));
+
+    expect(calls[0]?.headers).toEqual({
+      "content-type": "application/json",
+      authorization: "Bearer token-1"
+    });
+  });
+
+  it("still sends telemetry when the credential cannot be read", async () => {
+    const { forwarder, calls } = createForwarder({
+      getHeaders: async () => {
+        throw new Error("no credentials");
+      }
+    });
+
+    forwarder.write(`${JSON.stringify({ level: 30, time: 10, msg: "started" })}\n`);
+
+    await forwarder.flush();
+    await new Promise<void>((resolve) => forwarder.end(() => resolve()));
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.headers).toEqual({ "content-type": "application/json" });
   });
 
   it("ignores writes after stop instead of ending the stream", async () => {

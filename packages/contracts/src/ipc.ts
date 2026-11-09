@@ -106,7 +106,13 @@ export const ipcChannels = [
 /** Main -> renderer push channel used for update status changes. */
 export const updateEventChannel = "update.event" as const;
 
-export const DEFAULT_DIAGNOSTICS_URL = "http://localhost:8787";
+/**
+ * The published backend. Catalogue, telemetry and GPU reputation all live on it,
+ * so one constant keeps the desktop pointed at the same place.
+ */
+export const DEFAULT_API_BASE_URL = "https://api.maiallm.com";
+
+export const DEFAULT_DIAGNOSTICS_URL = DEFAULT_API_BASE_URL;
 export const DEFAULT_GPU_STARTUP_RETRIES = 5;
 
 const httpUrlSchema = z

@@ -11,6 +11,13 @@ import type { DatabaseConnection } from "../../storage/db";
 
 const SETTINGS_KEY = "app_settings";
 
+/**
+ * The diagnostics host before api.maiallm.com existed. A stored value equal to
+ * it was almost certainly never chosen by hand, so it follows the new default
+ * instead of pinning the install to a localhost service that no longer runs.
+ */
+const LEGACY_DIAGNOSTICS_URL = "http://localhost:8787";
+
 export const defaultAppSettings: AppSettings = {
   diagnosticsUrl: DEFAULT_DIAGNOSTICS_URL,
   gpuFilters: DEFAULT_GPU_FILTERS,
@@ -18,6 +25,12 @@ export const defaultAppSettings: AppSettings = {
   ideEndpointEnabled: false,
   ideEndpointPort: DEFAULT_IDE_ENDPOINT_PORT
 };
+
+function migrate(settings: AppSettings): AppSettings {
+  return settings.diagnosticsUrl === LEGACY_DIAGNOSTICS_URL
+    ? { ...settings, diagnosticsUrl: DEFAULT_DIAGNOSTICS_URL }
+    : settings;
+}
 
 /**
  * Small typed wrapper over the `preferences` table. Values are validated on the
@@ -37,7 +50,7 @@ export class SettingsStore {
 
     try {
       const parsed = appSettingsSchema.safeParse(JSON.parse(row.value_json));
-      return parsed.success ? parsed.data : { ...defaultAppSettings };
+      return parsed.success ? migrate(parsed.data) : { ...defaultAppSettings };
     } catch {
       return { ...defaultAppSettings };
     }

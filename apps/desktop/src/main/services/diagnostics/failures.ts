@@ -9,6 +9,8 @@ export interface FailureReporterOptions {
   now?: () => number;
   /** Pause between the two attempts; tests set it to 0. */
   retryDelayMs?: number;
+  /** Extra headers (installation credential). Failures are dropped, not thrown. */
+  getHeaders?: () => Promise<Record<string, string>>;
   logger?: { warn(message: string, context?: Record<string, unknown>): void };
 }
 
@@ -63,11 +65,18 @@ export function createFailureReporter(options: FailureReporterOptions) {
   const now = options.now ?? (() => Date.now());
 
   async function deliver(endpoint: string, report: FailureReport): Promise<boolean> {
+    let authorization: Record<string, string> = {};
+    try {
+      authorization = (await options.getHeaders?.()) ?? {};
+    } catch {
+      authorization = {};
+    }
+
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
         const response = await fetchImpl(endpoint, {
           method: "POST",
-          headers: { "content-type": "application/json" },
+          headers: { "content-type": "application/json", ...authorization },
           body: JSON.stringify(report),
           signal: AbortSignal.timeout(5_000)
         });
