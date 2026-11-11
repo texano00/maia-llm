@@ -41,6 +41,10 @@ curl -s http://127.0.0.1:11434/api/chat -H 'content-type: application/json' \
        "messages":[{"role":"user","content":"Draft a commit message for this diff."}]}'
 ```
 
+**Jump to:** [What you get](#what-you-get) · [Demo](#demo) ·
+[Requirements](#requirements) · [Install](#install) · [First run](#first-run) ·
+[Where things are stored](#where-things-are-stored) · [For developers](#for-developers)
+
 Three ideas shape everything in the app:
 
 1. **You see the price before the resource exists.** An estimate — GPU, hourly
@@ -106,35 +110,17 @@ Off until you turn it on.
   </a>
 </p>
 
-Fourteen seconds at 2× speed: **pick a GGUF model and read the estimate → watch
-the provisioning log move through image pull, download and load → chat with the
-model that just came up**. Click the clip for the full-quality file.
+Fourteen seconds at 2× speed: pick a model and read the estimate, watch the
+provisioning log move through image pull, download and load, then chat with the
+model that just came up. Click the clip for the full-quality file.
 
-| Recording | Where |
-| --- | --- |
-| 14 s highlight (H.264, no audio) | [`docs/demo/maia-llm-demo.mp4`](docs/demo/maia-llm-demo.mp4) |
-| Same clip as an inline GIF | [`docs/demo/maia-llm-demo.gif`](docs/demo/maia-llm-demo.gif) |
-| Still frame | [`docs/demo/demo-poster.png`](docs/demo/demo-poster.png) |
+## Requirements
 
-What it shows, so it stays in sync with the app:
-
-1. Catalogue with the runnable-only filter on: GGUF mirrors, weights, artifacts.
-2. The estimate: GPU, hourly rate and expected total, before anything is created.
-3. Provisioning: container pull, model download, load, then *Running*.
-4. Chat: an answer streaming in, with the live cost meter next to it.
-
-Regenerate the clip from a fresh recording with:
-
-```bash
-ffmpeg -i recording.mp4 -filter_complex \
-  "[0:v]trim=5.5:11.5,setpts=(PTS-STARTPTS)/2[a];\
-   [0:v]trim=12:16.5,setpts=(PTS-STARTPTS)/2[b];\
-   [0:v]trim=111:116,setpts=(PTS-STARTPTS)/2[c];\
-   [0:v]trim=126:138,setpts=(PTS-STARTPTS)/2[d];\
-   [a][b][c][d]concat=n=4:v=1:a=0[v]" -map "[v]" -an \
-  -c:v libx264 -crf 22 -preset slow -pix_fmt yuv420p \
-  -movflags +faststart docs/demo/maia-llm-demo.mp4
-```
+- Windows 10 or 11, x64
+- A vast.ai account with an API key (and credit) for real GPU runs
+- Internet access to huggingface.co and vast.ai
+- Optional: an S3-compatible bucket if you want model backups
+- Optional: an IDE assistant or agent that speaks the Ollama API
 
 ## Install
 
@@ -147,9 +133,7 @@ ffmpeg -i recording.mp4 -filter_complex \
 
 **About the Windows warning.** Builds are currently unsigned, so Windows may show
 *"Windows protected your PC"* or, with Smart App Control enabled, *"part of this
-app has been blocked"*. Use *More info → Run anyway*; the signature setup that
-removes the warning entirely is described in
-[docs/release-process.md](docs/release-process.md).
+app has been blocked"*. Click *More info → Run anyway* to continue.
 
 ## First run
 
@@ -183,14 +167,6 @@ install* applies it and reopens the app. Nothing is downloaded without that clic
 
 Beta builds are opt-in by launching the app with `MAIA_RELEASE_CHANNEL=beta`.
 
-## Requirements
-
-- Windows 10 or 11, x64
-- A vast.ai account with an API key (and credit) for real GPU runs
-- Internet access to huggingface.co and vast.ai
-- Optional: an S3-compatible bucket if you want model backups
-- Optional: an IDE assistant or agent that speaks the Ollama API
-
 ## Where things are stored
 
 | Data | Location |
@@ -200,7 +176,7 @@ Beta builds are opt-in by launching the app with `MAIA_RELEASE_CHANNEL=beta`.
 | Provider credentials | Windows credential vault (`safeStorage`) |
 | Model backups (optional) | Your own S3-compatible bucket |
 
-## Build from source
+## For developers
 
 ```bash
 npm install
@@ -208,16 +184,13 @@ npm run -w @maia/desktop dev          # desktop app, simulated GPU by default
 MAIA_PROVIDER_MODE=live npm run -w @maia/desktop dev
 ```
 
-Installers are built by GitHub Actions on a Windows runner:
-
-```bash
-gh workflow run windows-dev-build.yml --ref <branch> -f publish_release=true
-```
-
-More detail: [docs/development.md](docs/development.md) (setup, environment
-variables, live log mirroring), [docs/troubleshooting.md](docs/troubleshooting.md)
-(reading logs, diagnosing a stuck UI), [docs/release-process.md](docs/release-process.md)
-(signing and release checklist).
+Installers are built by GitHub Actions on a Windows runner
+(`windows-dev-build.yml`); lint, typecheck, tests and build run locally with
+`npm run lint && npm run typecheck && npm test && npm run build`. See
+[docs/development.md](docs/development.md) for setup, environment variables and
+log mirroring, [docs/troubleshooting.md](docs/troubleshooting.md) for diagnosing
+a stuck UI, and [docs/release-process.md](docs/release-process.md) for signing
+and the release checklist.
 
 ## License
 
