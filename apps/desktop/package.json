@@ -7,7 +7,7 @@
   "author": {
     "name": "texano00"
   },
-  "license": "UNLICENSED",
+  "license": "Apache-2.0",
   "main": "./out/main/main.js",
   "scripts": {
     "dev": "npm run rebuild:native && electron-vite dev",

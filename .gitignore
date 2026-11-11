@@ -19,6 +19,12 @@ test-results/
 !.env.example
 !.env.production.example
 
+# Code-signing material: lives in the CI secret store, never in the repo
+*.pfx
+*.p12
+*.cer
+*.b64
+
 # Local databases
 *.db
 *.db-shm

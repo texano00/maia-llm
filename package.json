@@ -2,6 +2,7 @@
   "name": "maia-llm",
   "version": "0.9.1",
   "private": true,
+  "license": "Apache-2.0",
   "type": "module",
   "description": "Desktop LLM suite with on-demand remote GPU and model archival",
   "engines": {

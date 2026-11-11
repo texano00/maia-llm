@@ -198,4 +198,7 @@ and the release checklist.
 
 ## License
 
-Proprietary. All rights reserved until a license is chosen.
+Apache License 2.0 — see [LICENSE](LICENSE). You may use, modify and redistribute
+the software, including commercially, provided you keep the copyright and
+attribution notices and state what you changed. The license does not grant rights
+to the Maia LLM name or logo.
