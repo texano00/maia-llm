@@ -34,6 +34,8 @@ export interface ServerConfig {
   catalogueRefreshHours: number;
   /** How many models one snapshot pass covers. */
   catalogueLimit: number;
+  /** Accept opt-in usage measurements at `/api/v0/usage`. */
+  usageEnabled: boolean;
 }
 
 const DRIVERS: readonly SqlDialect[] = ["sqlite", "postgres", "mysql"];
@@ -79,6 +81,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     hfToken: env.MAIA_PORTAL_HF_TOKEN ?? env.HF_TOKEN ?? null,
     catalogueRefreshHours: positive(env.MAIA_CATALOGUE_REFRESH_HOURS, 6),
     catalogueLimit: positive(env.MAIA_CATALOGUE_LIMIT, 300),
+    usageEnabled: env.MAIA_USAGE_ENABLED !== "false",
   };
 }
 

@@ -117,6 +117,77 @@ export class SessionStore {
     return row ? toSession(row, this.eventsFor(sessionId)) : null;
   }
 
+  /** Written exactly once per terminated run; later writes replace nothing. */
+  recordMetric(input: {
+    sessionId: string;
+    modelId: string;
+    powerTier: PowerTier;
+    outputTokens: number | null;
+    generationMs: number | null;
+    tokensPerSecond: number | null;
+    outcome: "completed" | "failed" | "cancelled" | "capped" | "idle";
+    recordedAt: string;
+  }): void {
+    this.database
+      .prepare(
+        `INSERT INTO session_metrics
+           (session_id, model_id, power_tier, output_tokens, generation_ms, tokens_per_second, outcome, recorded_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (session_id) DO NOTHING`
+      )
+      .run(
+        input.sessionId,
+        input.modelId,
+        input.powerTier,
+        input.outputTokens,
+        input.generationMs,
+        input.tokensPerSecond,
+        input.outcome,
+        input.recordedAt
+      );
+  }
+
+  metricFor(sessionId: string): {
+    outputTokens: number | null;
+    generationMs: number | null;
+    tokensPerSecond: number | null;
+    outcome: "completed" | "failed" | "cancelled" | "capped" | "idle";
+  } | null {
+    const row = this.database
+      .prepare(
+        "SELECT output_tokens, generation_ms, tokens_per_second, outcome FROM session_metrics WHERE session_id = ?"
+      )
+      .get(sessionId) as
+      | {
+          output_tokens: number | null;
+          generation_ms: number | null;
+          tokens_per_second: number | null;
+          outcome: "completed" | "failed" | "cancelled" | "capped" | "idle";
+        }
+      | undefined;
+
+    return row
+      ? {
+          outputTokens: row.output_tokens,
+          generationMs: row.generation_ms,
+          tokensPerSecond: row.tokens_per_second,
+          outcome: row.outcome
+        }
+      : null;
+  }
+
+  /** Most recent measured output rates for a model, newest first. */
+  recentSpeeds(modelId: string, limit = 20): number[] {    const rows = this.database
+      .prepare(
+        `SELECT tokens_per_second FROM session_metrics
+          WHERE model_id = ? AND tokens_per_second IS NOT NULL
+          ORDER BY recorded_at DESC LIMIT ?`
+      )
+      .all(modelId, limit) as Array<{ tokens_per_second: number }>;
+
+    return rows.map((row) => row.tokens_per_second);
+  }
+
   /**
    * Terminal and teardown rows for the Models view. Ordered newest first and
    * deliberately unbounded: a run stays in history until its session history is

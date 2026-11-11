@@ -3,6 +3,7 @@ import { initialSchema } from "./001-initial-schema.js";
 import { failureReports } from "./002-failure-reports.js";
 import { portalAuth } from "./003-portal-auth.js";
 import { catalogueSnapshots } from "./004-catalogue-snapshots.js";
+import { usageSamples } from "./005-usage-samples.js";
 
 /**
  * Ordered list of schema migrations.
@@ -19,5 +20,6 @@ export const migrations: readonly Migration[] = [
   initialSchema,
   failureReports,
   portalAuth,
-  catalogueSnapshots
+  catalogueSnapshots,
+  usageSamples
 ];

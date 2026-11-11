@@ -19,11 +19,10 @@ function sourceFiles(directory: string): string[] {
 }
 
 /**
- * Channels allowlisted ahead of their story. `estimate.preview` is registered by
- * US6 (T050); remove it from this set when that lands so the guard tightens
- * automatically.
+ * Channels allowlisted ahead of their story. Empty now that every channel is
+ * registered; keep the mechanism so a future story can declare one explicitly.
  */
-const PENDING_CHANNELS = new Set<string>(["estimate.preview"]);
+const PENDING_CHANNELS = new Set<string>();
 
 describe("IPC channel contract", () => {
   const sources = sourceFiles(MAIN_ROOT)

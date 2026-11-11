@@ -10,9 +10,11 @@ import {
 } from "./repositories/gpu-reputation.js";
 import { createFailureRepository, type FailureRepository } from "./repositories/failures.js";
 import { createTelemetryRepository, type TelemetryRepository } from "./repositories/telemetry.js";
+import { createUsageRepository, type UsageRepository } from "./repositories/usage.js";
 import { FailureService } from "./services/failure-service.js";
 import { GpuReputationService } from "./services/gpu-reputation-service.js";
 import { TelemetryService } from "./services/telemetry-service.js";
+import { UsageService } from "./services/usage-service.js";
 import { AdminAuthService, TokenService } from "./services/portal-auth.js";
 import { createHuggingFaceCatalogueClient } from "./services/catalogue/huggingface.js";
 import { SnapshotService } from "./services/catalogue/snapshot-service.js";
@@ -24,6 +26,7 @@ export interface AppContext {
   db: SqlDatabase;
   gpus: GpuReputationService;
   telemetry: TelemetryService;
+  usage: UsageService;
   failures: FailureService;
   tokens: TokenService;
   admins: AdminAuthService;
@@ -34,6 +37,7 @@ export interface AppContext {
     gpus: GpuReputationRepository;
     telemetry: TelemetryRepository;
     failures: FailureRepository;
+    usage: UsageRepository;
   };
   close(): Promise<void>;
 }
@@ -62,6 +66,7 @@ export async function createAppContext(options: CreateAppContextOptions = {}): P
   const gpuRepository = createGpuReputationRepository(db);
   const telemetryRepository = createTelemetryRepository(db);
   const failureRepository = createFailureRepository(db);
+  const usageRepository = createUsageRepository(db);
 
   if (config.legacyReputationFile) {
     await importLegacyReputation(gpuRepository, { file: config.legacyReputationFile });
@@ -84,8 +89,12 @@ export async function createAppContext(options: CreateAppContextOptions = {}): P
     ...(options.now ? { now: options.now } : {}),
   });
 
-  const tokens = new TokenService({
-    db,
+  const usage = new UsageService(
+    usageRepository,
+    options.now ? () => new Date(options.now!()) : () => new Date(),
+  );
+
+  const tokens = new TokenService({    db,
     secret: config.portalTokenSecret,
     accessTtlMs: config.accessTokenTtlMs,
     refreshTtlMs: config.refreshTokenTtlMs,
@@ -126,12 +135,13 @@ export async function createAppContext(options: CreateAppContextOptions = {}): P
     gpus,
     telemetry,
     failures,
+    usage,
     tokens,
     admins,
     snapshot,
     useCases,
     useCaseAdmin,
-    repositories: { gpus: gpuRepository, telemetry: telemetryRepository, failures: failureRepository },
+    repositories: { gpus: gpuRepository, telemetry: telemetryRepository, failures: failureRepository, usage: usageRepository },
     async close() {
       if (ownsDatabase) {
         await db.close();

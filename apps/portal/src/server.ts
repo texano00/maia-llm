@@ -8,6 +8,7 @@ import { registerConfigRoutes } from "./config-routes.js";
 import { createAppContext, type AppContext } from "./context.js";
 import { registerDiagnosticsRoutes } from "./diagnostics.js";
 import { registerFailureRoutes } from "./failures.js";
+import { registerUsageRoutes } from "./usage.js";
 import { startCatalogueRefreshJob } from "./jobs/catalogue-refresh.js";
 import { registerPortalAuthRoutes } from "./portal-auth-routes.js";
 import { registerReputationRoutes } from "./reputation.js";
@@ -69,6 +70,9 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   registerDiagnosticsRoutes(app, context.telemetry, authorize ? { authorize } : {});
   registerReputationRoutes(app, context.gpus);
   registerFailureRoutes(app, context.failures, authorize ? { authorize } : {});
+  if (context.config.usageEnabled) {
+    registerUsageRoutes(app, context.usage, authorize ? { authorize } : {});
+  }
   registerConfigRoutes(app, {
     snapshot: context.snapshot,
     useCases: context.useCases,

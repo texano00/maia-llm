@@ -42,6 +42,7 @@ describe("migrations", () => {
         "failure-reports",
         "portal-auth",
         "catalogue-snapshots",
+        "usage-samples",
       ]);
 
       // Running again is a no-op, which is what a restart does.
@@ -66,6 +67,8 @@ describe("migrations", () => {
         "snapshots",
         "telemetry_batches",
         "telemetry_events",
+        "usage_installations",
+        "usage_samples",
         "use_case_models",
         "use_cases",
       ]);
