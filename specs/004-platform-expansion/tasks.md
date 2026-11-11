@@ -214,12 +214,12 @@ Monorepo: desktop main process in `apps/desktop/src/main/`, renderer in `apps/de
 
 ### Tests for User Story 8 ⚠️
 
-- [ ] T067 [P] [US8] Write `apps/desktop/tests/unit/settings-sections.test.ts` for the pure helper `apps/desktop/src/renderer/features/settings/sections.ts`: default expanded set is empty, toggling one does not expand others, and a section holding an error is expanded on mount.
+- [X] T067 [P] [US8] Write `apps/desktop/tests/unit/settings-sections.test.ts` for the pure helper `apps/desktop/src/renderer/features/settings/sections.ts`: default expanded set is empty, toggling one does not expand others, and a section holding an error is expanded on mount.
 
 ### Implementation for User Story 8
 
-- [ ] T068 [US8] Create `apps/desktop/src/renderer/features/settings/SettingsSection.tsx` using native `<details>`/`<summary>` with a collapsed-state summary line and an `open` prop driven by the error rule.
-- [ ] T069 [US8] Convert every settings card in `apps/desktop/src/renderer/features/settings/SettingsPage.tsx` to `SettingsSection` and compute the error-expanded section from the existing validation state.
+- [X] T068 [US8] Create `apps/desktop/src/renderer/features/settings/SettingsSection.tsx` using native `<details>`/`<summary>` with a collapsed-state summary line and an `open` prop driven by the error rule.
+- [X] T069 [US8] Convert every settings card in `apps/desktop/src/renderer/features/settings/SettingsPage.tsx` to `SettingsSection` and compute the error-expanded section from the existing validation state.
 - [ ] T070 [US8] Add the Playwright spec `apps/desktop/tests/e2e/settings-collapse.spec.ts` for collapsed defaults, single expansion, error auto-open and keyboard-only operation.
 
 ---
