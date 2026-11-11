@@ -27,6 +27,13 @@ import { createHuggingFaceSource, testHuggingFaceToken } from "../services/catal
 import { assertChatRunnable } from "../services/catalogue/runnable";
 import { createUseCaseResolver } from "../services/catalogue/use-cases";
 import { CredentialStore } from "../services/credentials/store";
+import { NotificationCenter } from "../services/notifications/center";
+import { deriveHealthNotifications, HEALTH_NOTIFICATION_KEYS, ProviderHealthMonitor } from "../services/health/monitor";
+import { ReadinessNotifier } from "../services/notifications/desktop";
+import { createElectronNotificationBackend } from "../services/notifications/electron-backend";
+import { ReadinessWatcher } from "../services/notifications/readiness-watcher";
+import type { ProviderHealth } from "@maia/contracts";
+import { readyEventChannel } from "@maia/contracts";
 import { SessionOrchestrator } from "../services/sessions/orchestrator";
 import { SessionStore } from "../services/sessions/store";
 import { GpuGuardian, guardianPaths } from "../services/sessions/guardian";
@@ -40,6 +47,7 @@ import { registerUpdateHandlers } from "../ipc/updates";
 import { registerSettingsHandlers } from "../ipc/settings";
 import { registerWorkspaceHandlers } from "../ipc/workspace";
 import { registerIntegrationHandlers } from "../ipc/integration";
+import { registerSystemHandlers } from "../ipc/system";
 import { LocalEndpointService } from "../services/local-endpoint/lifecycle";
 import { createTurnRecorder } from "../services/local-endpoint/recorder";
 import { loadConfig } from "./config";
@@ -424,6 +432,68 @@ async function bootstrap(): Promise<void> {
       }
     }
   });
+  // Header health surface: one snapshot feeds the bell, the balance badge and the
+  // missing-key prompts. Provider checks never throw; `unknown` is a valid state.
+  const notifications = new NotificationCenter(settings);
+
+  // Resolved conditions disappear from the bell; their dismissal also resets so a
+  // recurrence notifies again.
+  function syncHealth(snapshot: ProviderHealth): void {
+    const entries = deriveHealthNotifications(snapshot);
+    const active = new Set(entries.map((entry) => entry.key));
+    for (const key of HEALTH_NOTIFICATION_KEYS) {
+      if (!active.has(key)) {
+        notifications.clear(key);
+      }
+    }
+    for (const entry of entries) {
+      notifications.set(entry);
+    }
+  }
+
+  const health = new ProviderHealthMonitor({
+    hasHuggingFace: async () => Boolean(await credentials.get("huggingface")),
+    verifyHuggingFace: async () => {
+      const secret = await credentials.get("huggingface");
+      return secret ? testHuggingFaceToken(secret) : false;
+    },
+    hasVastai: async () => Boolean(await credentials.get("vastai")),
+    verifyVastai: async () => {
+      const secret = await credentials.get("vastai");
+      return secret ? new VastAiClient(secret).testConnection() : false;
+    },
+    getBalanceMicroUsd: async () => {
+      const secret = await credentials.get("vastai");
+      return secret ? new VastAiClient(secret).getBalanceMicroUsd() : null;
+    },
+    getThresholdMicroUsd: () => settings.get().walletWarnThresholdMicroUsd
+  });
+  registerSystemHandlers({ registry, notifications, health, onHealth: syncHealth });
+  void health.refresh().then(syncHealth);
+
+  // One OS notification per run that becomes ready while Maia is in the
+  // background; clicking it brings the window forward on the run list.
+  const readinessNotifier = new ReadinessNotifier({
+    backend: createElectronNotificationBackend(),
+    isFocused: () => Boolean(mainWindow?.isFocused()),
+    onActivate: (sessionId) => {
+      mainWindow?.show();
+      mainWindow?.focus();
+      mainWindow?.webContents.send(readyEventChannel, { sessionId });
+    },
+    onUnsupported: () =>
+      notifications.set({
+        key: "desktop:unsupported",
+        severity: "warning",
+        message: "Allow system notifications for Maia LLM to be told when a model is ready.",
+        action: { label: "Open settings", route: "/settings" }
+      })
+  });
+  const readinessWatcher = new ReadinessWatcher({
+    listSessions: () => sessions.listSessions(),
+    notifier: readinessNotifier
+  });
+  readinessWatcher.start();
   // The IDE endpoint re-exposes the running model on 127.0.0.1 so VS Code can use
   // it; it binds only while the preference is on and a session is actually active.
   const ideEndpoint = new LocalEndpointService({

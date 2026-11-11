@@ -248,6 +248,26 @@ export class VastAiClient {
   }
 
   /**
+   * Prepaid credit reported by the account endpoint, in micro-USD. Returns null
+   * when the provider does not report a number, so the UI can show "unknown"
+   * rather than a misleading zero.
+   */
+  async getBalanceMicroUsd(): Promise<number | null> {
+    const response = await this.http.request("/api/v0/users/current/", {
+      headers: this.authHeaders()
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const payload = (await response.json()) as { credit?: unknown };
+    return typeof payload.credit === "number" && Number.isFinite(payload.credit)
+      ? Math.round(payload.credit * 1_000_000)
+      : null;
+  }
+
+  /**
    * Offers live at `GET /api/v0/bundles/?q=<json>`; the older
    * `PUT /api/v0/search/offers/` route now returns 404.
    */

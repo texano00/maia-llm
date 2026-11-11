@@ -1883,3 +1883,182 @@ textarea {
   border-color: rgb(255 255 255 / 16%);
   color: #a9b7ce;
 }
+
+/* Header: notifications, balance and the Models run indicator. */
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
+.notifications {
+  position: relative;
+}
+
+.notifications-count {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 1rem;
+  padding: 0 0.25rem;
+  border-radius: 999px;
+  background: #4868ff;
+  color: #fff;
+  font-size: 0.65rem;
+  line-height: 1rem;
+  text-align: center;
+}
+
+.notifications-error {
+  color: #ff9b9b;
+}
+
+.notifications-warning {
+  color: #ffd8a1;
+}
+
+.notifications-popover {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.5rem);
+  z-index: 50;
+  width: min(22rem, 80vw);
+  padding: 0.75rem;
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 0.75rem;
+  background: #0d1728;
+  box-shadow: 0 16px 32px rgb(0 0 0 / 45%);
+}
+
+.notifications-popover ul {
+  display: grid;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.notification {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 0.6rem;
+  font-size: 0.82rem;
+}
+
+.notification-error {
+  border-color: rgb(255 155 155 / 40%);
+}
+
+.notification-warning {
+  border-color: rgb(255 196 120 / 40%);
+}
+
+.notifications-actions {
+  display: flex;
+  gap: 0.4rem;
+  justify-content: flex-end;
+}
+
+.balance-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0 0.45rem;
+  font-size: 0.8rem;
+}
+
+.balance-amount {
+  font-variant-numeric: tabular-nums;
+}
+
+.models-nav-indicator {
+  display: inline-block;
+  width: 0.55rem;
+  height: 0.55rem;
+  margin-left: 0.45rem;
+  border-radius: 999px;
+}
+
+.models-nav-running {
+  background: #35e7b1;
+  animation: models-indicator-pulse 1.2s ease-in-out infinite;
+}
+
+.models-nav-failed {
+  background: #ff6b6b;
+}
+
+.models-nav-idle {
+  background: #ffa94d;
+}
+
+@keyframes models-indicator-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.25;
+  }
+}
+
+/* First-run guided setup. */
+.onboarding-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+  background: rgb(4 7 12 / 72%);
+  backdrop-filter: blur(3px);
+}
+
+.onboarding-card {
+  display: grid;
+  gap: 0.9rem;
+  width: min(30rem, 100%);
+  padding: 1.5rem;
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 1rem;
+  background: #0d1728;
+  color: #e7ecf5;
+}
+
+.onboarding-card header {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.onboarding-card h2 {
+  margin: 0;
+  font-size: 1.2rem;
+}
+
+.onboarding-steps {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.75rem;
+}
+
+.onboarding-step {
+  padding: 0.25rem 0.55rem;
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 999px;
+  color: #8fa3c8;
+}
+
+.onboarding-step.active {
+  border-color: rgb(72 104 255 / 60%);
+  background: rgb(72 104 255 / 18%);
+  color: #fff;
+}

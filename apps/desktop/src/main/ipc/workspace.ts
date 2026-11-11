@@ -11,6 +11,7 @@ import {
   catalogueQuerySchema,
   chatAbortSchema,
   chatSendSchema,
+  conversationDeleteSchema,
   sessionEndSchema,
   sessionStartSchema,
   type ChatChunk
@@ -263,7 +264,22 @@ export function registerWorkspaceHandlers(options: WorkspaceHandlersOptions): vo
     sessions.abort(payload.sessionId);
     return { aborted: true };
   });
-}
+
+  // Deleting is permanent, so any reply in flight is stopped first: a late chunk
+  // must never recreate rows for a conversation the user just removed.
+  registry.register("conversation.delete", conversationDeleteSchema, (payload) => {
+    const found = history.getConversation(payload.id);
+    if (!found) {
+      throw Object.assign(new Error("Conversation not found"), { code: "NOT_FOUND" });
+    }
+
+    if (found.conversation.sessionId) {
+      sessions.abort(found.conversation.sessionId);
+    }
+
+    history.deleteConversation(payload.id);
+    return { deleted: true as const, id: payload.id };
+  });}
 
 function registryResult(
   history: HistoryRepository,

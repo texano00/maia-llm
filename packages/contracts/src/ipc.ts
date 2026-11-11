@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { releaseChannelSchema } from "./domain";
-import { gpuFiltersSchema } from "./sessions";
+import { powerTierSchema, releaseChannelSchema } from "./domain";
+import { gpuFiltersSchema, microUsdSchema } from "./sessions";
 import { DEFAULT_IDE_ENDPOINT_PORT } from "./integration";
 
 export const errorCodeSchema = z.enum([
@@ -19,6 +19,8 @@ export const errorCodeSchema = z.enum([
   "NOT_FOUND",
   "ESTIMATE_REQUIRED",
   "GATED_ACCESS_REQUIRED",
+  "CAPABILITY_UNSUPPORTED",
+  "USAGE_OPTED_OUT",
   "INTERNAL"
 ]);
 
@@ -78,11 +80,13 @@ export const ipcChannels = [
   "settings.credentials.status",
   "settings.credentials.set",
   "settings.credentials.test",
+  "settings.credentials.clear",
   "catalogue.search",
   "catalogue.detail",
   "catalogue.refresh",
   "catalogue.useCases",
   "estimate.create",
+  "estimate.preview",
   "session.list",
   /** Locally persisted sessions in a terminal/teardown state (Models view). */
   "session.history",
@@ -94,11 +98,15 @@ export const ipcChannels = [
   "conversation.rename",
   "conversation.setPinned",
   "conversation.switchModel",
+  "conversation.delete",
   "chat.send",
   "chat.abort",
   "integration.status",
   "integration.enable",
   "integration.disable",
+  "notifications.list",
+  "notifications.dismiss",
+  "provider.health",
   "update.status",
   "update.check",
   "update.download",
@@ -107,6 +115,14 @@ export const ipcChannels = [
 
 /** Main -> renderer push channel used for update status changes. */
 export const updateEventChannel = "update.event" as const;
+
+/** Main -> renderer push when a readiness notification is activated. */
+export const readyEventChannel = "session.ready.event" as const;
+
+export const readyEventSchema = z.object({
+  sessionId: z.string().min(1)
+});
+export type ReadyEvent = z.infer<typeof readyEventSchema>;
 
 /**
  * The published backend. Catalogue, telemetry and GPU reputation all live on it,
@@ -145,7 +161,22 @@ export const appSettingsSchema = z.object({
    * Off by default: nothing listens on the user's machine unless asked.
    */
   ideEndpointEnabled: z.boolean().default(false),
-  ideEndpointPort: z.number().int().min(1024).max(65_535).default(DEFAULT_IDE_ENDPOINT_PORT)
+  ideEndpointPort: z.number().int().min(1024).max(65_535).default(DEFAULT_IDE_ENDPOINT_PORT),
+  /**
+   * Opt-in, content-free usage measurements (tokens per second per run). Off by
+   * default: nothing leaves the machine until the user enables it.
+   */
+  usageReporting: z.boolean().default(false),
+  /** Warn when the prepaid GPU balance falls below this amount. */
+  walletWarnThresholdMicroUsd: z.number().int().positive().default(2_000_000),
+  /** Set once both provider keys have been verified in the guided flow. */
+  onboardingCompleted: z.boolean().default(false),
+  /** Set when the guided flow is dismissed; it does not interrupt again. */
+  onboardingDismissedAt: z.string().nullable().default(null),
+  /** Notification condition keys the user has acknowledged. */
+  dismissedNotificationKeys: z.array(z.string().min(1)).max(100).default([]),
+  /** Pseudonymous identifier used only for opt-in usage samples. */
+  installationId: z.string().uuid().nullable().default(null)
 });
 
 export const settingsUpdateSchema = appSettingsSchema.partial();
@@ -163,6 +194,10 @@ export const testCredentialSchema = z.object({
   provider: credentialProviderSchema
 });
 
+export const clearCredentialSchema = z.object({
+  provider: credentialProviderSchema
+});
+
 export const credentialStatusSchema = z.object({
   huggingface: z.boolean(),
   vastai: z.boolean(),
@@ -172,6 +207,51 @@ export const credentialStatusSchema = z.object({
 export const credentialTestResultSchema = z.object({
   ok: z.boolean(),
   message: z.string()
+});
+
+export const notificationDismissSchema = z.object({
+  key: z.string().trim().min(1).max(120)
+});
+
+export const conversationDeleteSchema = z.object({
+  id: z.string().min(1).max(100)
+});
+
+export const estimatePreviewSchema = z.object({
+  modelId: z.string().min(1).max(200),
+  powerTier: powerTierSchema
+});
+
+export const notificationSchema = z.object({
+  key: z.string().min(1),
+  severity: z.enum(["warning", "error"]),
+  message: z.string().min(1),
+  action: z
+    .object({ label: z.string().min(1), route: z.string().min(1) })
+    .optional(),
+  createdAt: z.string()
+});
+
+export const notificationSnapshotSchema = z.object({
+  notifications: z.array(notificationSchema),
+  indicator: z.enum(["error", "warning", "none"])
+});
+
+export const credentialCheckSchema = z.object({
+  state: z.enum(["ok", "missing", "invalid", "unknown"]),
+  checkedAt: z.string()
+});
+
+export const balanceStateSchema = z.union([
+  z.object({ state: z.literal("known"), amountMicroUsd: microUsdSchema, checkedAt: z.string() }),
+  z.object({ state: z.literal("unknown"), amountMicroUsd: z.null(), checkedAt: z.string() })
+]);
+
+export const providerHealthSchema = z.object({
+  huggingface: credentialCheckSchema,
+  vastai: credentialCheckSchema,
+  balance: balanceStateSchema,
+  thresholdMicroUsd: microUsdSchema
 });
 
 export const ipcChannelSchema = z.enum(ipcChannels);
@@ -185,6 +265,11 @@ export type CredentialProvider = z.infer<typeof credentialProviderSchema>;
 export type CredentialStatus = z.infer<typeof credentialStatusSchema>;
 export type CredentialTestResult = z.infer<typeof credentialTestResultSchema>;
 export type IpcChannel = z.infer<typeof ipcChannelSchema>;
+export type Notification = z.infer<typeof notificationSchema>;
+export type NotificationSnapshot = z.infer<typeof notificationSnapshotSchema>;
+export type CredentialCheck = z.infer<typeof credentialCheckSchema>;
+export type BalanceState = z.infer<typeof balanceStateSchema>;
+export type ProviderHealth = z.infer<typeof providerHealthSchema>;
 export type UpdatePhase = z.infer<typeof updatePhaseSchema>;
 export type UpdateStatus = z.infer<typeof updateStatusSchema>;
 

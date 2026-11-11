@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { inferenceRuntimeSchema, sessionStateSchema } from "./domain";
+import { inferenceRuntimeSchema, modelCapabilitySchema, powerTierSchema, sessionStateSchema } from "./domain";
 
 export const CURRENCY = "USD" as const;
 
@@ -24,6 +24,8 @@ export const estimateSchema = z.object({
   currency: z.literal(CURRENCY),
   assumptions: z.array(z.string()),
   notes: z.array(z.string()),
+  /** Compute power tier the estimate was priced for. */
+  powerTier: powerTierSchema.default("balanced"),
   /** Demo/offline runs still show a price so the flow can be exercised. */
   simulated: z.boolean()
 });
@@ -51,6 +53,10 @@ export const sessionSchema = z.object({
     .enum(["user", "idle", "cap", "app_exit", "failure", "reconciled"])
     .nullable(),
   instanceId: z.number().int().positive().nullable(),
+  /** Compute power tier the run was started with. */
+  powerTier: powerTierSchema.default("balanced"),
+  /** What the run can serve; text-only runs keep the historical default. */
+  capability: modelCapabilitySchema.default("text"),
   simulated: z.boolean(),
   /** Provisioning / lifecycle log shown in the app, oldest first. */
   events: z.array(sessionEventSchema)
@@ -60,6 +66,8 @@ export const sessionStartSchema = z.object({
   estimateId: z.string().min(1),
   /** Provisioning is refused unless the caller confirms the shown estimate. */
   confirmEstimate: z.literal(true),
+  /** Compute power tier the user confirmed in the catalogue popup. */
+  powerTier: powerTierSchema.optional(),
   /** Gated models require explicit confirmation before Maia provisions a GPU. */
   confirmGatedAccess: z.boolean().optional(),
   generation: z

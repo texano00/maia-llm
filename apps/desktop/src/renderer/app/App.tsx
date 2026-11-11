@@ -4,6 +4,7 @@ import { Layout } from "./Layout";
 import { AppRoutes } from "./routes";
 import { UpdatesProvider } from "../shared/updates/UpdatesProvider";
 import { WorkspaceProvider } from "../shared/session/WorkspaceProvider";
+import { OnboardingGate } from "../features/onboarding/OnboardingGate";
 
 export function App() {
   return (
@@ -14,6 +15,7 @@ export function App() {
             <Layout>
               <AppRoutes />
             </Layout>
+            <OnboardingGate />
           </WorkspaceProvider>
         </UpdatesProvider>
       </HashRouter>

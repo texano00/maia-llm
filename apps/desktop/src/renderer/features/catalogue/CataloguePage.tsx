@@ -3,8 +3,11 @@ import { Link, useNavigate } from "react-router-dom";
 import type { CatalogueModel, ModelArtifact, Session } from "@maia/contracts";
 import { describeGatedAccess, huggingFaceModelUrl, isChatCapableModel, isGgufRepositoryName } from "@maia/contracts";
 import { useWorkspace } from "../../shared/session/WorkspaceProvider";
+import { useProviderHealth } from "../../shared/health/useProviderHealth";
+import { openOnboarding } from "../onboarding/open";
 import { formatParameters, formatContext, formatBytes, formatUsd } from "../../shared/format";
 export function CataloguePage() {
+  const { health } = useProviderHealth();
   const {
     models,
     stale,
@@ -72,11 +75,18 @@ export function CataloguePage() {
       <p className="eyebrow">Catalogue</p>
       <h1>Pick a model to run</h1>
       <p className="lede">
-        Models come from the catalogue MaiaLLM publishes, so the list is the same everywhere and
-        works offline from the last snapshot. Nothing is provisioned until you review and confirm
-        the cost estimate.
-      </p>
-
+        Free and fully open: no account, no email, no data selling. You bring your own
+        provider keys and pay them directly. Models come from the catalogue MaiaLLM
+        publishes, so the list is the same everywhere and works offline from the last
+        snapshot. Nothing is provisioned until you review and confirm the cost estimate.
+      </p>      {health?.huggingface.state === "missing" ? (
+        <div className="alert">
+          <span>Add your Hugging Face token to download models.</span>
+          <button type="button" className="ghost-button" onClick={() => openOnboarding("huggingface")}>
+            Set up the key
+          </button>
+        </div>
+      ) : null}
       {error ? (
         <div className="alert" role="alert">
           <span>{error}</span>
@@ -417,6 +427,10 @@ export function CataloguePage() {
                           ? "Cannot run this model"
                           : "Not a chat model"}
                   </button>
+                  <p className="field-hint">
+                    Start-up takes a few minutes. You can leave Maia in the background and we will
+                    notify you when the model is ready, or follow the progress in Models.
+                  </p>
                 </div>
               )}
             </>
