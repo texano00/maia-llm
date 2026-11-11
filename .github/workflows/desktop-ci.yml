@@ -1,7 +1,8 @@
 name: desktop-ci
 
+# CI runs once, after a merge lands on main. Feature-branch pushes stay free: a
+# PR costs a windows-2022 run per push and nothing consumes the result.
 on:
-  pull_request:
   push:
     branches: [main]
 

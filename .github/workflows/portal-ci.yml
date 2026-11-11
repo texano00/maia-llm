@@ -1,7 +1,7 @@
 name: portal-ci
 
+# Same rule as desktop-ci: verify and publish only for commits that reach main.
 on:
-  pull_request:
   push:
     branches: [main]
   # Rebuild the image (and move `latest`) without touching the source.
@@ -26,8 +26,8 @@ jobs:
       - run: npm run -w @maia/portal build:admin
 
   publish:
-    # `latest` must never move backwards, so a manual run counts only on main.
-    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+    # `latest` must never move backwards, so only main builds publish.
+    if: github.ref == 'refs/heads/main'
     needs: verify
     runs-on: ubuntu-24.04
     permissions:
