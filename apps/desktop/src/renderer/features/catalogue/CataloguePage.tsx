@@ -427,6 +427,10 @@ export function CataloguePage() {
                           ? "Cannot run this model"
                           : "Not a chat model"}
                   </button>
+                  <p className="field-hint">
+                    Start-up takes a few minutes. You can leave Maia in the background and we will
+                    notify you when the model is ready, or follow the progress in Models.
+                  </p>
                 </div>
               )}
             </>

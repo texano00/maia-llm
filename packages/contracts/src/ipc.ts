@@ -116,6 +116,14 @@ export const ipcChannels = [
 /** Main -> renderer push channel used for update status changes. */
 export const updateEventChannel = "update.event" as const;
 
+/** Main -> renderer push when a readiness notification is activated. */
+export const readyEventChannel = "session.ready.event" as const;
+
+export const readyEventSchema = z.object({
+  sessionId: z.string().min(1)
+});
+export type ReadyEvent = z.infer<typeof readyEventSchema>;
+
 /**
  * The published backend. Catalogue, telemetry and GPU reputation all live on it,
  * so one constant keeps the desktop pointed at the same place.

@@ -14,7 +14,7 @@ export interface ReadinessNotifierOptions {
   /** True when the app window has focus. */
   isFocused: () => boolean;
   /** Session currently visible in the focused window, when known. */
-  getVisibleSessionId: () => string | null;
+  getVisibleSessionId?: () => string | null;
   onActivate: (sessionId: string) => void;
   /** Called once, when the platform refuses notifications. */
   onUnsupported?: () => void;
@@ -46,8 +46,10 @@ export class ReadinessNotifier {
       return false;
     }
 
-    const watching = this.options.isFocused() && this.options.getVisibleSessionId() === run.id;
-    if (watching) {
+    const watching = this.options.isFocused() &&
+      (this.options.getVisibleSessionId?.() ?? null) === run.id;
+    if (watching || this.options.isFocused()) {
+      // The app is in front: the in-app status is the notification.
       return false;
     }
 

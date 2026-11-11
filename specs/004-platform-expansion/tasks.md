@@ -127,15 +127,15 @@ Monorepo: desktop main process in `apps/desktop/src/main/`, renderer in `apps/de
 
 ### Tests for User Story 4 ⚠️
 
-- [ ] T036 [P] [US4] Write `apps/desktop/tests/unit/desktop-notification.test.ts` with injected fakes for `Notification` support, window focus state and visible session id: notify only on the not-ready → ready transition while unfocused and not visible, never twice per run, and remain silent when permissions are refused.
+- [X] T036 [P] [US4] Write `apps/desktop/tests/unit/desktop-notification.test.ts` with injected fakes for `Notification` support, window focus state and visible session id: notify only on the not-ready → ready transition while unfocused and not visible, never twice per run, and remain silent when permissions are refused.
 
 ### Implementation for User Story 4
 
-- [ ] T037 [US4] Complete delivery in `apps/desktop/src/main/services/notifications/desktop.ts`: title/body naming model and run, click callback routing to the run, and the unsupported/permission-denied fallback hint.
-- [ ] T038 [US4] Subscribe to session lifecycle transitions in `apps/desktop/src/main/bootstrap/main.ts` (or an orchestrator hook in `apps/desktop/src/main/services/sessions/orchestrator.ts`) so readiness triggers exactly one notifier call.
-- [ ] T039 [US4] Focus the window and route to the run when the notification is activated, using the existing window and IPC broadcast plumbing in `apps/desktop/src/main/bootstrap/main.ts` and a renderer listener in `apps/desktop/src/renderer/features/models/useModelRuns.ts`.
-- [ ] T040 [US4] Show the estimated wait and "leave the app in the background, we will notify you" guidance where a run starts (`apps/desktop/src/renderer/features/catalogue/CataloguePage.tsx` and `apps/desktop/src/renderer/features/chat/ChatPage.tsx`).
-- [ ] T041 [US4] Surface the one-time permission hint in `apps/desktop/src/renderer/features/notifications/NotificationBell.tsx` when notifications are unsupported or refused.
+- [X] T037 [US4] Complete delivery in `apps/desktop/src/main/services/notifications/desktop.ts`: title/body naming model and run, click callback routing to the run, and the unsupported/permission-denied fallback hint.
+- [X] T038 [US4] Subscribe to session lifecycle transitions in `apps/desktop/src/main/bootstrap/main.ts` (or an orchestrator hook in `apps/desktop/src/main/services/sessions/orchestrator.ts`) so readiness triggers exactly one notifier call.
+- [X] T039 [US4] Focus the window and route to the run when the notification is activated, using the existing window and IPC broadcast plumbing in `apps/desktop/src/main/bootstrap/main.ts` and a renderer listener in `apps/desktop/src/renderer/features/models/useModelRuns.ts`.
+- [X] T040 [US4] Show the estimated wait and "leave the app in the background, we will notify you" guidance where a run starts (`apps/desktop/src/renderer/features/catalogue/CataloguePage.tsx` and `apps/desktop/src/renderer/features/chat/ChatPage.tsx`).
+- [X] T041 [US4] Surface the one-time permission hint in `apps/desktop/src/renderer/features/notifications/NotificationBell.tsx` when notifications are unsupported or refused.
 
 ---
 

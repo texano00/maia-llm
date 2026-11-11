@@ -29,7 +29,11 @@ import { createUseCaseResolver } from "../services/catalogue/use-cases";
 import { CredentialStore } from "../services/credentials/store";
 import { NotificationCenter } from "../services/notifications/center";
 import { deriveHealthNotifications, HEALTH_NOTIFICATION_KEYS, ProviderHealthMonitor } from "../services/health/monitor";
+import { ReadinessNotifier } from "../services/notifications/desktop";
+import { createElectronNotificationBackend } from "../services/notifications/electron-backend";
+import { ReadinessWatcher } from "../services/notifications/readiness-watcher";
 import type { ProviderHealth } from "@maia/contracts";
+import { readyEventChannel } from "@maia/contracts";
 import { SessionOrchestrator } from "../services/sessions/orchestrator";
 import { SessionStore } from "../services/sessions/store";
 import { GpuGuardian, guardianPaths } from "../services/sessions/guardian";
@@ -466,6 +470,30 @@ async function bootstrap(): Promise<void> {
   });
   registerSystemHandlers({ registry, notifications, health, onHealth: syncHealth });
   void health.refresh().then(syncHealth);
+
+  // One OS notification per run that becomes ready while Maia is in the
+  // background; clicking it brings the window forward on the run list.
+  const readinessNotifier = new ReadinessNotifier({
+    backend: createElectronNotificationBackend(),
+    isFocused: () => Boolean(mainWindow?.isFocused()),
+    onActivate: (sessionId) => {
+      mainWindow?.show();
+      mainWindow?.focus();
+      mainWindow?.webContents.send(readyEventChannel, { sessionId });
+    },
+    onUnsupported: () =>
+      notifications.set({
+        key: "desktop:unsupported",
+        severity: "warning",
+        message: "Allow system notifications for Maia LLM to be told when a model is ready.",
+        action: { label: "Open settings", route: "/settings" }
+      })
+  });
+  const readinessWatcher = new ReadinessWatcher({
+    listSessions: () => sessions.listSessions(),
+    notifier: readinessNotifier
+  });
+  readinessWatcher.start();
   // The IDE endpoint re-exposes the running model on 127.0.0.1 so VS Code can use
   // it; it binds only while the preference is on and a session is actually active.
   const ideEndpoint = new LocalEndpointService({

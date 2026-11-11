@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
-import { NavLink } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router-dom";
 import logoMark from "../assets/logo-mark.png";
 import { InfoButton } from "../shared/InfoButton";
 import { UpdateToast } from "../shared/updates/UpdateToast";
@@ -25,7 +25,14 @@ const navigation = [
 export function Layout({ children }: { children: ReactNode }) {
   const { sessions } = useWorkspace();
   const { health } = useProviderHealth();
+  const navigate = useNavigate();
   const [acknowledged, setAcknowledged] = useState<string[]>(() => readAcknowledgedFailures());
+
+  // Activating a readiness notification brings the app forward on the run list.
+  useEffect(() => {
+    const unsubscribe = window.maia?.onReadyEvent?.(() => navigate("/models"));
+    return () => unsubscribe?.();
+  }, [navigate]);
 
   useEffect(() => {
     const onAcknowledged = (): void => setAcknowledged(readAcknowledgedFailures());

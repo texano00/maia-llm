@@ -4,11 +4,14 @@ import {
   chatEventChannel,
   fail,
   ipcChannels,
+  readyEventChannel,
+  readyEventSchema,
   updateEventChannel,
   updateStatusSchema,
   type AppInfo,
   type ChatChunk,
   type IpcChannel,
+  type ReadyEvent,
   type Result,
   type UpdateStatus
 } from "@maia/contracts";
@@ -20,6 +23,8 @@ export interface MaiaBridge {
   onUpdateStatus(listener: (status: UpdateStatus) => void): () => void;
   /** Subscribes to streaming chat deltas. */
   onChatEvent(listener: (chunk: ChatChunk) => void): () => void;
+  /** Subscribes to readiness notifications the user activated. */
+  onReadyEvent?(listener: (event: ReadyEvent) => void): () => void;
 }
 
 const allowedChannels = new Set<string>(ipcChannels);
@@ -70,6 +75,21 @@ const bridge: MaiaBridge = {
 
     return () => {
       ipcRenderer.removeListener(chatEventChannel, handler);
+    };
+  },
+
+  onReadyEvent(listener: (event: ReadyEvent) => void): () => void {
+    const handler = (_event: IpcRendererEvent, payload: unknown): void => {
+      const parsed = readyEventSchema.safeParse(payload);
+      if (parsed.success) {
+        listener(parsed.data);
+      }
+    };
+
+    ipcRenderer.on(readyEventChannel, handler);
+
+    return () => {
+      ipcRenderer.removeListener(readyEventChannel, handler);
     };
   }
 };
