@@ -3,10 +3,13 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { TARGETS } from "../../infra/landing/release.js";
 
+// A Windows checkout has CRLF line endings, and these assertions are written
+// against the `\n` form; normalise before matching so the CI runner sees the
+// same file the author did.
 const BUILDER = readFileSync(
   join(process.cwd(), "apps/desktop/electron-builder.yml"),
   "utf8"
-);
+).replace(/\r\n/g, "\n");
 
 /** The one template every platform uses, so the page and the builder agree. */
 const TEMPLATE = "MaiaLLM-${version}-${arch}.${ext}";
