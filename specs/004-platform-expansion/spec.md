@@ -18,6 +18,13 @@
 - Q: Must the macOS and Linux builds be signed (and notarized on macOS) before they are offered for download, even when that needs a paid Apple Developer account? → A: No; macOS ships unsigned with published checksums and documented first-launch instructions, Linux is signed where free.
 - Q: How long should a failed run keep the Models navigation indicator red when nothing is running? → A: Until the user acknowledges it by opening Models or dismissing its notification.
 
+### Session 2026-11-12
+
+- Q: How should the Windows build be signed so Smart App Control stops blocking the upgrade from 0.9.0 to 0.9.1? → A: Sign the installer and the app executables with a Microsoft-trusted signature (Microsoft Trusted Signing or an OV/EV code-signing certificate) in the release workflow; an unsigned build is not an acceptable fallback.
+- Q: What should happen to the local "Use this model from your editor" feature now that the model's own endpoint is documented in Models? → A: Remove it completely — page, navigation entry, setting, loopback server and its IPC surface — so the model's own endpoint is the only documented way in.
+- Q: When the app shows a running model's public endpoint, should it also require an access key for it? → A: Yes — the model server starts with a generated per-run key, the app shows the key beside the endpoint, and every example includes it; a leaked address alone is useless.
+- Q: How should the header show the prepaid balance so it never spills out of its control? → A: A fixed-size badge that abbreviates amounts above $999.99 (e.g. $1.2k), with the exact amount in the tooltip and accessibility label.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - See the privacy promise before signing anything (Priority: P1)
@@ -224,6 +231,7 @@ A user launching the desktop app reaches a usable catalogue and their existing h
 
 - A key is revoked or expires while a model is running: the run continues, and the notification explains that the next run needs a new key.
 - The provider's balance cannot be read (offline, outage, or missing key): the credit icon shows an unknown state rather than a stale or zero amount.
+- The balance is large, or the window is narrow: the header control keeps its size and layout, showing an abbreviated amount instead of overflowing.
 - A model fails while another one is running: the Models navigation indicator stays green because a run is active, and the failure is listed in notifications.
 - A failure is acknowledged once by opening Models or dismissing its notification; it then stops affecting the navigation indicator, and any later failure raises the red state again.
 - Several notifications share the highest severity: the icon stays red, and the list orders errors before warnings, newest first.
@@ -234,7 +242,11 @@ A user launching the desktop app reaches a usable catalogue and their existing h
 - A conversation is deleted while the same model is used by another conversation: only the selected conversation's messages are removed.
 - Deleting a conversation that is the source of a telemetry sample does not remove or alter the sample, which never contains content.
 - An artifact is pulled from release while a visitor has the page open: the download action reports unavailable instead of failing silently.
+- An upgrade is installed on a Windows machine where Smart App Control is enabled: the signed build installs without a security block, and the same upgrade on a machine with Smart App Control off behaves identically.
+- The signing identity is unavailable or expired when a release is built: the workflow stops before publishing, and the previously released version stays the newest download.
 - A laptop wakes from sleep with a run that ended while suspended: the run is shown as terminated with its recorded end time and reason.
+- A user upgrades with the local editor proxy enabled: the port stops listening, the setting disappears from settings, and the rest of the app behaves as before.
+- An external tool keeps a copied endpoint after its run ended: the request is rejected, and the app has already stated that the address and key are valid only while that run lasts.
 
 ## Requirements *(mandatory)*
 
@@ -272,7 +284,7 @@ A user launching the desktop app reaches a usable catalogue and their existing h
 - **FR-019**: The notification indicator MUST be red when at least one current notification is an error, yellow when the highest severity is a warning, and otherwise neutral.
 - **FR-020**: The app MUST raise a notification when either provider key is missing or rejected, naming the affected key.
 - **FR-021**: The app MUST raise a warning when the prepaid compute balance falls below a threshold of 2 USD by default, and that threshold MUST be editable in settings.
-- **FR-022**: The header MUST display the remaining prepaid compute balance next to the notification indicator; activating it MUST NOT navigate or perform any action.
+- **FR-022**: The header MUST display the remaining prepaid compute balance next to the notification indicator, in a fixed-size indicator whose content stays inside its bounds for every value — including the unknown state — with amounts above 999.99 abbreviated and the exact amount available in the tooltip and the accessibility label; activating it MUST NOT navigate or perform any action.
 - **FR-023**: When the balance cannot be read, the header MUST show an unknown state rather than a zero or stale value.
 - **FR-024**: The Models item in the navigation MUST show a green blinking indicator while at least one model is running, a red indicator when no model is running and an unacknowledged failure exists, and an orange indicator when no model is running and no unacknowledged failure exists. Opening Models or dismissing the failure's notification acknowledges it; a running model always takes precedence over a failure.
 - **FR-025**: Dismissed notifications MUST stay dismissed until their condition occurs again.
@@ -323,6 +335,8 @@ A user launching the desktop app reaches a usable catalogue and their existing h
 **Platform availability**
 
 - **FR-054**: The product MUST publish installable builds for Windows x64, Linux x64, Linux arm64, macOS on Apple silicon, and macOS on Intel. Windows and Linux builds MUST carry the same origin and integrity guarantees as the current Windows build; macOS builds are published unsigned, MUST have published checksums, and MUST be accompanied by documented first-launch instructions.
+- **FR-054a**: Every published Windows build MUST be signed with a signature Microsoft trusts (Microsoft Trusted Signing or an OV/EV code-signing certificate), covering the installer and the installed application executables, so that an upgrade from the previous version installs on a machine with Smart App Control enabled without being blocked.
+- **FR-054b**: The release workflow MUST fail rather than publish unsigned Windows artifacts, and each release MUST state on its download page which authority signed the artifacts.
 - **FR-055**: The landing page MUST provide an operating-system selector and an architecture selector, where the architecture options depend on the selected operating system.
 - **FR-056**: The download action MUST resolve to the newest artifact matching the selected combination and MUST caption it with version, platform, architecture and size.
 - **FR-057**: A combination without a published artifact MUST be shown as unavailable rather than producing a broken or incorrect download.
@@ -335,6 +349,14 @@ A user launching the desktop app reaches a usable catalogue and their existing h
 - **FR-061**: Startup work that is not required to show the first screen MUST NOT block interaction with that screen.
 - **FR-062**: Faster startup MUST NOT change cost metering, estimate confirmation, teardown, orphan handling, or data retention behaviour.
 
+**Using a running model outside the app**
+
+- **FR-063**: The app MUST NOT ship, start, or advertise a local proxy that forwards an editor's requests to the rented model; the previous "use this model from your editor" page, its navigation entry, its setting, and the local server behind it MUST be removed, together with the means to control them.
+- **FR-064**: An installation that had the local proxy enabled MUST start after upgrade with no listener on that port and with the obsolete setting dropped, silently, without an error shown to the user.
+- **FR-065**: For each running model, the Models screen MUST show the endpoint an external tool needs — base URL including host and port, and the model identifier to request — read from the running instance rather than from a stored value.
+- **FR-066**: The model server MUST be started with a per-run access key generated on the device, and requests without that key MUST be rejected; the key MUST be new for every run, MUST NOT appear in logs, usage samples or exported data, and MUST be shown only for the run it belongs to.
+- **FR-067**: The Models screen MUST offer a copy-ready OpenAI-compatible request example and a copy-ready editor configuration example, both containing the current endpoint and key, and MUST state that the address and key stop working when the run ends.
+
 ### Key Entities
 
 - **Installation identity**: The pseudonymous identifier for one installation on one device, with device facts, creation time, current reporting preference, and the addresses observed over time. Not linked to any account or personal detail.
@@ -342,10 +364,10 @@ A user launching the desktop app reaches a usable catalogue and their existing h
 - **Provider credential**: A key the user owns for model downloads or compute rental, with its provider, verification state, and last verification time. Never leaves the app except to its provider.
 - **Health notification**: A current condition with severity (warning or error), message, optional call to action, condition key, and dismissal state.
 - **Balance reading**: The most recently retrieved prepaid compute balance, its retrieval time, and whether it is known or unavailable, with the user's warning threshold.
-- **Run**: A model the user requested, with its capability (text, text-to-image, image-to-text, image-to-image), lifecycle status, chosen power level, measured speed when available, and cost details.
+- **Run**: A model the user requested, with its capability (text, text-to-image, image-to-text, image-to-image), lifecycle status, chosen power level, measured speed when available, cost details, and while it lasts the endpoint and per-run access key other tools use to reach it.
 - **Power selection**: The user's chosen power tier for a run — Economy, Balanced or Performance — with the projected output token rate, projected hourly rate and projected total shown before confirmation.
 - **Conversation**: A local chat with its messages and, where applicable, image attachments, which the user can rename, pin, or permanently delete.
-- **Release artifact**: A published build identified by channel, version, operating system, and architecture, used by the landing page download selector.
+- **Release artifact**: A published build identified by channel, version, operating system, and architecture, its signing state (signed by which authority, or unsigned) and the integrity checks published with it, used by the landing page download selector.
 
 ## Success Criteria *(mandatory)*
 
@@ -364,6 +386,10 @@ A user launching the desktop app reaches a usable catalogue and their existing h
 - **SC-011**: Cold start reaches an interactive catalogue in under 2 seconds and readable history in under 3 seconds on the reference machine, at least 40% faster than the measured baseline.
 - **SC-012**: Downloads resolve to the correct newest artifact for 100% of supported operating system and architecture combinations, and unavailable combinations are never offered as downloads.
 - **SC-013**: All five supported platform targets install and pass their smoke checks on a fresh machine before a release is announced.
+- **SC-015**: 100% of Windows releases are signed, and upgrading from the previous release completes on a default Windows 11 machine with Smart App Control enabled, with zero security blocks recorded.
+- **SC-016**: A running model has exactly one documented external endpoint, and no local proxy port is listening on any installation after upgrade.
+- **SC-017**: 100% of external tools configured from the shown details work while their run lasts, and 100% of requests with a missing or expired key are rejected.
+- **SC-018**: The header balance control shows no clipped or overflowing text at any amount from 0 to the largest supported balance, at 100% and 200% zoom, with the exact figure always exposed in its tooltip and accessibility label.
 - **SC-014**: Settings sections are collapsed on 100% of openings, and no settings action requires a pointer device.
 
 ## Assumptions
@@ -377,7 +403,7 @@ A user launching the desktop app reaches a usable catalogue and their existing h
 - Image capabilities reuse the existing chat surface, estimate flow and cost meter; image files stay on the device and are deleted with their conversation.
 - A single amendment to the project constitution will bring image-model support and macOS/Linux distribution into scope before planning; both stories stay in this feature at P2 and P3 so the P1 trust, onboarding, health, notification and chat-deletion work ships first.
 - The reference machine for startup targets is documented in the plan; the targets in FR-060 apply to a warm installation with existing history.
-- Windows and Linux releases keep the existing signing and integrity requirements; macOS is published unsigned because notarization needs a paid Apple Developer account, so published checksums and a documented first-launch confirmation are the substitute. This departs from the release-integrity rule and must be recorded as an explicit exception in the constitution amendment.
+- Windows and Linux releases keep the existing integrity requirements, and Windows adds a trusted signature because Smart App Control blocks unsigned upgrades outright; macOS is published unsigned because notarization needs a paid Apple Developer account, so published checksums and a documented first-launch confirmation are the substitute. This departs from the release-integrity rule and must be recorded as an explicit exception in the constitution amendment.
 - Landing-page selectors rely on the same public release metadata the current download action already uses; no new account or backend service is introduced.
 
 ## Out of Scope
@@ -389,3 +415,4 @@ A user launching the desktop app reaches a usable catalogue and their existing h
 - Model training, fine-tuning, audio, and video workflows.
 - Mobile applications.
 - A billing or wallet system owned by Maia LLM; compute remains paid directly to the provider.
+- A local proxy that forwards an editor's traffic to a rented model; other tools connect to the model's own endpoint with its per-run key.
