@@ -329,12 +329,14 @@ rejected otherwise.
 
 ### Landing page
 
-`infra/landing/` is a self-contained page (logo, motto, Windows download button,
-Linux/macOS "coming soon", no build step). The button links to the release page
-and is re-pointed on every load at the newest installer from the public GitHub
-API, so the page never carries a hard-coded version or filename; it falls back to
-the release page when that call is unavailable. Deploy it after editing and
-whenever the logo changes:
+`infra/landing/` is a self-contained page (logo, motto, download button with
+platform and processor pickers, no build step). `release.js` holds the artifact
+table — one entry per OS/architecture pair — and the page asks it which installer
+the newest release carries. The button is re-pointed on every load from the
+public GitHub API, so the page never carries a hard-coded version or filename; a
+platform the release does not include shows "coming soon" instead of a dead link,
+and if the API is unreachable the button falls back to the release page. Deploy it
+after editing and whenever the logo changes:
 
 ```bash
 sudo rsync -a --delete infra/landing/ /var/www/maiallm/

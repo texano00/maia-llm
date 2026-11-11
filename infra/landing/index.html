@@ -101,6 +101,38 @@
         font-size: 0.82rem;
       }
 
+      .picker {
+        width: 100%;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.6rem;
+        text-align: left;
+      }
+
+      .picker label {
+        display: grid;
+        gap: 0.3rem;
+        color: var(--muted);
+        font-size: 0.8rem;
+      }
+
+      .picker select {
+        width: 100%;
+        padding: 0.55rem 0.7rem;
+        border: 1px solid var(--border);
+        border-radius: 0.6rem;
+        background: rgb(255 255 255 / 4%);
+        color: #e7ecf5;
+        font: inherit;
+      }
+
+      /* A platform we do not publish yet must not look like a working link. */
+      .cta.is-unavailable {
+        border-color: var(--border);
+        background: rgb(255 255 255 / 4%);
+        color: var(--muted);
+      }
+
       ul.platforms {
         width: 100%;
         margin: 0.25rem 0 0;
@@ -224,27 +256,22 @@
           <path d="m6 11 6 6 6-6" />
           <path d="M4 21h16" />
         </svg>
-        Download for Windows
+        <span id="download-label">Download</span>
       </a>
       <p class="meta" id="release-meta">Windows 10/11 x64 · latest release on GitHub</p>
 
-      <ul class="platforms">
-        <li class="platform is-available">
-          <span class="platform-name">Windows</span>
-          <span class="platform-note">Windows 10/11 · x64</span>
-          <span class="badge badge--available">Available</span>
-        </li>
-        <li class="platform">
-          <span class="platform-name">Linux</span>
-          <span class="platform-note">Desktop, x64</span>
-          <span class="badge">Coming soon</span>
-        </li>
-        <li class="platform">
-          <span class="platform-name">macOS</span>
-          <span class="platform-note">Apple silicon and Intel</span>
-          <span class="badge">Coming soon</span>
-        </li>
-      </ul>
+      <div class="picker">
+        <label>
+          <span>Platform</span>
+          <select id="platform"></select>
+        </label>
+        <label>
+          <span>Processor</span>
+          <select id="architecture"></select>
+        </label>
+      </div>
+
+      <ul class="platforms" id="platform-status" aria-live="polite"></ul>
 
       <nav class="links">
         <a href="https://github.com/texano00/maia-llm/releases">All releases</a>
@@ -254,38 +281,159 @@
       <footer>Developed with ❤️ for an open future</footer>
     </main>
 
-    <script>
-      // Point the button at the exact installer of the newest release when the
-      // GitHub API answers; otherwise it keeps linking to the latest release
-      // page, where the same installer is listed.
-      (function () {
-        var button = document.getElementById("download");
-        var meta = document.getElementById("release-meta");
-        if (!button || !meta) return;
+    <script type="module">
+      import { describeDownload, detectPlatform, targets } from "./release.js";
 
-        fetch("https://api.github.com/repos/texano00/maia-llm/releases/latest", {
-          headers: { accept: "application/vnd.github+json" },
-          cache: "no-store",
+      // One script, one source of truth: the button, the caption and the
+      // availability list all come from the resolver that the tests cover.
+      const BUTTON = document.getElementById("download");
+      const LABEL = document.getElementById("download-label");
+      const META = document.getElementById("release-meta");
+      const PLATFORM = document.getElementById("platform");
+      const ARCHITECTURE = document.getElementById("architecture");
+      const STATUS = document.getElementById("platform-status");
+      const RELEASES = "https://github.com/texano00/maia-llm/releases";
+
+      const OS_LABELS = { windows: "Windows", macos: "macOS", linux: "Linux" };
+      const PAIRS = targets();
+
+      let latest = null;
+
+      function fillPlatforms(selected) {
+        const seen = [];
+        for (const pair of PAIRS) {
+          if (seen.indexOf(pair.os) === -1) {
+            seen.push(pair.os);
+          }
+        }
+
+        PLATFORM.replaceChildren(
+          ...seen.map((os) => new Option(OS_LABELS[os] || os, os, false, os === selected))
+        );
+      }
+
+      function fillArchitectures(os, selected) {
+        const options = PAIRS.filter((pair) => pair.os === os);
+        ARCHITECTURE.replaceChildren(
+          ...options.map(
+            (pair) =>
+              new Option(
+                pair.archLabel + (pair.note ? " · " + pair.note : ""),
+                pair.arch,
+                false,
+                pair.arch === selected
+              )
+          )
+        );
+      }
+
+      // Availability is per release: a platform we do not build yet resolves to
+      // nothing, and the page says so instead of linking to a missing file.
+      function renderStatus() {
+        // Without the API there is nothing to be truthful about, so the list
+        // stays empty rather than guessing which builds exist.
+        if (!latest) {
+          STATUS.replaceChildren();
+          return;
+        }
+
+        const byOs = {};
+        for (const pair of PAIRS) {
+          const described = describeDownload(latest, pair.os, pair.arch);
+          byOs[pair.os] = byOs[pair.os] || { available: 0, total: 0 };
+          byOs[pair.os].total += 1;
+          if (described.available) {
+            byOs[pair.os].available += 1;
+          }
+        }
+
+        STATUS.replaceChildren(
+          ...Object.keys(byOs).map((os) => {
+            const entry = byOs[os];
+            const item = document.createElement("li");
+            item.className = entry.available > 0 ? "platform is-available" : "platform";
+
+            const name = document.createElement("span");
+            name.className = "platform-name";
+            name.textContent = OS_LABELS[os] || os;
+
+            const note = document.createElement("span");
+            note.className = "platform-note";
+            const architectures = PAIRS.filter((pair) => pair.os === os)
+              .map((pair) => pair.archLabel)
+              .join(" · ");
+            note.textContent = architectures;
+
+            const badge = document.createElement("span");
+            badge.className = entry.available > 0 ? "badge badge--available" : "badge";
+            badge.textContent = entry.available > 0 ? "Available" : "Coming soon";
+
+            item.append(name, note, badge);
+            return item;
+          })
+        );
+      }
+
+      function render() {
+        const os = PLATFORM.value;
+        const arch = ARCHITECTURE.value;
+
+        if (!latest) {
+          // Before the API answers, keep the plain "latest release" behaviour.
+          META.textContent = "Latest release on GitHub";
+          return;
+        }
+
+        const described = describeDownload(latest, os, arch);
+        const platformName = OS_LABELS[described.os] || "your platform";
+
+        if (described.available) {
+          BUTTON.href = described.url;
+          BUTTON.classList.remove("is-unavailable");
+          BUTTON.removeAttribute("aria-disabled");
+          LABEL.textContent = "Download for " + platformName;
+          META.textContent =
+            described.caption + (described.sizeLabel ? " · " + described.sizeLabel : "") + " · latest release";
+        } else {
+          BUTTON.href = described.fallbackUrl || RELEASES;
+          BUTTON.classList.add("is-unavailable");
+          BUTTON.setAttribute("aria-disabled", "true");
+          LABEL.textContent = platformName + " build coming soon";
+          META.textContent = "No installer published for this platform yet — see all releases";
+        }
+      }
+
+      const guess = detectPlatform({
+        userAgent: navigator.userAgent || "",
+        platform: navigator.platform || "",
+      });
+      const initialOs = guess.os || "windows";
+      fillPlatforms(initialOs);
+      fillArchitectures(initialOs, guess.arch || "x64");
+      renderStatus();
+      render();
+
+      PLATFORM.addEventListener("change", () => {
+        fillArchitectures(PLATFORM.value, ARCHITECTURE.value);
+        render();
+      });
+      ARCHITECTURE.addEventListener("change", render);
+
+      // The newest release, re-read on every load so the link is never stale.
+      fetch("https://api.github.com/repos/texano00/maia-llm/releases/latest", {
+        headers: { accept: "application/vnd.github+json" },
+        cache: "no-store",
+      })
+        .then((response) => (response.ok ? response.json() : Promise.reject(response.status)))
+        .then((release) => {
+          latest = release;
+          renderStatus();
+          render();
         })
-          .then(function (response) {
-            return response.ok ? response.json() : Promise.reject(response.status);
-          })
-          .then(function (release) {
-            var installer = (release.assets || []).filter(function (asset) {
-              return /^MaiaLLM-Setup-.*-x64\.exe$/i.test(asset.name);
-            })[0];
-            if (!installer || !installer.browser_download_url) return;
-
-            // Never print a version number: the link is re-resolved on every
-            // load, so it always points at the newest installer.
-            var megabytes = Math.round(installer.size / 1048576);
-            button.href = installer.browser_download_url;
-            meta.textContent = "Windows 10/11 x64 · " + megabytes + " MB · latest release";
-          })
-          .catch(function () {
-            // Private repo or offline: the release page link still works.
-          });
-      })();
+        .catch(() => {
+          // Private repo or offline: the release page link still works.
+          META.textContent = "Latest release on GitHub";
+        });
     </script>
   </body>
 </html>

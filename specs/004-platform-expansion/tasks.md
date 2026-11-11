@@ -257,12 +257,12 @@ Monorepo: desktop main process in `apps/desktop/src/main/`, renderer in `apps/de
 
 ### Tests for User Story 10 ⚠️
 
-- [ ] T081 [P] [US10] Write `scripts/tests/release-resolver.test.ts` for the pure resolver `infra/landing/release.js`: per-OS architecture options, newest-asset selection by name pattern, unavailable combination, and Windows x64 fallback when detection fails.
+- [X] T081 [P] [US10] Write `scripts/tests/release-resolver.test.ts` for the pure resolver `infra/landing/release.js`: per-OS architecture options, newest-asset selection by name pattern, unavailable combination, and Windows x64 fallback when detection fails.
 
 ### Implementation for User Story 10
 
-- [ ] T082 [P] [US10] Extract asset resolution into `infra/landing/release.js` (pure, no DOM) and load it from `infra/landing/index.html`.
-- [ ] T083 [US10] Add the OS and architecture selects plus the unavailable state to `infra/landing/index.html`, keeping the existing caption format and newest-release API call.
+- [X] T082 [P] [US10] Extract asset resolution into `infra/landing/release.js` (ES module, no DOM) and load it from `infra/landing/index.html`.
+- [X] T083 [US10] Add the OS and architecture selects plus the unavailable state to `infra/landing/index.html`, keeping the existing caption format and newest-release API call. The platform list is rendered from the same resolver, and `infra/nginx/maiallm.conf` serves `/release.js` uncached.
 - [ ] T084 [US10] Add `mac` (dmg, arm64 + x64, `identity: null`) and `linux` (AppImage + deb, x64 + arm64) targets with artifact names matching the existing pattern to `apps/desktop/electron-builder.yml`.
 - [ ] T085 [US10] Extend `.github/workflows/windows-dev-build.yml` (or add a platform matrix workflow) to build on macOS and Ubuntu runners, upload installers, and publish `SHA256SUMS.txt` with the release.
 - [ ] T086 [US10] Document the unsigned-macOS first-launch confirmation, the checksum verification command and the platform support matrix in `docs/release-process.md` and `README.md`.
