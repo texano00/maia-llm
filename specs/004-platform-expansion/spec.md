@@ -8,6 +8,16 @@
 
 **Input**: Founder's feature notes requesting: privacy-first, truly open and free positioning (no accounts, no data selling) reflected in the product motto, README and landing page; voluntary, pseudonymous telemetry keyed to a unique installation identity (device facts and observed IPs) with effective tokens-per-second per user and per model in the private backoffice; first-run wizard for the user's own provider keys; a catalogue popup asking the desired "power" and previewing the expected output token rate; notification icon (yellow/red) with provider-health and wallet alerts, plus a wallet-credit icon and a Models status indicator; desktop notifications when a model becomes ready; image (text-to-image, image-to-text, image-to-image) model support; faster desktop startup; macOS and Linux artifacts with an OS/architecture download selector on the landing page; conversation deletion in Chat; and settings sections collapsed by default for a cleaner UX.
 
+## Clarifications
+
+### Session 2026-11-11
+
+- Q: Should image-model support and macOS/Linux builds be brought inside this release's scope by amending the project constitution, or deferred so this release stays under the current rules? → A: Amend the constitution once for both; image models stay at P2 and macOS/Linux at P3 so planning can phase them behind the P1 work.
+- Q: How should the network addresses attached to usage samples be stored, given that the product promises to collect as little personal data as possible? → A: Store the full address in the telemetry store with no expiry; application logs still never contain addresses.
+- Q: What should the power slider in the catalogue popup actually change when the user moves it? → A: Three named GPU tiers (Economy, Balanced, Performance) mapped to existing offer classes, opening at Balanced.
+- Q: Must the macOS and Linux builds be signed (and notarized on macOS) before they are offered for download, even when that needs a paid Apple Developer account? → A: No; macOS ships unsigned with published checksums and documented first-launch instructions, Linux is signed where free.
+- Q: How long should a failed run keep the Models navigation indicator red when nothing is running? → A: Until the user acknowledges it by opening Models or dismissing its notification.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - See the privacy promise before signing anything (Priority: P1)
@@ -60,7 +70,7 @@ A user sees, without opening a settings screen, whether one of their provider ke
 3. **Given** notifications exist, **When** the user looks at the notification icon, **Then** its colour is red when at least one notification is an error and yellow when the highest severity is a warning.
 4. **Given** the user opens the notification list, **When** they select an entry, **Then** the app navigates to the screen that resolves it, and the entry can be dismissed once resolved.
 5. **Given** the balance is readable, **When** the user looks next to the notification icon, **Then** a money icon shows the remaining prepaid balance, and activating it performs no navigation.
-6. **Given** at least one model is running, **When** the user looks at the Models item in the left navigation, **Then** a green blinking indicator is shown; if no model is running and at least one run has failed, the indicator is red; if no model is running and nothing failed, it is orange.
+6. **Given** at least one model is running, **When** the user looks at the Models item in the left navigation, **Then** a green blinking indicator is shown; if no model is running and an unacknowledged failure exists, the indicator is red; if no model is running and no unacknowledged failure exists, it is orange. Opening Models or dismissing the failure's notification acknowledges it and clears the red state.
 
 ---
 
@@ -110,8 +120,8 @@ A user selects a model and is asked, in a popup, how powerful a GPU they want, w
 
 **Acceptance Scenarios**:
 
-1. **Given** the user selects a model in either catalogue mode, **When** they request a run, **Then** a popup asks for the desired power level using a slider from low to high.
-2. **Given** the slider is moved, **When** its value changes, **Then** the projected output token rate updates continuously and is labelled as an estimate, not a guarantee.
+1. **Given** the user selects a model in either catalogue mode, **When** they request a run, **Then** a popup asks for the desired power level using a slider that offers three named stops — Economy, Balanced and Performance — and opens at Balanced.
+2. **Given** the slider is moved, **When** its value changes, **Then** the projected output token rate updates for the selected tier and is labelled as an estimate, not a guarantee.
 3. **Given** the user changes the power level, **When** the projection changes, **Then** the projected hourly rate and expected total cost update consistently with the existing estimate rules.
 4. **Given** the user confirms the power level, **When** they continue, **Then** the existing estimate review and explicit confirmation still happen before any resource is rented.
 5. **Given** the user cancels the popup, **When** it closes, **Then** no estimate or rental is created and the catalogue selection is unchanged.
@@ -189,7 +199,7 @@ A user on macOS or Linux downloads a build for their operating system and proces
 2. **Given** a valid combination is selected, **When** the visitor activates download, **Then** the newest artifact for that combination is downloaded, and the caption names its version, platform, architecture and size.
 3. **Given** a combination has no published artifact yet, **When** it is selected, **Then** the download action is replaced by an explicit unavailable state instead of a broken link.
 4. **Given** a visitor makes no choice, **When** the page loads, **Then** the selector defaults to their detected operating system and architecture, falling back to Windows x64 when detection is not possible.
-5. **Given** a downloaded build, **When** it is installed on its target, **Then** it passes the same origin and integrity checks as the Windows build.
+5. **Given** a downloaded build, **When** it is installed on its target, **Then** its checksum matches the published value and it installs following that platform's documented steps, including the first-launch confirmation required on macOS.
 
 ---
 
@@ -215,6 +225,7 @@ A user launching the desktop app reaches a usable catalogue and their existing h
 - A key is revoked or expires while a model is running: the run continues, and the notification explains that the next run needs a new key.
 - The provider's balance cannot be read (offline, outage, or missing key): the credit icon shows an unknown state rather than a stale or zero amount.
 - A model fails while another one is running: the Models navigation indicator stays green because a run is active, and the failure is listed in notifications.
+- A failure is acknowledged once by opening Models or dismissing its notification; it then stops affecting the navigation indicator, and any later failure raises the red state again.
 - Several notifications share the highest severity: the icon stays red, and the list orders errors before warnings, newest first.
 - The power slider is used for a model with no measured history: the projection is labelled as a coarse default.
 - The measured speed for a run is zero (model failed before producing output): the sample records the failure outcome instead of a zero rate.
@@ -245,7 +256,7 @@ A user launching the desktop app reaches a usable catalogue and their existing h
 - **FR-009**: The private backoffice MUST show, for each installation and for each model within it, the measured output token rate over time, the number of runs, and their outcomes; installations that opted out MUST be marked as such.
 - **FR-010**: Users MUST be able to switch usage reporting off at any time; after that, no further samples are transmitted.
 - **FR-011**: Identifiers and their samples MUST NOT be joined to any account, email address, or third-party analytics service, because none exists.
-- **FR-012**: Address history MUST be retained only in the telemetry store, MUST NOT appear in application logs, and MUST be removed on a stated retention schedule (default: 90 days) while run samples without addresses may be kept longer for quality analysis.
+- **FR-012**: Address history MUST be retained in the telemetry store in full and without an automatic expiry, MUST NOT appear in application logs, and MUST be disclosed as permanently retained in the reporting opt-in explanation, together with the reason it is kept.
 
 **Provider keys and first-run guidance**
 
@@ -263,7 +274,7 @@ A user launching the desktop app reaches a usable catalogue and their existing h
 - **FR-021**: The app MUST raise a warning when the prepaid compute balance falls below a threshold of 2 USD by default, and that threshold MUST be editable in settings.
 - **FR-022**: The header MUST display the remaining prepaid compute balance next to the notification indicator; activating it MUST NOT navigate or perform any action.
 - **FR-023**: When the balance cannot be read, the header MUST show an unknown state rather than a zero or stale value.
-- **FR-024**: The Models item in the navigation MUST show a green blinking indicator while at least one model is running, a red indicator when no model is running and at least one run has failed, and an orange indicator when no model is running and no run has failed.
+- **FR-024**: The Models item in the navigation MUST show a green blinking indicator while at least one model is running, a red indicator when no model is running and an unacknowledged failure exists, and an orange indicator when no model is running and no unacknowledged failure exists. Opening Models or dismissing the failure's notification acknowledges it; a running model always takes precedence over a failure.
 - **FR-025**: Dismissed notifications MUST stay dismissed until their condition occurs again.
 
 **Notifications outside the app**
@@ -276,13 +287,13 @@ A user launching the desktop app reaches a usable catalogue and their existing h
 
 **Catalogue power selection and speed projection**
 
-- **FR-031**: Requesting a run from either catalogue mode MUST open a popup that asks for a desired power level using a horizontal slider from low to high.
-- **FR-032**: While the slider moves, the popup MUST show a continuously updated estimate of the output token rate for the selected power level, labelled as an estimate.
+- **FR-031**: Requesting a run from either catalogue mode MUST open a popup that asks for a desired power level using a horizontal slider with exactly three named stops — Economy, Balanced and Performance — opening on Balanced.
+- **FR-032**: Changing the selected tier MUST update the estimate of the output token rate shown in the popup, labelled as an estimate.
 - **FR-033**: The popup MUST show the hourly rate and expected total implied by the selected power level, using the same cost rules as the existing estimate.
 - **FR-034**: Confirming the popup MUST continue to the existing estimate review and explicit confirmation before any resource is rented.
 - **FR-035**: Cancelling the popup MUST create no estimate and no rental, and MUST leave the catalogue selection unchanged.
 - **FR-036**: When no measured speed data exists for the selected model, the projection MUST be labelled as a coarse default.
-- **FR-037**: The selected power level MUST determine the compute class requested for the run, and the same choice MUST be visible on the estimate the user confirms.
+- **FR-037**: The selected tier MUST determine the compute class requested for the run, drawn from the user's configured GPU preferences, and the same tier MUST be visible on the estimate the user confirms.
 
 **Conversation deletion**
 
@@ -311,12 +322,12 @@ A user launching the desktop app reaches a usable catalogue and their existing h
 
 **Platform availability**
 
-- **FR-054**: The product MUST publish installable builds for Windows x64, Linux x64, Linux arm64, macOS on Apple silicon, and macOS on Intel, each carrying the same origin and integrity guarantees as the current Windows build.
+- **FR-054**: The product MUST publish installable builds for Windows x64, Linux x64, Linux arm64, macOS on Apple silicon, and macOS on Intel. Windows and Linux builds MUST carry the same origin and integrity guarantees as the current Windows build; macOS builds are published unsigned, MUST have published checksums, and MUST be accompanied by documented first-launch instructions.
 - **FR-055**: The landing page MUST provide an operating-system selector and an architecture selector, where the architecture options depend on the selected operating system.
 - **FR-056**: The download action MUST resolve to the newest artifact matching the selected combination and MUST caption it with version, platform, architecture and size.
 - **FR-057**: A combination without a published artifact MUST be shown as unavailable rather than producing a broken or incorrect download.
 - **FR-058**: When no choice has been made, the selectors MUST default to the detected operating system and architecture, falling back to Windows x64.
-- **FR-059**: Behaviour that differs by platform MUST be described to the user where it affects installation or first run.
+- **FR-059**: Behaviour that differs by platform MUST be described where it affects installation or first run, including the first-launch confirmation macOS requires for an unsigned build and how to verify a downloaded build's checksum.
 
 **Startup performance**
 
@@ -332,7 +343,7 @@ A user launching the desktop app reaches a usable catalogue and their existing h
 - **Health notification**: A current condition with severity (warning or error), message, optional call to action, condition key, and dismissal state.
 - **Balance reading**: The most recently retrieved prepaid compute balance, its retrieval time, and whether it is known or unavailable, with the user's warning threshold.
 - **Run**: A model the user requested, with its capability (text, text-to-image, image-to-text, image-to-image), lifecycle status, chosen power level, measured speed when available, and cost details.
-- **Power selection**: The user's chosen compute power level for a run, with the projected output token rate, projected hourly rate and projected total shown before confirmation.
+- **Power selection**: The user's chosen power tier for a run — Economy, Balanced or Performance — with the projected output token rate, projected hourly rate and projected total shown before confirmation.
 - **Conversation**: A local chat with its messages and, where applicable, image attachments, which the user can rename, pin, or permanently delete.
 - **Release artifact**: A published build identified by channel, version, operating system, and architecture, used by the landing page download selector.
 
@@ -359,14 +370,14 @@ A user launching the desktop app reaches a usable catalogue and their existing h
 
 - The product remains account-free and single-user. Identity is a locally generated pseudonymous identifier; no email, phone number, or third-party login is introduced at any point.
 - Usage reporting stays opt-in to honour the existing governance rule that telemetry is disabled by default and limited to content-free events. The founder's "only information we retrieve" list is therefore the *maximum* collected when a user opts in, not a default.
-- Address history is stored only in the telemetry store with a default 90-day retention, because the governance rules forbid full addresses in application logs.
-- The "power" slider selects among compute classes that already exist in the provider's offer set; the projection is driven by measured speed samples once available and by coarse defaults before that. No new pricing model is introduced.
+- Address history is stored in full and without expiry in the telemetry store, while application logs still never contain addresses, as the governance rules require. The constitution amendment must state this retention explicitly, and the reporting opt-in screen must disclose it before the user switches reporting on.
+- The "power" slider offers exactly three tiers (Economy, Balanced, Performance) that map to compute classes already available in the provider's offer set; the projection is driven by measured speed samples once available and by coarse defaults before that. No new pricing model is introduced.
 - Provider-key verification uses the providers' existing verification endpoints; no key is sent anywhere else.
 - Desktop notifications rely on the operating system's permission model; when permission is refused, in-app status remains authoritative.
 - Image capabilities reuse the existing chat surface, estimate flow and cost meter; image files stay on the device and are deleted with their conversation.
-- macOS and Linux distribution and image-model support go beyond the currently documented 1.x scope, so implementing them requires an amendment to the project constitution before planning; this specification records the intended behaviour for that amended scope.
+- A single amendment to the project constitution will bring image-model support and macOS/Linux distribution into scope before planning; both stories stay in this feature at P2 and P3 so the P1 trust, onboarding, health, notification and chat-deletion work ships first.
 - The reference machine for startup targets is documented in the plan; the targets in FR-060 apply to a warm installation with existing history.
-- Release signing for new platforms follows the same integrity and provenance requirements as the Windows build, including a documented first-run step where an operating system requires it.
+- Windows and Linux releases keep the existing signing and integrity requirements; macOS is published unsigned because notarization needs a paid Apple Developer account, so published checksums and a documented first-launch confirmation are the substitute. This departs from the release-integrity rule and must be recorded as an explicit exception in the constitution amendment.
 - Landing-page selectors rely on the same public release metadata the current download action already uses; no new account or backend service is introduced.
 
 ## Out of Scope
