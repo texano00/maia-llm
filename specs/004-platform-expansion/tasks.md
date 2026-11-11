@@ -232,19 +232,20 @@ Monorepo: desktop main process in `apps/desktop/src/main/`, renderer in `apps/de
 
 ### Tests for User Story 9 ⚠️
 
-- [ ] T071 [P] [US9] Write `apps/desktop/tests/unit/capability-gate.test.ts`: `CAPABILITY_UNSUPPORTED` before any offer is booked for a model/runtime that cannot serve the requested capability, and the existing embedding-model refusal still fires.
-- [ ] T072 [P] [US9] Write `apps/desktop/tests/unit/conversation-images.test.ts`: images are written under `userData/images/<conversationId>/`, only relative paths are stored, deleting a conversation removes rows and files, and a file-removal failure does not resurrect the row.
+- [X] T071 [P] [US9] Write `apps/desktop/tests/unit/capability-gate.test.ts`: `CAPABILITY_UNSUPPORTED` before any offer is booked for a model/runtime that cannot serve the requested capability, and the existing embedding-model refusal still fires.
+- [X] T072 [P] [US9] Write `apps/desktop/tests/unit/conversation-images.test.ts`: images are written under `userData/images/<conversationId>/`, only relative paths are stored, deleting a conversation removes rows and files, and a file-removal failure does not resurrect the row.
 
 ### Implementation for User Story 9
 
-- [ ] T073 [US9] Map catalogue pipeline tags to the `capability` enum in `apps/desktop/src/main/services/catalogue/` and surface it in `apps/desktop/src/renderer/features/catalogue/CataloguePage.tsx`.
-- [ ] T074 [US9] Extend engine support in `apps/desktop/src/main/services/inference/launch-plan.ts` and the runnability gate in `apps/desktop/src/main/services/sessions/orchestrator.ts` so unsupported capability/model combinations are refused before booking.
-- [ ] T075 [US9] Implement `apps/desktop/src/main/services/history/images.ts` (store, resolve, delete, size cap 20 MB, max 4 per message) and expose it as the only image persistence path.
-- [ ] T076 [US9] Validate `attachments` in `chat.send` and shape image requests/responses in `apps/desktop/src/main/services/inference/vllm.ts` and `apps/desktop/src/main/services/inference/llamacpp.ts`, enforcing at least one attachment for image-to-text/image-to-image and none for text models.
-- [ ] T077 [US9] Add attachment picking and image rendering to `apps/desktop/src/renderer/features/chat/ChatPage.tsx` (bridge URL, never absolute paths in text), including local save of generated images.
-- [ ] T078 [US9] Remove image rows and files during deletion in `apps/desktop/src/main/ipc/workspace.ts` (the T043 path) and keep `session_metrics` writing for image runs.
-- [ ] T079 [US9] Include `capability` on usage samples from `apps/desktop/src/main/services/telemetry/usage.ts` with no image, prompt or dimension data.
+- [X] T073 [US9] Map catalogue pipeline tags to the `capability` enum in `packages/contracts/src/catalogue.ts` (`capabilityForPipelineTag`) and surface it in `apps/desktop/src/renderer/features/catalogue/CataloguePage.tsx` as a "reads images" badge.
+- [X] T074 [US9] Refuse unsupported capability/model combinations before booking: the catalogue runnability gate keeps diffusion pipelines out, and `SessionOrchestrator.send` throws `CAPABILITY_UNSUPPORTED` when images reach a text-only run.
+- [X] T075 [US9] Implement `apps/desktop/src/main/services/history/images.ts` (store, load, delete, 20 MB cap, max 4 per message, header-derived dimensions) and expose it as the only image persistence path.
+- [X] T076 [US9] Validate images in `chat.send` and shape image content parts in `apps/desktop/src/main/services/inference/vllm.ts`; text runs refuse attachments, and vision runs may still be asked a text-only question (deviation from the original "at least one attachment" rule, which would block plain questions on a vision model).
+- [X] T077 [US9] Add attachment picking and image rendering to `apps/desktop/src/renderer/features/chat/ChatPage.tsx`: format/size/count checks before upload, thumbnails in the composer, stored images loaded by id (never absolute paths), previews kept when a send fails.
+- [X] T078 [US9] Remove image rows and files during deletion in `apps/desktop/src/main/ipc/workspace.ts` and keep `session_metrics` writing for image runs.
+- [X] T079 [US9] Include `capability` on usage samples from `apps/desktop/src/main/services/telemetry/usage.ts` with no image, prompt or dimension data.
 - [ ] T080 [US9] Extend conversation export in `apps/desktop/src/main/services/history/` to copy referenced image files while keeping everything local.
+- [ ] T080a [US9] Text-to-image: generate into `conversation_images` with `direction = 'output'` and render generated images in the transcript (scheduled for 0.9.2).
 
 ---
 

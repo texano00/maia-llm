@@ -75,7 +75,13 @@ How the transport differs, and why:
   over SSE. Proxied and forwarded ports buffer event streams, which silently drops
   token-by-token updates; polling every 350 ms works everywhere.
 - Credentials live in memory only (`EnvSecretVault`): the browser build never
-  touches the OS keyring, and nothing is persisted outside `.maia-web/maia.db`.
+  touches the OS keyring, and nothing is persisted outside `.maia-web/maia.db`
+  and `.maia-web/images/`.
+- Attached images are written next to the database — `.maia-web/images/<chat>/`
+  here, `userData/images/<chat>/` in the packaged app — and only their metadata
+  (id, format, width, height) goes into SQLite. Deleting a chat removes the
+  folder. Nothing is uploaded anywhere: images reach the rented model over its
+  own endpoint and stay on disk afterwards so the transcript survives.
 - In-app updates are disabled; the "Check for updates" button reports that updates
   belong to the installed desktop build.
 

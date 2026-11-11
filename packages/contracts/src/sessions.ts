@@ -84,11 +84,42 @@ export const sessionEndSchema = z.object({
   reason: z.enum(["user", "idle", "cap", "app_exit", "failure"]).optional()
 });
 
+/**
+ * Vision input limits. Four images per turn is what the usual chat UIs allow
+ * and keeps one request under the 20 MB the model server accepts without
+ * chunking the upload.
+ */
+export const MAX_IMAGES_PER_MESSAGE = 4;
+export const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+
+export const imageMimeTypeSchema = z.enum(["image/png", "image/jpeg", "image/webp"]);
+
+export const IMAGE_MIME_TYPES = imageMimeTypeSchema.options;
+
+/** An image on its way to the model: base64 without the `data:` prefix. */
+export const chatImageInputSchema = z.object({
+  mimeType: imageMimeTypeSchema,
+  dataBase64: z.string().min(1)
+});
+
+/** An image already saved next to the conversation; payloads load on demand. */
+export const chatImageSchema = z.object({
+  id: z.string().min(1),
+  mimeType: imageMimeTypeSchema,
+  width: z.number().int().positive(),
+  height: z.number().int().positive()
+});
+
 export const chatSendSchema = z.object({
   sessionId: z.string().min(1),
   /** Omit to start a new conversation; include to continue an existing one. */
   conversationId: z.string().min(1).optional(),
-  content: z.string().min(1).max(32_000)
+  content: z.string().min(1).max(32_000),
+  /**
+   * Images for a vision run. The main process saves them before inference, so
+   * the transcript keeps them after the session is released.
+   */
+  images: z.array(chatImageInputSchema).max(MAX_IMAGES_PER_MESSAGE).default([])
 });
 
 export const chatAbortSchema = z.object({
@@ -166,6 +197,8 @@ export const conversationMessageSchema = z.object({
   content: z.string(),
   /** Reasoning tokens the model streamed before the answer, when it exposed any. */
   reasoning: z.string().nullable(),
+  /** Images attached to this turn, loaded separately so a transcript stays light. */
+  images: z.array(chatImageSchema).default([]),
   createdAt: z.string()
 });
 
@@ -211,6 +244,8 @@ export type ChatChunk = z.infer<typeof chatChunkSchema>;
 export type GpuFilters = z.infer<typeof gpuFiltersSchema>;
 export type ConversationSummary = z.infer<typeof conversationSummarySchema>;
 export type ConversationMessage = z.infer<typeof conversationMessageSchema>;
+export type ChatImage = z.infer<typeof chatImageSchema>;
+export type ChatImageInput = z.infer<typeof chatImageInputSchema>;
 export type ConversationRecord = z.infer<typeof conversationSchema>;
 export type ConversationDetail = z.infer<typeof conversationDetailSchema>;
 

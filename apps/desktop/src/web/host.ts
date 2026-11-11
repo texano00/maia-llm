@@ -1,8 +1,10 @@
 import { z } from "zod";
-import { chatEventChannel, type IpcChannel } from "@maia/contracts";
+import { dirname, join } from "node:path";
+import { capabilityForPipelineTag, chatEventChannel, type IpcChannel } from "@maia/contracts";
 import { closeDatabase, createConnection, type DatabaseConnection } from "../main/storage/connection";
 import { loadMigrations } from "./migrations";
 import { HistoryRepository } from "../main/services/history/repository";
+import { ConversationImageStore } from "../main/services/history/images";
 import { SettingsStore } from "../main/services/settings/store";
 import { CatalogueRepository } from "../main/services/catalogue/repository";
 import { CatalogueService } from "../main/services/catalogue/service";
@@ -64,6 +66,12 @@ export async function createWebHost(options: WebHostOptions): Promise<WebHost> {
   const database: DatabaseConnection = createConnection(options.databasePath, loadMigrations());
   const settings = new SettingsStore(database);
   const repository = new HistoryRepository(database);
+  // The web host has no Electron userData path, so images sit beside the
+  // database file it was given.
+  const conversationImages = new ConversationImageStore(
+    database,
+    join(dirname(options.databasePath), "images")
+  );
   const credentials = new CredentialStore(database, new EnvSecretVault());
 
   // Keys from the environment (VAST_API_KEY, HF_TOKEN) go through the normal
@@ -143,6 +151,8 @@ export async function createWebHost(options: WebHostOptions): Promise<WebHost> {
     assertRunnable: async (modelId) => {
       await assertChatRunnable(catalogue, modelId);
     },
+    capabilityFor: (modelId) =>
+      capabilityForPipelineTag(catalogueRepository.get(modelId)?.pipelineTag ?? null),
     reportFailure,
     logger
   });
@@ -259,6 +269,7 @@ export async function createWebHost(options: WebHostOptions): Promise<WebHost> {
     catalogue,
     sessions,
     history: repository,
+    images: conversationImages,
     broadcastChat: (payload) => options.onEvent?.(chatEventChannel, payload)
   });
 

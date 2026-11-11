@@ -1,7 +1,13 @@
 import { memo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import type { CatalogueModel, ModelArtifact, Session } from "@maia/contracts";
-import { describeGatedAccess, huggingFaceModelUrl, isChatCapableModel, isGgufRepositoryName } from "@maia/contracts";
+import {
+  capabilityForPipelineTag,
+  describeGatedAccess,
+  huggingFaceModelUrl,
+  isChatCapableModel,
+  isGgufRepositoryName
+} from "@maia/contracts";
 import { useWorkspace } from "../../shared/session/WorkspaceProvider";
 import { useProviderHealth } from "../../shared/health/useProviderHealth";
 import { openOnboarding } from "../onboarding/open";
@@ -544,6 +550,20 @@ const ModelRow = memo(function ModelRow({
           ) : null}
           {model.engine ? (
             <span className="pill">{describeEngine(model.engine)}</span>
+          ) : null}
+          {capabilityForPipelineTag(model.pipelineTag) === "image-to-text" ? (
+            <span
+              className="tooltip-source"
+              onMouseEnter={(event) =>
+                showTip(
+                  "This model reads images: attach a picture in the chat and ask about it.",
+                  event.currentTarget
+                )
+              }
+              onMouseLeave={() => setTip(null)}
+            >
+              <span className="pill pill-ok">reads images</span>
+            </span>
           ) : null}
           {isChatCapableModel(model) ? null : (
             <span

@@ -99,6 +99,8 @@ export const ipcChannels = [
   "conversation.setPinned",
   "conversation.switchModel",
   "conversation.delete",
+  /** Loads one saved image as a data URL for the transcript. */
+  "conversation.image",
   "chat.send",
   "chat.abort",
   "integration.status",
@@ -216,6 +218,19 @@ export const notificationDismissSchema = z.object({
 export const conversationDeleteSchema = z.object({
   id: z.string().min(1).max(100)
 });
+
+export const conversationImageRequestSchema = z.object({
+  id: z.string().min(1).max(100)
+});
+
+export const conversationImageResultSchema = z.object({
+  id: z.string().min(1),
+  mimeType: z.enum(["image/png", "image/jpeg", "image/webp"]),
+  dataBase64: z.string().min(1)
+});
+
+export type ConversationImageRequest = z.infer<typeof conversationImageRequestSchema>;
+export type ConversationImageResult = z.infer<typeof conversationImageResultSchema>;
 
 export const estimatePreviewSchema = z.object({
   modelId: z.string().min(1).max(200),

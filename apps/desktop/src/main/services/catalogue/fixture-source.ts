@@ -53,6 +53,18 @@ const MODELS: HuggingFaceModelPayload[] = [
     safetensors: { parameters: { F32: 124_439_808 } }
   },
   {
+    // Vision chat model: exercises attaching an image end to end in mock mode.
+    id: "Qwen/Qwen2.5-VL-7B-Instruct",
+    downloads: 640_000,
+    likes: 720,
+    gated: false,
+    pipeline_tag: "image-text-to-text",
+    lastModified: "2026-10-02T13:30:00.000Z",
+    tags: ["license:apache-2.0", "image-text-to-text", "qwen2-vl", "multimodal"],
+    cardData: { license: "apache-2.0", context_length: 32768 },
+    safetensors: { parameters: { BF16: 8_293_000_000 } }
+  },
+  {
     // The field case: a ComfyUI diffusion pack with no pipeline_tag and no
     // config.json. vLLM cannot load it, so a start must be refused up front.
     id: "Comfy-Org/MiniMax-H3",
@@ -96,6 +108,13 @@ const FILES: Record<string, HuggingFaceTreeEntry[]> = {
     { type: "file", path: "config.json", size: 720 },
     { type: "file", path: "tokenizer.json", size: 1_357_256 },
     { type: "file", path: "README.md", size: 12_040 }
+  ],
+  "Qwen/Qwen2.5-VL-7B-Instruct": [
+    { type: "file", path: "model-00001-of-00004.safetensors", size: 4_101_234_688, lfs: { size: 4_101_234_688 } },
+    { type: "file", path: "config.json", size: 1_480 },
+    { type: "file", path: "preprocessor_config.json", size: 1_120 },
+    { type: "file", path: "tokenizer.json", size: 11_402_112 },
+    { type: "file", path: "README.md", size: 7_040 }
   ],
   "Comfy-Org/MiniMax-H3": [
     { type: "file", path: "diffusion_models/minimax_h3_fl2va_bf16.safetensors", size: 17_200_000_000 },

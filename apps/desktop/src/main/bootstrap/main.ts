@@ -6,6 +6,7 @@ import { updateEventChannel, chatEventChannel } from "@maia/contracts";
 import { createModelPlanResolver } from "../services/inference/model-plan-resolver";
 import { closeDatabase, openDatabase, type DatabaseConnection } from "../storage/db";
 import { HistoryRepository } from "../services/history/repository";
+import { ConversationImageStore } from "../services/history/images";
 import { CredentialVault } from "../services/credentials/vault";
 import { UpdateService, type UpdateLogger } from "../services/updates/updater";
 import {
@@ -270,6 +271,7 @@ async function bootstrap(): Promise<void> {
   });
 
   const repository = new HistoryRepository(database);
+  const conversationImages = new ConversationImageStore(database, paths.imagesDir);
   const vault = new CredentialVault(paths.vaultDir);
   const credentials = new CredentialStore(database, vault);
 
@@ -587,6 +589,7 @@ async function bootstrap(): Promise<void> {
     catalogue,
     sessions,
     history: repository,
+    images: conversationImages,
     useCases: createUseCaseResolver({
       list: portal.configured() ? () => portal.useCases() : null,
       catalogue,

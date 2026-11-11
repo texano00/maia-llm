@@ -89,12 +89,20 @@ export interface ProvisioningProgress {
   elapsedMs: number;
 }
 
+/** One image on its way to a vision model, already base64 encoded. */
+export interface InferenceImage {
+  mimeType: string;
+  dataBase64: string;
+}
+
 export interface InferenceRuntime {
   stream(input: {
     sessionId: string;
     modelId: string;
     instanceId: number | null;
     prompt: string;
+    /** Images for vision runs; empty for text-only models. */
+    images?: InferenceImage[] | undefined;
     signal: AbortSignal;
     onDelta: (kind: StreamKind, text: string) => void;
   }): Promise<{ tokens: number; text: string }>;
@@ -106,6 +114,7 @@ export type SessionErrorCode =
   | "SESSION_CONFLICT"
   | "MODEL_NOT_READY"
   | "PROVIDER_UNAVAILABLE"
+  | "CAPABILITY_UNSUPPORTED"
   | "NOT_FOUND";
 
 export class SessionError extends Error {
@@ -965,7 +974,8 @@ export class SessionOrchestrator {
   async send(
     sessionId: string,
     content: string,
-    onDelta: (kind: StreamKind, text: string) => void
+    onDelta: (kind: StreamKind, text: string) => void,
+    images: InferenceImage[] = []
   ): Promise<{ tokens: number; text: string }> {
     const runtime = this.runtimes.get(sessionId);
     if (!runtime) {
@@ -981,6 +991,15 @@ export class SessionOrchestrator {
       );
     }
 
+    // A text model would silently ignore the pixels, so refuse before the GPU
+    // spends tokens on a question that was never actually asked.
+    if (images.length > 0 && runtime.session.capability !== "image-to-text") {
+      throw new SessionError(
+        "CAPABILITY_UNSUPPORTED",
+        "This model only reads text. Start a model that accepts images to send one."
+      );
+    }
+
     this.touchActivity(sessionId);
     const abort = new AbortController();
     runtime.abort = abort;
@@ -992,6 +1011,7 @@ export class SessionOrchestrator {
         modelId: runtime.session.modelId,
         instanceId: runtime.session.instanceId,
         prompt: content,
+        images,
         signal: abort.signal,
         onDelta
       });

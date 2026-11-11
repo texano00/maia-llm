@@ -4,6 +4,7 @@ import { IpcRegistry } from "../../src/main/ipc/registry";
 import { registerWorkspaceHandlers } from "../../src/main/ipc/workspace";
 import type { CatalogueService } from "../../src/main/services/catalogue/service";
 import type { HistoryRepository } from "../../src/main/services/history/repository";
+import type { ConversationImageStore } from "../../src/main/services/history/images";
 import type { SessionOrchestrator } from "../../src/main/services/sessions/orchestrator";
 
 function session(id: string, state: Session["state"], startedAt: string): Session {
@@ -50,6 +51,7 @@ function harness(options: HarnessOptions = {}): IpcRegistry {
     catalogue: {} as CatalogueService,
     sessions,
     history: {} as HistoryRepository,
+    images: {} as ConversationImageStore,
     broadcastChat: () => undefined
   });
 
