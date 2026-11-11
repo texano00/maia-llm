@@ -352,6 +352,12 @@ maia restart portal                      # planned restart, volume untouched
 docker inspect maia-portal --format '{{ json .State.Health.Status }}'
 ```
 
+No nginx reload is needed after recreating the portal container: the shipped
+`maiallm.conf` deliberately keeps **no** upstream connection pool, so nginx never
+holds a socket to a container that has been replaced. A host still running the
+older `keepalive 16` upstream must reload nginx once after a recreate
+(`sudo nginx -t && sudo systemctl reload nginx`).
+
 ## Backups
 
 The named `portaldata` volume contains the SQLite database. Stop the stack before
@@ -376,6 +382,7 @@ valid with the same secret.
 | `http://maiallm.com` answers 200 instead of redirecting   | Cloudflare **Always Use HTTPS** is off; the origin must not redirect behind a tunnel                                 |
 | Security headers missing on one hostname only             | Two vhosts claim that name; `sudo nginx -T \| grep -n "server_name maiallm.com"` and keep one                        |
 | Cloudflare answers `502` / `1033`                         | The tunnel cannot reach nginx: `sudo systemctl status cloudflared` and `curl -I http://localhost/` on the host       |
+| `/admin` returns nginx's `502` right after a recreate     | nginx reused pooled sockets to the previous container: `sudo systemctl reload nginx`. Shipped config pools nothing |
 | Cloudflare `404` for a hostname that works on the origin  | That public hostname is missing from the tunnel ingress, or `server_name` in the nginx block does not match it       |
 | `redirect loop` after adding the tunnel                   | Something still forces HTTPS at the origin; the nginx config must not redirect on port 80                            |
 | `api.maiallm.com/v1/admin/…` returns 404                  | By design: the backoffice API only exists on `pvt.maiallm.com`                                                       |
