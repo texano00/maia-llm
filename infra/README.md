@@ -8,7 +8,7 @@ Deployment files for maiallm.com. The full runbook is
 | `docker-compose.yml`      | Local development: builds the portal from source, plus PostgreSQL and MinIO for future use |
 | `docker-compose.prod.yml` | Production: pulls `ghcr.io/texano00/maia-llm:latest`, runs Watchtower                      |
 | `nginx/`                  | Three port-80 vhosts for an nginx behind a Cloudflare Tunnel: landing, API, backoffice     |
-| `landing/`                | Static page for `maiallm.com` (logo, motto, GitHub link)                                   |
+| `landing/`                | Static page for `maiallm.com` (logo, motto, Windows download, Linux/macOS coming soon) |
 | `.env.production.example` | Template for `infra/.env` (secrets, image tag, poll interval)                              |
 
 ```bash

@@ -89,9 +89,105 @@
         background: rgb(72 104 255 / 34%);
       }
 
+      a.cta svg {
+        flex: none;
+        width: 1.1rem;
+        height: 1.1rem;
+      }
+
+      p.meta {
+        margin: -0.75rem 0 0;
+        color: #6f83a6;
+        font-size: 0.82rem;
+      }
+
+      ul.platforms {
+        width: 100%;
+        margin: 0.25rem 0 0;
+        padding: 0;
+        display: grid;
+        gap: 0.6rem;
+        list-style: none;
+        text-align: left;
+      }
+
+      .platform {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 0.1rem 0.75rem;
+        padding: 0.7rem 0.9rem;
+        border: 1px solid var(--border);
+        border-radius: 0.75rem;
+        background: rgb(255 255 255 / 3%);
+      }
+
+      .platform-name {
+        font-weight: 600;
+        color: var(--muted);
+      }
+
+      .platform-note {
+        grid-column: 1;
+        color: #63779b;
+        font-size: 0.82rem;
+      }
+
+      .is-available .platform-name {
+        color: #fff;
+      }
+
+      .badge {
+        grid-row: 1 / span 2;
+        grid-column: 2;
+        align-self: center;
+        padding: 0.2rem 0.6rem;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        color: #6f83a6;
+        font-size: 0.7rem;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        white-space: nowrap;
+      }
+
+      .badge--available {
+        border-color: rgb(94 220 154 / 45%);
+        background: rgb(94 220 154 / 12%);
+        color: #8ef0bb;
+      }
+
+      nav.links {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 1.25rem;
+        font-size: 0.88rem;
+      }
+
+      nav.links a {
+        color: var(--muted);
+        text-decoration: none;
+      }
+
+      nav.links a:hover,
+      nav.links a:focus-visible {
+        color: #fff;
+        text-decoration: underline;
+      }
+
       footer {
         color: #6f83a6;
         font-size: 0.8rem;
+      }
+
+      @media (max-width: 26rem) {
+        body {
+          padding: 1.25rem 0.75rem;
+        }
+
+        main {
+          padding: 2rem 1.25rem;
+        }
       }
 
       @media (prefers-color-scheme: light) {
@@ -101,14 +197,93 @@
   </head>
   <body>
     <main>
-      <img class="logo" src="/logo.png" alt="Maia LLM" width="560" height="568" />      <h1>Maia LLM</h1>
+      <img class="logo" src="/logo.png" alt="Maia LLM" width="560" height="568" />
+      <h1>Maia LLM</h1>
       <p class="motto">
         Run open-weight language models on a GPU you rent only for as long as you use it.
       </p>
-      <a class="cta" href="https://github.com/texano00/maia-llm" rel="noreferrer">
-        View on GitHub
+
+      <a
+        class="cta"
+        id="download"
+        href="https://github.com/texano00/maia-llm/releases/latest"
+        rel="noreferrer"
+      >
+        <svg
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <path d="M12 3v12" />
+          <path d="m6 11 6 6 6-6" />
+          <path d="M4 21h16" />
+        </svg>
+        Download for Windows
       </a>
+      <p class="meta" id="release-meta">Windows 10/11 x64 · latest release on GitHub</p>
+
+      <ul class="platforms">
+        <li class="platform is-available">
+          <span class="platform-name">Windows</span>
+          <span class="platform-note">Windows 10/11 · x64</span>
+          <span class="badge badge--available">Available</span>
+        </li>
+        <li class="platform">
+          <span class="platform-name">Linux</span>
+          <span class="platform-note">Desktop, x64</span>
+          <span class="badge">Coming soon</span>
+        </li>
+        <li class="platform">
+          <span class="platform-name">macOS</span>
+          <span class="platform-note">Apple silicon and Intel</span>
+          <span class="badge">Coming soon</span>
+        </li>
+      </ul>
+
+      <nav class="links">
+        <a href="https://github.com/texano00/maia-llm/releases">All releases</a>
+        <a href="https://github.com/texano00/maia-llm">GitHub</a>
+      </nav>
+
       <footer>Developed with ❤️ for an open future</footer>
     </main>
+
+    <script>
+      // Point the button at the exact installer of the newest release when the
+      // GitHub API answers; otherwise it keeps linking to the latest release
+      // page, where the same installer is listed.
+      (function () {
+        var button = document.getElementById("download");
+        var meta = document.getElementById("release-meta");
+        if (!button || !meta) return;
+
+        fetch("https://api.github.com/repos/texano00/maia-llm/releases/latest", {
+          headers: { accept: "application/vnd.github+json" },
+        })
+          .then(function (response) {
+            return response.ok ? response.json() : Promise.reject(response.status);
+          })
+          .then(function (release) {
+            var installer = (release.assets || []).filter(function (asset) {
+              return /^MaiaLLM-Setup-.*-x64\.exe$/i.test(asset.name);
+            })[0];
+            if (!installer || !installer.browser_download_url) return;
+
+            var version = String(release.tag_name || "").replace(/^v/, "");
+            var megabytes = Math.round(installer.size / 1048576);
+            button.href = installer.browser_download_url;
+            meta.textContent =
+              (version ? "Version " + version + " · " : "") +
+              "Windows 10/11 x64 · " + megabytes + " MB";
+          })
+          .catch(function () {
+            // Private repo or offline: the release page link still works.
+          });
+      })();
+    </script>
   </body>
 </html>
