@@ -516,56 +516,7 @@ nav {
   color: #ffb3b3;
 }
 
-.session-log {
-  padding: 0.6rem 0.8rem;
-  border: 1px solid rgb(255 255 255 / 8%);
-  border-radius: 0.7rem;
-  background: rgb(255 255 255 / 2%);
-  font-size: 0.78rem;
-}
-
-.session-log summary {
-  cursor: pointer;
-  color: #8fa3c8;
-}
-
-.session-log ol {
-  display: grid;
-  gap: 0.2rem;
-  margin: 0.5rem 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.session-log li {
-  display: grid;
-  grid-template-columns: 5.5rem 3.2rem minmax(0, 1fr);
-  gap: 0.5rem;
-  color: #a9b7ce;
-}
-
-.session-log time {
-  color: #6f83a6;
-  font-variant-numeric: tabular-nums;
-}
-
-.log-level {
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  font-size: 0.68rem;
-  color: #6f83a6;
-}
-
-.log-error .log-level,
-.log-error {
-  color: #ffb3b3;
-}
-
-.log-warn .log-level {
-  color: #ffd8a1;
-}
-
-.model-meta {
+.log-warn .model-meta {
   color: #8fa3c8;
   font-size: 0.78rem;
 }
@@ -1324,15 +1275,6 @@ button:hover {
 .session-bar {
   gap: 0.6rem;
   padding: 0.25rem 0;
-}
-
-.session-log {
-  padding: 0.9rem 1.1rem;
-}
-
-.session-log ol {
-  gap: 0.4rem;
-  margin-top: 0.75rem;
 }
 
 .transcript {

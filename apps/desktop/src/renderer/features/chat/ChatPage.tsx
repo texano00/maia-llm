@@ -4,13 +4,12 @@ import type {
   ChatImage,
   ConversationDetail,
   ConversationSummary,
-  Estimate,
   Session
 } from "@maia/contracts";
 import { useWorkspace } from "../../shared/session/WorkspaceProvider";
-import { accruedMicroUsd, formatElapsed, formatUsd } from "../../shared/format";
 import { MessageContent } from "./MessageContent";
 import { ReasoningPanel } from "./ReasoningPanel";
+import { defaultSession, readySessions, sessionForModel } from "./ready";
 import {
   IMAGE_ACCEPT,
   canAttachImages,
@@ -33,7 +32,6 @@ interface PendingUserTurn {
 export function ChatPage() {
   const {
     sessions,
-    reloadSessions,
     focusSessionId,
     clearFocusSession,
     error: workspaceError,
@@ -59,7 +57,6 @@ export function ChatPage() {
   const [studentMode, setStudentMode] = useState(readStudentMode);
   const [historyOpen, setHistoryOpen] = useState(readHistoryOpen);
   const [atBottom, setAtBottom] = useState(true);
-  const [now, setNow] = useState(() => Date.now());
   const transcriptRef = useRef<HTMLDivElement>(null);
   // Streaming must not yank the transcript back to the bottom: scrolling up to
   // re-read an earlier step has to stay possible until the user returns.
@@ -68,9 +65,14 @@ export function ChatPage() {
   // must not paint a second bubble over the stored transcript.
   const inFlightRef = useRef(false);
 
-  const activeSession = sessions.find((session) => session.id === activeSessionId) ?? null;
+  // Only models that are serving can be used here. Starting, pricing, progress
+  // and teardown belong to Models; Chat is for talking to a ready model.
+  const usableSessions = readySessions(sessions);
+  const activeSession = usableSessions.find((session) => session.id === activeSessionId) ?? null;
   const frozen =
-    detail !== null && detail.conversation.modelId !== null && !sessions.some((session) => session.modelId === detail.conversation.modelId);
+    detail !== null &&
+    detail.conversation.modelId !== null &&
+    !usableSessions.some((session) => session.modelId === detail.conversation.modelId);
 
   const loadConversations = useCallback(async () => {
     const bridge = window.maia;
@@ -98,7 +100,7 @@ export function ChatPage() {
 
       if (result.ok) {
         setDetail(result.data);
-        const match = sessions.find((session) => session.modelId === result.data.conversation.modelId);
+        const match = sessionForModel(usableSessions, result.data.conversation.modelId);
         setActiveSessionId(match?.id ?? null);
       } else if (result.error.code === "NOT_FOUND") {
         // The remembered chat was deleted, or belonged to a different install:
@@ -111,7 +113,7 @@ export function ChatPage() {
         setError(result.error.message);
       }
     },
-    [loadConversations, sessions]
+    [loadConversations, usableSessions]
   );
 
   useEffect(() => {
@@ -134,25 +136,26 @@ export function ChatPage() {
       return;
     }
 
-    if (sessions.some((session) => session.id === focusSessionId)) {
+    if (usableSessions.some((session) => session.id === focusSessionId)) {
       setActiveSessionId(focusSessionId);
       clearFocusSession();
     }
-  }, [clearFocusSession, focusSessionId, sessions]);
+  }, [clearFocusSession, focusSessionId, usableSessions]);
 
+  // A new chat has no stored conversation to take its model from, so it starts
+  // on the first ready one. An open conversation keeps its own model: if that
+  // model is gone, the frozen notice explains it instead of silently borrowing
+  // another model's answers.
   useEffect(() => {
-    // The elapsed/cost clock only matters while a session is running. Ticking
-    // otherwise re-rendered the whole transcript every second for nothing.
-    const live = sessions.some(
-      (session) => session.state === "active" || session.state === "provisioning"
-    );
-    if (!live) {
+    if (detail !== null) {
       return;
     }
 
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [sessions]);
+    const next = defaultSession(usableSessions, activeSessionId);
+    if (next && next.id !== activeSessionId) {
+      setActiveSessionId(next.id);
+    }
+  }, [activeSessionId, detail, usableSessions]);
 
   useEffect(() => {
     const bridge = window.maia;
@@ -475,48 +478,6 @@ export function ChatPage() {
     }
   }
 
-  async function reviveModel(modelId: string): Promise<void> {
-    const bridge = window.maia;
-    if (!bridge) {
-      return;
-    }
-
-    setBusy(true);
-    const estimate = await bridge.invoke<Estimate>("estimate.create", {
-      modelId,
-      expectedMinutes: 30
-    });
-
-    if (!estimate.ok) {
-      setBusy(false);
-      setError(estimate.error.message);
-      return;
-    }
-
-    const confirmed = window.confirm(
-      `Start ${estimate.data.gpuName} at ${formatUsd(estimate.data.hourlyRateMicroUsd)}/h?\n\nExpected 30 min cost: ${formatUsd(estimate.data.projectedTotalMicroUsd)} (range ${formatUsd(estimate.data.rangeMicroUsd.low)}–${formatUsd(estimate.data.rangeMicroUsd.high)}).`
-    );
-
-    if (!confirmed) {
-      setBusy(false);
-      return;
-    }
-
-    const started = await bridge.invoke<Session>("session.start", {
-      estimateId: estimate.data.id,
-      confirmEstimate: true
-    });
-    setBusy(false);
-
-    if (started.ok) {
-      await reloadSessions();
-      setActiveSessionId(started.data.id);
-      setError(null);
-    } else {
-      setError(started.error.message);
-    }
-  }
-
   const showError = error ?? workspaceError;
 
   return (
@@ -660,7 +621,7 @@ export function ChatPage() {
             <select
               value={activeSessionId ?? ""}
               onChange={(event) => {
-                const session = sessions.find((entry) => entry.id === event.target.value);
+                const session = usableSessions.find((entry) => entry.id === event.target.value);
                 if (session) {
                   void switchModel(session);
                 }
@@ -670,11 +631,11 @@ export function ChatPage() {
               }}
             >
               <option value="">
-                {sessions.length === 0 ? "No model running" : "Select a running model"}
+                {usableSessions.length === 0 ? "No model is ready" : "Select a ready model"}
               </option>
-              {sessions.map((session) => (
+              {usableSessions.map((session) => (
                 <option key={session.id} value={session.id}>
-                  {session.modelId} · {session.gpuName}
+                  {session.modelId}
                 </option>
               ))}
             </select>
@@ -693,56 +654,16 @@ export function ChatPage() {
             <span>Student mode</span>
           </label>
 
-          {activeSession ? (
-            <>
-              <span className={stateClass(activeSession.state)}>{stateLabel(activeSession.state)}</span>
-              <span className="pill">{formatUsd(activeSession.hourlyRateMicroUsd)}/h</span>
-              <span className="pill">elapsed {formatElapsed(activeSession.startedAt, now)}</span>
-              <span className="pill">
-                accrued {formatUsd(accruedMicroUsd(activeSession.hourlyRateMicroUsd, activeSession.startedAt, now))}
-              </span>
-              <button
-                type="button"
-                className="ghost-button"
-                onClick={async () => {
-                  const bridge = window.maia;
-                  if (!bridge) {
-                    return;
-                  }
-                  await bridge.invoke("session.end", {
-                    sessionId: activeSession.id,
-                    reason: "user"
-                  });
-                  setActiveSessionId(null);
-                  await reloadSessions();
-                }}
-              >
-                Pause and release GPU
-              </button>
-            </>
-          ) : null}
+          {usableSessions.length === 0 ? (
+            <Link className="ghost-button" to="/catalogue">
+              Start a model
+            </Link>
+          ) : (
+            <Link className="ghost-button" to="/models">
+              Model status
+            </Link>
+          )}
         </div>
-
-        {activeSession ? (
-          <details className="session-log" open={activeSession.state === "provisioning"}>
-            <summary>
-              Provisioning log · {activeSession.events.length} events
-              {activeSession.instanceId ? ` · instance ${activeSession.instanceId}` : ""}
-            </summary>
-            <ol>
-              {activeSession.events.length === 0 ? (
-                <li className="muted small">No events yet.</li>
-              ) : null}
-              {activeSession.events.map((event, index) => (
-                <li key={`${event.at}-${index}`} className={`log-${event.level}`}>
-                  <time dateTime={event.at}>{formatClock(event.at)}</time>
-                  <span className="log-level">{event.level}</span>
-                  <span>{event.message}</span>
-                </li>
-              ))}
-            </ol>
-          </details>
-        ) : null}
 
         {showError ? (
           <div className="alert" role="alert">
@@ -763,19 +684,19 @@ export function ChatPage() {
         {frozen && detail?.conversation.modelId ? (
           <div className="alert alert-frozen" role="status">
             <div>
-              <strong>This chat is frozen.</strong>{" "}
-              {detail.conversation.modelId} is not running any more. Restart it to continue where you
-              left off, or switch this conversation to another running model.
+              <strong>This chat's model is not ready.</strong>{" "}
+              {detail.conversation.modelId} is not serving any more, so this conversation is paused.
+              Start or restart a model from Models, then come back.
             </div>
             <div className="update-actions">
-              <button type="button" disabled={busy} onClick={() => void reviveModel(detail.conversation.modelId!)}>
-                {busy ? "Starting…" : `Restart ${shortModel(detail.conversation.modelId)}`}
-              </button>
-              {sessions.length > 0 ? (
+              <Link className="ghost-button" to="/models">
+                Open Models
+              </Link>
+              {usableSessions.length > 0 ? (
                 <select
                   defaultValue=""
                   onChange={(event) => {
-                    const session = sessions.find((entry) => entry.id === event.target.value);
+                    const session = usableSessions.find((entry) => entry.id === event.target.value);
                     if (session) {
                       void switchModel(session);
                     }
@@ -784,7 +705,7 @@ export function ChatPage() {
                   <option value="" disabled>
                     Continue with another model…
                   </option>
-                  {sessions.map((session) => (
+                  {usableSessions.map((session) => (
                     <option key={session.id} value={session.id}>
                       {session.modelId}
                     </option>
@@ -901,14 +822,12 @@ export function ChatPage() {
             value={draft}
             placeholder={
               activeSession
-                ? activeSession.state === "active"
-                  ? "Ask the model something…"
-                  : `Model is ${stateLabel(activeSession.state).toLowerCase()} — the composer unlocks when it is running.`
+                ? "Ask the model something…"
                 : frozen
-                  ? "Restart the model or switch models to continue this chat."
+                  ? "This chat's model is not ready — start one in Models."
                   : "Start a model from the catalogue to chat."
             }
-            disabled={!activeSession || activeSession.state !== "active" || busy}
+            disabled={!activeSession || busy}
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey) {
@@ -936,14 +855,14 @@ export function ChatPage() {
                   type="button"
                   className="ghost-button"
                   title="Attach an image for this model to look at"
-                  disabled={!activeSession || activeSession.state !== "active" || busy}
+                  disabled={!activeSession || busy}
                   onClick={() => fileInputRef.current?.click()}
                 >
                   Attach image
                 </button>
               </>
             ) : null}
-            <button type="submit" disabled={!activeSession || activeSession.state !== "active" || busy || draft.trim().length === 0}>
+            <button type="submit" disabled={!activeSession || busy || draft.trim().length === 0}>
               {busy ? "Generating…" : "Send"}
             </button>
             {busy && activeSession ? (
@@ -967,46 +886,6 @@ export function ChatPage() {
       </div>
     </section>
   );
-}
-
-function shortModel(modelId: string): string {
-  return modelId.split("/").at(-1) ?? modelId;
-}
-
-const STATE_LABELS: Record<string, string> = {
-  estimated: "Estimated",
-  provisioning: "Provisioning",
-  ready: "Starting",
-  active: "Running",
-  ending: "Shutting down",
-  ended: "Paused",
-  cancelled: "Cancelled",
-  failed: "Error"
-};
-
-function stateLabel(state: string): string {
-  return STATE_LABELS[state] ?? state;
-}
-
-function stateClass(state: string): string {
-  if (state === "active") {
-    return "pill pill-ok";
-  }
-  if (state === "failed") {
-    return "pill pill-danger";
-  }
-  if (state === "provisioning" || state === "ready" || state === "ending") {
-    return "pill pill-warning";
-  }
-  return "pill";
-}
-
-function formatClock(iso: string): string {
-  return new Date(iso).toLocaleTimeString(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit"
-  });
 }
 
 function roleLabel(role: string): string {
