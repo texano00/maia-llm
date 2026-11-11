@@ -235,6 +235,20 @@ export function SettingsPage() {
     }
   }
 
+  async function toggleUsageReporting(next: boolean): Promise<void> {
+    const bridge = window.maia;
+    if (!bridge) {
+      return;
+    }
+
+    const result = await bridge.invoke<AppSettings>("settings.update", { usageReporting: next });
+    if (result.ok) {
+      setSettings(result.data);
+    } else {
+      setError(result.error.message);
+    }
+  }
+
   async function saveDiagnostics(next: string): Promise<void> {
     const bridge = window.maia;
     if (!bridge) {
@@ -607,6 +621,33 @@ export function SettingsPage() {
           </button>
         </div>
       </form>
+
+      <section className="settings-card settings-card-stacked">
+        <div>
+          <h2>Usage reporting</h2>
+          <p className="lede">
+            Optional. When on, Maia sends one content-free measurement per finished run: the model,
+            its capability, how many tokens it produced, how long generation took, the resulting
+            tokens per second, and the outcome. It also sends a pseudonymous installation id, device
+            facts (operating system, version, architecture) and the network address observed by the
+            server, which is kept without an expiry.
+          </p>
+          <p className="lede">
+            It never sends prompts, responses, images, file paths or credentials. There is no account
+            and the data is never sold. Turning this off stops the next run from reporting.
+          </p>
+        </div>
+        <div className="update-actions">
+          <button
+            type="button"
+            disabled={!bridgeAvailable || !settings}
+            onClick={() => void toggleUsageReporting(!(settings?.usageReporting ?? false))}
+          >
+            {settings?.usageReporting ? "Turn usage reporting off" : "Turn usage reporting on"}
+          </button>
+          <span className="pill">{settings?.usageReporting ? "On" : "Off"}</span>
+        </div>
+      </section>
     </section>
   );
 }

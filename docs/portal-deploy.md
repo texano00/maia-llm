@@ -386,3 +386,14 @@ valid with the same secret.
 | Watchtower logs "No new images found" after a release     | The release did not publish (`Actions → portal-ci`), or this host is pinned with `MAIA_IMAGE_TAG`                    |
 | Logins invalidated after a restart                        | `MAIA_PORTAL_TOKEN_SECRET` changed; restore the previous value                                                       |
 | Disk filling with logs                                    | `logging.options.max-size` in the Compose file; also `docker image prune`                                            |
+
+### Usage reporting endpoints
+
+`portal-ci` deploys the opt-in measurement endpoints alongside the diagnostics sink:
+
+- `POST /api/v0/usage` — one content-free sample per finished run (`202`, or `400`
+  for unknown keys, `403` when the installation opted out).
+- `POST /api/v0/usage/opt-in` / `/api/v0/usage/opt-out` — preference signals.
+
+Set `MAIA_USAGE_ENABLED=false` to disable them on a deployment. Samples live in
+`usage_samples`; addresses are stored in full and are never written to logs.

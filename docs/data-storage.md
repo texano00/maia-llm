@@ -151,3 +151,21 @@ The work is confined to one new adapter and a short verification pass:
   stop the service first.
 - `sqlite3 var/maia.sqlite 'select * from gpu_machines'` works from any shell.
 - Telemetry can be read over HTTP: `GET /v1/diagnostics/logs?level=error&limit=50`.
+
+## Opt-in usage samples (portal)
+
+`usage_samples` holds one content-free measurement per finished model run, sent only
+when the user turns usage reporting on. The desktop sends the model, capability,
+output tokens, generation time, resulting tokens per second, the outcome, a
+pseudonymous installation id, device facts (OS, version, architecture) and the
+timestamp. It never sends prompts, responses, images, file paths or credentials.
+
+- `POST /api/v0/usage` accepts one sample; unknown or content-like keys are
+  rejected with `400` and nothing is stored.
+- `POST /api/v0/usage/opt-in` and `/api/v0/usage/opt-out` record the preference in
+  `usage_installations`; an opted-out installation receives `403 USAGE_OPTED_OUT`.
+- `observed_address` stores the first `X-Forwarded-For` hop (or the socket address)
+  in full and without expiry, per the product decision. Addresses never appear in
+  application logs.
+- Samples contain no content, so deleting a local conversation does not remove them.
+- `MAIA_USAGE_ENABLED=false` turns the ingestion routes off entirely.

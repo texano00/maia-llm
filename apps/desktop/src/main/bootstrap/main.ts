@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, Menu, shell } from "electron";
+import { release as osRelease } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 import { updateEventChannel, chatEventChannel } from "@maia/contracts";
@@ -27,6 +28,8 @@ import { createHuggingFaceSource, testHuggingFaceToken } from "../services/catal
 import { assertChatRunnable } from "../services/catalogue/runnable";
 import { createUseCaseResolver } from "../services/catalogue/use-cases";
 import { CredentialStore } from "../services/credentials/store";
+import { installationFacts } from "../services/telemetry/identity";
+import { postUsage, UsageReporter } from "../services/telemetry/usage";
 import { NotificationCenter } from "../services/notifications/center";
 import { deriveHealthNotifications, HEALTH_NOTIFICATION_KEYS, ProviderHealthMonitor } from "../services/health/monitor";
 import { ReadinessNotifier } from "../services/notifications/desktop";
@@ -206,6 +209,19 @@ async function bootstrap(): Promise<void> {
   database = openDatabase(paths.database);
   const settings = new SettingsStore(database);
 
+  // Opt-in usage programme: one content-free sample per completed run.
+  const usageReporter = new UsageReporter({
+    settings: () => settings.get(),
+    facts: () =>
+      installationFacts(settings, {
+        platform: process.platform,
+        arch: process.arch,
+        osVersion: osRelease(),
+        appVersion: app.getVersion()
+      }),
+    post: postUsage
+  });
+
   const diagnosticsEndpoint = resolveDiagnosticsEndpoint(
     config.diagnosticLogUrl ?? settings.get().diagnosticsUrl
   );
@@ -321,8 +337,9 @@ async function bootstrap(): Promise<void> {
       })
     : createMockInference({ chunkDelayMs: 12 });
 
+  const sessionStore = new SessionStore(database);
   const sessions = new SessionOrchestrator({
-    store: new SessionStore(database),
+    store: sessionStore,
     compute,
     inference,
     idleTimeoutMinutes: config.idleTimeoutMinutes,
@@ -336,6 +353,12 @@ async function bootstrap(): Promise<void> {
     },
     isGatedModel: (modelId) => catalogueRepository.get(modelId)?.gated !== "none",
     reportFailure,
+    onRunFinished: (session) => {
+      const metric = sessionStore.metricFor(session.id);
+      if (metric) {
+        void usageReporter.report(session, metric);
+      }
+    },
     logger
   });
 
@@ -397,6 +420,7 @@ async function bootstrap(): Promise<void> {
     packaged: app.isPackaged
   }));
   registerUpdateHandlers(registry, updates);
+  let lastUsageReporting = settings.get().usageReporting;
   registerSettingsHandlers({
     registry,
     store: settings,
@@ -405,6 +429,10 @@ async function bootstrap(): Promise<void> {
       const endpoint = resolveDiagnosticsEndpoint(next.diagnosticsUrl);
       if (endpoint && diagnostics) {
         diagnostics.setUrl(endpoint);
+      }
+      if (next.usageReporting !== lastUsageReporting) {
+        void usageReporter.preference(next.usageReporting);
+        lastUsageReporting = next.usageReporting;
       }
     },
     testCredential: async (provider, secret) => {

@@ -148,12 +148,17 @@ export interface SessionOrchestratorOptions {
    * implementation must never throw or block the teardown path.
    */
   reportFailure?: (event: FailureEvent) => void;
+  /** Called once when a run reaches a terminal state, after metrics are stored. */
+  onRunFinished?: (session: Session) => void;
 }
 
 interface SessionRuntime {
   session: Session;
   lastActivityAt: number;
   abort: AbortController | null;
+  /** Tokens produced across this run's turns and their generation time. */
+  outputTokens: number;
+  generationMs: number;
 }
 
 /**
@@ -197,7 +202,13 @@ export class SessionOrchestrator {
       options.delay ?? ((ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 
     for (const session of options.store.getActive()) {
-      this.runtimes.set(session.id, { session, lastActivityAt: this.now(), abort: null });
+      this.runtimes.set(session.id, {
+        session,
+        lastActivityAt: this.now(),
+        abort: null,
+        outputTokens: 0,
+        generationMs: 0
+      });
     }
   }
 
@@ -439,7 +450,9 @@ export class SessionOrchestrator {
       this.runtimes.set(sessionId, {
         session: provisioning,
         lastActivityAt: this.now(),
-        abort: null
+        abort: null,
+        outputTokens: 0,
+        generationMs: 0
       });
 
       // Booting a model takes minutes. The caller must not be blocked for that
@@ -457,7 +470,20 @@ export class SessionOrchestrator {
         endReason: "failure",
         failureCode: error instanceof SessionError ? error.code : "INTERNAL"
       });
-
+      // The row only exists once a machine was booked, so a booking failure has
+      // nothing to attach a measurement to.
+      if (this.options.store.get(sessionId)) {
+        this.options.store.recordMetric({
+          sessionId,
+          modelId: estimate.modelId,
+          powerTier: estimate.powerTier ?? DEFAULT_POWER_TIER,
+          outputTokens: 0,
+          generationMs: 0,
+          tokensPerSecond: null,
+          outcome: "failed",
+          recordedAt: new Date(this.now()).toISOString()
+        });
+      }
       if (inserted) {
         this.options.store.appendEvent(
           sessionId,
@@ -954,9 +980,10 @@ export class SessionOrchestrator {
     this.touchActivity(sessionId);
     const abort = new AbortController();
     runtime.abort = abort;
+    const generationStarted = this.now();
 
     try {
-      return await this.options.inference.stream({
+      const result = await this.options.inference.stream({
         sessionId,
         modelId: runtime.session.modelId,
         instanceId: runtime.session.instanceId,
@@ -964,6 +991,10 @@ export class SessionOrchestrator {
         signal: abort.signal,
         onDelta
       });
+
+      runtime.outputTokens += result.tokens;
+      runtime.generationMs += Math.max(0, this.now() - generationStarted);
+      return result;
     } finally {
       runtime.abort = null;
       this.touchActivity(sessionId);
@@ -1030,6 +1061,10 @@ export class SessionOrchestrator {
     });
 
     const ended = this.options.store.get(sessionId);
+    if (ended) {
+      this.recordMetrics(runtime, ended, metricOutcome(reason));
+      this.options.onRunFinished?.(ended);
+    }
     this.runtimes.delete(sessionId);
     return ended;  }
 
@@ -1104,8 +1139,26 @@ export class SessionOrchestrator {
     return reconciled;
   }
 
-  private refresh(runtime: SessionRuntime): SessionRuntime {
-    const fresh = this.options.store.get(runtime.session.id);
+  /** Persists one run's measurements; the store ignores duplicate writes. */
+  private recordMetrics(runtime: SessionRuntime, session: Session, outcome: RunOutcome): void {
+    const { outputTokens, generationMs } = runtime;
+
+    this.options.store.recordMetric({
+      sessionId: session.id,
+      modelId: session.modelId,
+      powerTier: session.powerTier ?? DEFAULT_POWER_TIER,
+      outputTokens,
+      generationMs,
+      tokensPerSecond:
+        generationMs > 0 && outputTokens > 0
+          ? Math.round(((outputTokens / generationMs) * 1000) * 10) / 10
+          : null,
+      outcome,
+      recordedAt: new Date(this.now()).toISOString()
+    });
+  }
+
+  private refresh(runtime: SessionRuntime): SessionRuntime {    const fresh = this.options.store.get(runtime.session.id);
     if (fresh) {
       runtime.session = fresh;
     }
@@ -1124,6 +1177,21 @@ export function hasActiveFilters(filters: GpuFilters): boolean {
 }
 
 /** "Waiting for the host to allocate the instance" and friends. */
+function metricOutcome(reason: NonNullable<Session["endReason"]>): RunOutcome {
+  switch (reason) {
+    case "idle":
+      return "idle";
+    case "cap":
+      return "capped";
+    case "failure":
+      return "failed";
+    default:
+      return "cancelled";
+  }
+}
+
+type RunOutcome = "completed" | "failed" | "cancelled" | "capped" | "idle";
+
 function describeStatus(status: string): string {
   switch (status) {
     case "created":

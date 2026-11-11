@@ -188,21 +188,21 @@ Monorepo: desktop main process in `apps/desktop/src/main/`, renderer in `apps/de
 
 ### Tests for User Story 7 ⚠️
 
-- [ ] T055 [P] [US7] Write the failing allowlist test `apps/portal/tests/contract/usage-allowlist.test.ts` enumerating the exact key set of `usageSampleSchema` and rejecting any prompt/response/content/path/credential key.
-- [ ] T056 [P] [US7] Write `apps/desktop/tests/unit/usage-consent.test.ts`: no send while `usageReporting` is false, exactly one send per terminal run when true, immediate stop after opt-out, and an opt-out signal posted once.
-- [ ] T057 [P] [US7] Write `apps/portal/tests/integration/usage-ingest.test.ts`: accepted sample persists with full `observed_address`, unknown keys return `400`, opted-out installations return `403`, and storage failures store nothing.
+- [X] T055 [P] [US7] Write the failing allowlist test `apps/portal/tests/contract/usage-allowlist.test.ts` enumerating the exact key set of `usageSampleSchema` and rejecting any prompt/response/content/path/credential key.
+- [X] T056 [P] [US7] Write `apps/desktop/tests/unit/usage-consent.test.ts`: no send while `usageReporting` is false, exactly one send per terminal run when true, immediate stop after opt-out, and an opt-out signal posted once.
+- [X] T057 [P] [US7] Write `apps/portal/tests/integration/usage-ingest.test.ts`: accepted sample persists with full `observed_address`, unknown keys return `400`, opted-out installations return `403`, and storage failures store nothing.
 
 ### Implementation for User Story 7
 
-- [ ] T058 [US7] Add `apps/portal/src/db/migrations/005-usage-samples.ts` creating `usage_samples` with the columns and indexes in `data-model.md` and register it in `apps/portal/src/db/migrations/index.ts`.
-- [ ] T059 [US7] Implement `apps/portal/src/repositories/usage.ts` (append, list by installation, per-model summary, opt-out marker) using the dialect-free `?` placeholder style.
-- [ ] T060 [US7] Implement `apps/portal/src/services/usage-service.ts` validating with `usageSampleSchema`, rejecting unknown keys, capturing the first `X-Forwarded-For` hop (or socket address) as `observed_address`, and refusing opted-out installations with `USAGE_OPTED_OUT`.
-- [ ] T061 [US7] Add `POST /api/v0/usage`, `/usage/opt-in` and `/usage/opt-out` in `apps/portal/src/usage.ts` and register them in `apps/portal/src/server.ts`, with `MAIA_USAGE_ENABLED` and rate-limit config in `apps/portal/src/config.ts`.
-- [ ] T062 [US7] Write `session_metrics` exactly once on each terminal transition in `apps/desktop/src/main/services/sessions/store.ts`, computing `generation_ms` from first to last token and `tokens_per_second` from `output_tokens` (null rate when `generation_ms` is 0).
-- [ ] T063 [US7] Implement `apps/desktop/src/main/services/telemetry/usage.ts`: build one sample per completed run, gate on `usageReporting` at send time, send through the existing fetch pattern with the installation credential header, and post the opt-out signal when reporting is disabled after being enabled.
-- [ ] T064 [US7] Add the reporting toggle with the disclosure (what is collected, the full-address retention, what is never collected) to `apps/desktop/src/renderer/features/settings/SettingsPage.tsx`.
+- [X] T058 [US7] Add `apps/portal/src/db/migrations/005-usage-samples.ts` creating `usage_samples` with the columns and indexes in `data-model.md` and register it in `apps/portal/src/db/migrations/index.ts`.
+- [X] T059 [US7] Implement `apps/portal/src/repositories/usage.ts` (append, list by installation, per-model summary, opt-out marker) using the dialect-free `?` placeholder style.
+- [X] T060 [US7] Implement `apps/portal/src/services/usage-service.ts` validating with `usageSampleSchema`, rejecting unknown keys, capturing the first `X-Forwarded-For` hop (or socket address) as `observed_address`, and refusing opted-out installations with `USAGE_OPTED_OUT`.
+- [X] T061 [US7] Add `POST /api/v0/usage`, `/usage/opt-in` and `/usage/opt-out` in `apps/portal/src/usage.ts` and register them in `apps/portal/src/server.ts`, with `MAIA_USAGE_ENABLED` and rate-limit config in `apps/portal/src/config.ts`.
+- [X] T062 [US7] Write `session_metrics` exactly once on each terminal transition in `apps/desktop/src/main/services/sessions/store.ts`, computing `generation_ms` from first to last token and `tokens_per_second` from `output_tokens` (null rate when `generation_ms` is 0).
+- [X] T063 [US7] Implement `apps/desktop/src/main/services/telemetry/usage.ts`: build one sample per completed run, gate on `usageReporting` at send time, send through the existing fetch pattern with the installation credential header, and post the opt-out signal when reporting is disabled after being enabled.
+- [X] T064 [US7] Add the reporting toggle with the disclosure (what is collected, the full-address retention, what is never collected) to `apps/desktop/src/renderer/features/settings/SettingsPage.tsx`.
 - [ ] T065 [US7] Add the installations and per-model speed views to `apps/portal/ui/src/App.jsx` with matching API calls in `apps/portal/ui/src/api.js` and routes in `apps/portal/src/admin-routes.ts`.
-- [ ] T066 [US7] Document `usage_samples` retention, the opt-in/opt-out endpoints and the address policy in `docs/data-storage.md` and the portal runbook `docs/portal-deploy.md`.
+- [X] T066 [US7] Document `usage_samples` retention, the opt-in/opt-out endpoints and the address policy in `docs/data-storage.md` and the portal runbook `docs/portal-deploy.md`.
 
 ---
 
