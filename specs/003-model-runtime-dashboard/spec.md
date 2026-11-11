@@ -8,6 +8,12 @@
 
 **Input**: User description: "Create a new Models section in the left navigation to show models requested to run, including terminated runs. By default, show only running models. Model statuses are initializing, running, and terminated. Users choose a model in the catalogue, review and accept its estimate, inspect the model and runtime information in Models, then use Chat with the running model. Statistics are a future feature."
 
+## Clarifications
+
+### Session 2026-11-11
+
+- Q: How long should terminated model runs remain available in the Models section? → A: Until the user deletes their related session or history.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Monitor a requested model (Priority: P1)
@@ -38,6 +44,7 @@ A user opens Models to see currently running models by default, then changes the
 2. **Given** the user changes the status filter, **When** they select Initializing, Terminated, or All, **Then** Models shows entries matching that selection.
 3. **Given** a requested model run has ended or failed to initialize, **When** the user filters for Terminated, **Then** its entry remains available with its end time, final duration and cost when available, and termination reason when known.
 4. **Given** a model has been requested more than once, **When** the user views all entries, **Then** each run is shown as a distinct entry with its own status and runtime details.
+5. **Given** a terminated run's related session history has not been deleted, **When** the user filters for Terminated, **Then** the run remains available regardless of its age.
 
 ### User Story 3 - Continue in Chat with a running model (Priority: P2)
 
@@ -76,6 +83,7 @@ A user finds a running model in Models and moves to Chat to continue using that 
 - **FR-010**: The Models section MUST reflect lifecycle status changes and update the applicable runtime details for the corresponding run.
 - **FR-011**: A running model shown in Models MUST remain available through the existing Chat experience. Initializing and terminated models MUST NOT be offered as running models in Chat.
 - **FR-012**: The Models section MUST not include usage statistics in this feature; statistics are deferred to a future feature.
+- **FR-013**: Terminated model runs MUST remain available in Models until the user deletes their related session history; the application MUST NOT automatically expire terminated entries or impose a separate run-history limit.
 
 ### Key Entities
 
@@ -96,6 +104,6 @@ A user finds a running model in Models and moves to Chat to continue using that 
 
 - The user has already selected a catalogue model and accepted its estimate before a run is created.
 - The Models section is an overview of model runs, while Chat remains the established place to interact with a running model.
-- Terminated runs remain available in the Models history under the existing session-history retention behavior; this feature does not introduce a separate retention or deletion policy.
+- Terminated runs are retained for as long as their related session history remains; this feature does not introduce a separate deletion mechanism.
 - Existing product limits on concurrent active sessions remain unchanged.
 - Usage statistics are explicitly outside this feature's scope and may be added separately later.

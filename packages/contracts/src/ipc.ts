@@ -84,6 +84,8 @@ export const ipcChannels = [
   "catalogue.useCases",
   "estimate.create",
   "session.list",
+  /** Locally persisted sessions in a terminal/teardown state (Models view). */
+  "session.history",
   "session.status",
   "session.start",
   "session.end",

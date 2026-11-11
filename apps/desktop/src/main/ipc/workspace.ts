@@ -92,6 +92,10 @@ export function registerWorkspaceHandlers(options: WorkspaceHandlersOptions): vo
 
   registry.register("session.list", z.unknown(), (): Session[] => sessions.listSessions());
 
+  // Ended runs that stay visible in the Models view; `session.list` above remains
+  // the active-only query used by Chat and the catalogue.
+  registry.register("session.history", z.unknown(), (): Session[] => sessions.listSessionHistory());
+
   registry.register("session.status", z.unknown(), (): Session | null => sessions.getStatus());
 
   registry.register("session.start", sessionStartSchema, async (payload): Promise<Session> => {

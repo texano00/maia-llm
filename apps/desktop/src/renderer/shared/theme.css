@@ -1744,3 +1744,142 @@ textarea {
     font-size: 1.9rem;
   }
 }
+
+/* Models: every model run requested from this installation, active or ended. */
+.models-page {
+  display: grid;
+  gap: 1rem;
+}
+
+.models-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-end;
+  justify-content: space-between;
+}
+
+.models-head h1 {
+  margin: 0 0 0.25rem;
+  font-size: 1.6rem;
+}
+
+.models-head p {
+  margin: 0;
+}
+
+.models-filter {
+  margin-left: auto;
+}
+
+.models-empty {
+  padding: 1.25rem;
+  border: 1px dashed rgb(255 255 255 / 14%);
+  border-radius: 0.8rem;
+  background: rgb(255 255 255 / 2%);
+}
+
+.models-empty h2 {
+  margin: 0 0 0.35rem;
+  font-size: 1rem;
+}
+
+.models-empty p {
+  margin: 0;
+}
+
+.model-run-list {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.model-run {
+  display: grid;
+  gap: 0.6rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 0.8rem;
+  background: rgb(255 255 255 / 3%);
+}
+
+.model-run > p {
+  margin: 0;
+}
+
+.model-run-head {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.model-run-head h2 {
+  margin: 0;
+  font-size: 1rem;
+  overflow-wrap: anywhere;
+}
+
+.model-run-head p {
+  margin: 0.2rem 0 0;
+}
+
+.model-run-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 0.5rem 1rem;
+  margin: 0;
+}
+
+.model-run-facts div {
+  display: grid;
+  gap: 0.1rem;
+}
+
+.model-run-facts dt {
+  color: #8fa3c8;
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.model-run-facts dd {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.model-run-progress {
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid rgb(255 255 255 / 8%);
+  border-radius: 0.6rem;
+  background: rgb(255 255 255 / 2%);
+}
+
+.model-run-progress p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.model-run-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.models-status-running {
+  border-color: rgb(53 231 177 / 45%);
+  color: #9df3d8;
+}
+
+.models-status-initializing {
+  border-color: rgb(255 196 120 / 45%);
+  color: #ffd8a1;
+}
+
+.models-status-terminated {
+  border-color: rgb(255 255 255 / 16%);
+  color: #a9b7ce;
+}

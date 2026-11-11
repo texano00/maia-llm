@@ -111,6 +111,23 @@ export class SessionStore {
     return row ? toSession(row, this.eventsFor(sessionId)) : null;
   }
 
+  /**
+   * Terminal and teardown rows for the Models view. Ordered newest first and
+   * deliberately unbounded: a run stays in history until its session history is
+   * deleted, so there is no age or count cap here.
+   */
+  getTerminated(): Session[] {
+    const rows = this.database
+      .prepare(
+        `SELECT * FROM sessions
+          WHERE state IN ('ending', 'ended', 'cancelled', 'failed')
+          ORDER BY started_at DESC`
+      )
+      .all() as SessionRow[];
+
+    return rows.map((row) => toSession(row, this.eventsFor(row.id)));
+  }
+
   /** Provisioning log entries, oldest first (bounded to the last 60). */
   eventsFor(sessionId: string): SessionEvent[] {
     const rows = this.database
