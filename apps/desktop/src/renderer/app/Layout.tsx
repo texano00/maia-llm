@@ -1,8 +1,18 @@
 import type { ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { NavLink } from "react-router-dom";
 import logoMark from "../assets/logo-mark.png";
 import { InfoButton } from "../shared/InfoButton";
 import { UpdateToast } from "../shared/updates/UpdateToast";
+import { useWorkspace } from "../shared/session/WorkspaceProvider";
+import { useProviderHealth } from "../shared/health/useProviderHealth";
+import { BalanceBadge } from "../features/notifications/BalanceBadge";
+import { NotificationBell } from "../features/notifications/NotificationBell";
+import {
+  FAILURES_ACKNOWLEDGED_EVENT,
+  modelsIndicator,
+  readAcknowledgedFailures
+} from "../features/models/indicator";
 
 const navigation = [
   { to: "/catalogue", label: "Catalogue" },
@@ -13,6 +23,18 @@ const navigation = [
 ];
 
 export function Layout({ children }: { children: ReactNode }) {
+  const { sessions } = useWorkspace();
+  const { health } = useProviderHealth();
+  const [acknowledged, setAcknowledged] = useState<string[]>(() => readAcknowledgedFailures());
+
+  useEffect(() => {
+    const onAcknowledged = (): void => setAcknowledged(readAcknowledgedFailures());
+    window.addEventListener(FAILURES_ACKNOWLEDGED_EVENT, onAcknowledged);
+    return () => window.removeEventListener(FAILURES_ACKNOWLEDGED_EVENT, onAcknowledged);
+  }, []);
+
+  const indicator = modelsIndicator(sessions, acknowledged);
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -32,6 +54,18 @@ export function Layout({ children }: { children: ReactNode }) {
               className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}
             >
               {item.label}
+              {item.to === "/models" ? (
+                <span
+                  className={`models-nav-indicator models-nav-${indicator}`}
+                  aria-label={
+                    indicator === "running"
+                      ? "A model is running"
+                      : indicator === "failed"
+                        ? "A model failed"
+                        : "No model running"
+                  }
+                />
+              ) : null}
             </NavLink>
           ))}
         </nav>
@@ -39,7 +73,11 @@ export function Layout({ children }: { children: ReactNode }) {
 
       <div className="content">
         <header className="topbar">
-          <InfoButton />
+          <div className="topbar-actions">
+            <BalanceBadge health={health} />
+            <NotificationBell />
+            <InfoButton />
+          </div>
         </header>
         <main className="page">{children}</main>
         <UpdateToast />

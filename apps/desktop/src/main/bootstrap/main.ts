@@ -28,7 +28,8 @@ import { assertChatRunnable } from "../services/catalogue/runnable";
 import { createUseCaseResolver } from "../services/catalogue/use-cases";
 import { CredentialStore } from "../services/credentials/store";
 import { NotificationCenter } from "../services/notifications/center";
-import { deriveHealthNotifications, ProviderHealthMonitor } from "../services/health/monitor";
+import { deriveHealthNotifications, HEALTH_NOTIFICATION_KEYS, ProviderHealthMonitor } from "../services/health/monitor";
+import type { ProviderHealth } from "@maia/contracts";
 import { SessionOrchestrator } from "../services/sessions/orchestrator";
 import { SessionStore } from "../services/sessions/store";
 import { GpuGuardian, guardianPaths } from "../services/sessions/guardian";
@@ -430,18 +431,41 @@ async function bootstrap(): Promise<void> {
   // Header health surface: one snapshot feeds the bell, the balance badge and the
   // missing-key prompts. Provider checks never throw; `unknown` is a valid state.
   const notifications = new NotificationCenter(settings);
-  const health = new ProviderHealthMonitor({
-    hasHuggingFace: async () => Boolean(await credentials.get("huggingface")),
-    hasVastai: async () => Boolean(await credentials.get("vastai")),
-    getBalanceMicroUsd: async () => null,
-    getThresholdMicroUsd: () => settings.get().walletWarnThresholdMicroUsd
-  });
-  registerSystemHandlers({ registry, notifications, health });
-  void health.refresh().then((snapshot) => {
-    for (const entry of deriveHealthNotifications(snapshot)) {
+
+  // Resolved conditions disappear from the bell; their dismissal also resets so a
+  // recurrence notifies again.
+  function syncHealth(snapshot: ProviderHealth): void {
+    const entries = deriveHealthNotifications(snapshot);
+    const active = new Set(entries.map((entry) => entry.key));
+    for (const key of HEALTH_NOTIFICATION_KEYS) {
+      if (!active.has(key)) {
+        notifications.clear(key);
+      }
+    }
+    for (const entry of entries) {
       notifications.set(entry);
     }
+  }
+
+  const health = new ProviderHealthMonitor({
+    hasHuggingFace: async () => Boolean(await credentials.get("huggingface")),
+    verifyHuggingFace: async () => {
+      const secret = await credentials.get("huggingface");
+      return secret ? testHuggingFaceToken(secret) : false;
+    },
+    hasVastai: async () => Boolean(await credentials.get("vastai")),
+    verifyVastai: async () => {
+      const secret = await credentials.get("vastai");
+      return secret ? new VastAiClient(secret).testConnection() : false;
+    },
+    getBalanceMicroUsd: async () => {
+      const secret = await credentials.get("vastai");
+      return secret ? new VastAiClient(secret).getBalanceMicroUsd() : null;
+    },
+    getThresholdMicroUsd: () => settings.get().walletWarnThresholdMicroUsd
   });
+  registerSystemHandlers({ registry, notifications, health, onHealth: syncHealth });
+  void health.refresh().then(syncHealth);
   // The IDE endpoint re-exposes the running model on 127.0.0.1 so VS Code can use
   // it; it binds only while the preference is on and a session is actually active.
   const ideEndpoint = new LocalEndpointService({

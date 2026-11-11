@@ -90,6 +90,15 @@ export class ProviderHealthMonitor {
   }
 }
 
+/** Every condition key this monitor can raise, so resolved ones can be cleared. */
+export const HEALTH_NOTIFICATION_KEYS = [
+  "credential:huggingface:missing",
+  "credential:huggingface:invalid",
+  "credential:vastai:missing",
+  "credential:vastai:invalid",
+  "balance:below-threshold"
+] as const;
+
 /** Maps the snapshot to the bell entries the app should currently show. */
 export function deriveHealthNotifications(health: ProviderHealth): NotificationInput[] {
   const entries: NotificationInput[] = [];

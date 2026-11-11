@@ -8,6 +8,8 @@ export interface SystemHandlersOptions {
   registry: IpcRegistry;
   notifications: NotificationCenter;
   health: ProviderHealthMonitor;
+  /** Called after each refresh so the bell reflects the latest checks. */
+  onHealth?: ((snapshot: Awaited<ReturnType<ProviderHealthMonitor["refresh"]>>) => void) | undefined;
 }
 
 /**
@@ -25,5 +27,9 @@ export function registerSystemHandlers(options: SystemHandlersOptions): void {
     notifications.dismiss(payload.key)
   );
 
-  registry.register("provider.health", z.unknown(), async () => health.refresh());
+  registry.register("provider.health", z.unknown(), async () => {
+    const snapshot = await health.refresh();
+    options.onHealth?.(snapshot);
+    return snapshot;
+  });
 }

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  clearCredentialSchema,
   setCredentialSchema,
   settingsUpdateSchema,
   testCredentialSchema,
@@ -37,6 +38,11 @@ export function registerSettingsHandlers(options: SettingsHandlersOptions): void
 
   registry.register("settings.credentials.set", setCredentialSchema, async (payload): Promise<CredentialStatus> => {
     await credentials.set(payload.provider, payload.secret);
+    return credentials.status();
+  });
+
+  registry.register("settings.credentials.clear", clearCredentialSchema, async (payload): Promise<CredentialStatus> => {
+    await credentials.remove(payload.provider);
     return credentials.status();
   });
 

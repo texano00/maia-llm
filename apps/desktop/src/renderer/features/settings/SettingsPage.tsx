@@ -48,6 +48,7 @@ export function SettingsPage() {
   const [minUploadMbps, setMinUploadMbps] = useState("");
   const [minDiskMBps, setMinDiskMBps] = useState("");
   const [gpuStartupRetries, setGpuStartupRetries] = useState(String(DEFAULT_GPU_STARTUP_RETRIES));
+  const [walletWarnUsd, setWalletWarnUsd] = useState("2");
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [gpuState, setGpuState] = useState<"idle" | "saving" | "saved">("idle");
   const [hfToken, setHfToken] = useState("");
@@ -76,6 +77,7 @@ export function SettingsPage() {
         setDiagnosticsUrl(result.data.diagnosticsUrl);
         applyGpuFilters(result.data.gpuFilters);
         setGpuStartupRetries(String(result.data.gpuStartupRetries));
+        setWalletWarnUsd(String(result.data.walletWarnThresholdMicroUsd / 1_000_000));
       }
     });
 
@@ -189,6 +191,13 @@ export function SettingsPage() {
       return;
     }
 
+    const warnUsd = Number(walletWarnUsd);
+    if (!Number.isFinite(warnUsd) || warnUsd <= 0) {
+      setGpuState("idle");
+      setError("The wallet warning threshold must be a positive amount in USD.");
+      return;
+    }
+
     setGpuState("saving");
     setError(null);
     const filters: GpuFilters = override ?? {
@@ -210,13 +219,15 @@ export function SettingsPage() {
 
     const result = await bridge.invoke<AppSettings>("settings.update", {
       gpuFilters: filters,
-      gpuStartupRetries: startupRetries
+      gpuStartupRetries: startupRetries,
+      walletWarnThresholdMicroUsd: Math.round(warnUsd * 1_000_000)
     });
 
     if (result.ok) {
       setSettings(result.data);
       applyGpuFilters(result.data.gpuFilters);
       setGpuStartupRetries(String(result.data.gpuStartupRetries));
+      setWalletWarnUsd(String(result.data.walletWarnThresholdMicroUsd / 1_000_000));
       setGpuState("saved");
     } else {
       setGpuState("idle");
@@ -503,6 +514,19 @@ export function SettingsPage() {
               value={gpuStartupRetries}
               onChange={(event) => {
                 setGpuStartupRetries(event.target.value);
+                setGpuState("idle");
+              }}
+            />
+          </label>
+          <label className="field">
+            <span>Warn me when the vast.ai balance falls below (USD)</span>
+            <input
+              type="number"
+              min="0.01"
+              step="0.01"
+              value={walletWarnUsd}
+              onChange={(event) => {
+                setWalletWarnUsd(event.target.value);
                 setGpuState("idle");
               }}
             />

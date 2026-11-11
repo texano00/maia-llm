@@ -80,6 +80,7 @@ export const ipcChannels = [
   "settings.credentials.status",
   "settings.credentials.set",
   "settings.credentials.test",
+  "settings.credentials.clear",
   "catalogue.search",
   "catalogue.detail",
   "catalogue.refresh",
@@ -182,6 +183,10 @@ export const setCredentialSchema = z.object({
 });
 
 export const testCredentialSchema = z.object({
+  provider: credentialProviderSchema
+});
+
+export const clearCredentialSchema = z.object({
   provider: credentialProviderSchema
 });
 

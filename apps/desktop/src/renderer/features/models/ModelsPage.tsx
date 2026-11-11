@@ -4,7 +4,10 @@ import { formatUsd } from "../../shared/format";
 import { DEFAULT_STATUS_FILTER, filterRuns, emptyStateFor, STATUS_FILTERS, type StatusFilter } from "./filter";
 import { describeRun } from "./run-details";
 import { isChatEligible, type VisibleStatus } from "./status";
+import { acknowledgeFailures, failedRunIds } from "./indicator";
 import { useModelRuns } from "./useModelRuns";
+import { useProviderHealth } from "../../shared/health/useProviderHealth";
+import { openOnboarding } from "../onboarding/open";
 
 const STATUS_LABELS: Record<VisibleStatus, string> = {
   initializing: "Initializing",
@@ -18,11 +21,18 @@ const STATUS_LABELS: Record<VisibleStatus, string> = {
  * Chat remains the place to talk to a running model.
  */
 export function ModelsPage() {
+  const { health } = useProviderHealth();
   const { runs, historyError, reloadHistory } = useModelRuns();
   const [filter, setFilter] = useState<StatusFilter>(DEFAULT_STATUS_FILTER);
   const [now, setNow] = useState(() => Date.now());
   const visibleRuns = filterRuns(runs, filter);
   const empty = emptyStateFor(filter);
+
+  // Opening Models acknowledges failures: the navigation indicator goes back to
+  // orange and the bell stops repeating them.
+  useEffect(() => {
+    acknowledgeFailures(failedRunIds(runs));
+  }, [runs]);
 
   // The elapsed/cost meter only matters while a run is in flight; a one-second
   // tick mirrors the chat meter without touching the history query.
@@ -52,6 +62,15 @@ export function ModelsPage() {
           </select>
         </label>
       </header>
+
+      {health?.vastai.state === "missing" ? (
+        <div className="alert">
+          <span>Add your vast.ai key to rent a GPU and run models.</span>
+          <button type="button" className="ghost-button" onClick={() => openOnboarding("vastai")}>
+            Set up the key
+          </button>
+        </div>
+      ) : null}
 
       {historyError ? (
         <div className="alert" role="alert">
