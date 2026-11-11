@@ -853,6 +853,15 @@ export class SessionOrchestrator {
   listSessions(): Session[] {
     return [...this.runtimes.values()].map((runtime) => this.refresh(runtime).session);
   }
+
+  /**
+   * Ended runs for the Models view. `listSessions()` stays the active-only query
+   * that Chat and Catalogue rely on. Reads go straight to the store because the
+   * runtimes map only holds in-flight sessions.
+   */
+  listSessionHistory(): Session[] {
+    return this.options.store.getTerminated();
+  }
   getSession(sessionId: string): Session | null {
     const runtime = this.runtimes.get(sessionId);
     return runtime ? this.refresh(runtime).session : null;
