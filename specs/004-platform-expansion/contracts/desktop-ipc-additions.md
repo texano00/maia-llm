@@ -63,7 +63,20 @@ interface NotificationSnapshot {
 | `walletWarnThresholdMicroUsd` | integer `> 0` | Default `2_000_000`. |
 | `onboardingCompleted` | boolean | Set by the onboarding flow after both keys verify. |
 
-No other settings keys change shape; the existing local-endpoint, diagnostics and GPU-preference keys remain untouched.
+No other settings keys change shape; the diagnostics and GPU-preference keys are
+untouched. The former local-endpoint keys (`ideEndpointEnabled`,
+`ideEndpointPort`) are removed: a stored row that still carries them parses
+normally and they are dropped.
+
+## `session.endpoint`
+
+| Property | Contract |
+|---|---|
+| Request | `{ sessionId: string }` (1..100 chars). |
+| Response | `{ baseUrl: string; modelId: string; apiKey: string }` or `null`. |
+| Behaviour | Returns the mapped OpenAI-compatible base URL (host, port and `/v1`), the model identifier to request, and the key that run was started with. `null` unless the session is `active` and the instance is mapped. |
+| Key lifetime | Generated per run on the device, passed to the model server as its own access key, and dropped with the runtime. Never written to session events, diagnostic logs, usage samples or exported data. |
+| Errors | `VALIDATION_FAILED` for a malformed payload; `NOT_FOUND` is not used — an absent endpoint is a normal `null`. |
 
 ## Notes for the renderer
 

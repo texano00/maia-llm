@@ -46,6 +46,8 @@ const conversationListSchema = z.object({
 
 const conversationIdSchema = z.object({ id: z.string().min(1).max(100) });
 
+const sessionIdSchema = z.object({ sessionId: z.string().min(1).max(100) });
+
 const switchModelSchema = z.object({
   conversationId: z.string().min(1).max(100),
   sessionId: z.string().min(1).max(100),
@@ -123,6 +125,12 @@ export function registerWorkspaceHandlers(options: WorkspaceHandlersOptions): vo
   registry.register("session.history", z.unknown(), (): Session[] => sessions.listSessionHistory());
 
   registry.register("session.status", z.unknown(), (): Session | null => sessions.getStatus());
+
+  // Only a serving run has an endpoint, and only while it lasts: the answer
+  // carries the key the server was started with.
+  registry.register("session.endpoint", sessionIdSchema, (payload) =>
+    sessions.describeEndpoint(payload.sessionId)
+  );
 
   registry.register("session.start", sessionStartSchema, async (payload): Promise<Session> => {
     return sessions.start(payload);

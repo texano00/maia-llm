@@ -764,6 +764,46 @@ nav {
   gap: 0.6rem;
 }
 
+/* How another tool reaches this run: copy-ready, but collapsed by default. */
+.external-access {
+  border: 1px solid rgb(255 255 255 / 8%);
+  border-radius: 0.7rem;
+  padding: 0.6rem 0.75rem;
+  background: rgb(255 255 255 / 2%);
+}
+
+.external-access > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.external-access-snippet {
+  margin-top: 0.6rem;
+  border: 1px solid rgb(255 255 255 / 8%);
+  border-radius: 0.6rem;
+  overflow: hidden;
+}
+
+.external-access-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  background: rgb(255 255 255 / 3%);
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.external-access pre {
+  margin: 0;
+  padding: 0.6rem;
+  overflow-x: auto;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
 /* Thumbnails of the images waiting to be sent with the next turn. */
 .composer-attachments {
   display: flex;
@@ -2012,13 +2052,19 @@ textarea {
 .balance-badge {
   display: inline-flex;
   align-items: center;
-  gap: 0.25rem;
-  padding: 0 0.45rem;
-  font-size: 0.8rem;
+  justify-content: center;
+  /* Wide enough for "$999.99" and never wider: the amount is abbreviated above
+     that, so the label can never escape the pill. */
+  min-width: 4.6rem;
+  padding: 0 0.55rem;
+  font-size: 0.78rem;
+  white-space: nowrap;
+  overflow: hidden;
 }
 
 .balance-amount {
   font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
 }
 
 .models-nav-indicator {

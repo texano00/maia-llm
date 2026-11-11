@@ -13,14 +13,17 @@ asar: true
 
 win:
   icon: icon.png
+  # Code signing is supplied by CSC_LINK and CSC_KEY_PASSWORD in the protected
+  # release environment and is required there: Smart App Control blocks an
+  # unsigned upgrade outright. Both the installed executables and the installer
+  # are signed; the workflow verifies each one before publishing.
+  signAndEditExecutable: true
+  signingHashAlgorithms:
+    - sha256
   target:
     - target: nsis
       arch:
         - x64
-  # Code signing is supplied by CSC_LINK and CSC_KEY_PASSWORD in the protected
-  # release environment. Local builds use CSC_IDENTITY_AUTO_DISCOVERY=false.
-  # Without a certificate Windows shows the SmartScreen warning for unsigned
-  # executables; see docs/release-process.md.
 
 nsis:
   artifactName: MaiaLLM-Setup-${version}-${arch}.${ext}

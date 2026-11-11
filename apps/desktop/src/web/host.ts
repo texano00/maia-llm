@@ -27,9 +27,6 @@ import { GpuReputationClient } from "../main/services/gpu/reputation";
 import { IpcRegistry } from "../main/ipc/registry";
 import { registerSettingsHandlers } from "../main/ipc/settings";
 import { registerWorkspaceHandlers } from "../main/ipc/workspace";
-import { registerIntegrationHandlers } from "../main/ipc/integration";
-import { LocalEndpointService } from "../main/services/local-endpoint/lifecycle";
-import { createTurnRecorder } from "../main/services/local-endpoint/recorder";
 import { EnvSecretVault } from "./vault";
 
 export interface WebHostOptions {
@@ -208,61 +205,6 @@ export async function createWebHost(options: WebHostOptions): Promise<WebHost> {
     }
   });
 
-  const ideEndpoint = new LocalEndpointService({
-    appVersion: process.env.MAIA_APP_VERSION ?? "web",
-    session: () => {
-      const active = sessions.listSessions().find((session) => session.state === "active");
-
-      return active
-        ? {
-            id: active.id,
-            modelId: active.modelId,
-            state: active.state,
-            instanceId: active.instanceId
-          }
-        : null;
-    },
-    touch: (sessionId) => sessions.touchActivity(sessionId),
-    resolveUpstream: (session) => {
-      if (session.instanceId === null || !("resolveEndpoint" in compute)) {
-        return null;
-      }
-
-      return compute.resolveEndpoint(session.instanceId);
-    },
-    describe: (modelId) => {
-      const model = catalogueRepository.get(modelId);
-      const artifacts = catalogueRepository.getArtifacts(modelId);
-      const format: "gguf" | "safetensors" | "unknown" = artifacts.some(
-        (artifact) => artifact.format === "gguf"
-      )
-        ? "gguf"
-        : artifacts.length > 0
-          ? "safetensors"
-          : "unknown";
-
-      return {
-        parameterCount: model?.parameterCount ?? null,
-        contextWindow: model?.contextWindow ?? null,
-        license: model?.license ?? null,
-        architecture: null,
-        format
-      };
-    },
-    recordTurn: createTurnRecorder(repository),
-    preference: () => {
-      const current = settings.get();
-      return { enabled: current.ideEndpointEnabled, port: current.ideEndpointPort };
-    },
-    persist: (update) => {
-      settings.update({
-        ...(update.enabled !== undefined ? { ideEndpointEnabled: update.enabled } : {}),
-        ...(update.port !== undefined ? { ideEndpointPort: update.port } : {})
-      });
-    },
-    logger
-  });
-  registerIntegrationHandlers({ registry, endpoint: ideEndpoint });
 
   registerWorkspaceHandlers({
     registry,
@@ -288,7 +230,6 @@ export async function createWebHost(options: WebHostOptions): Promise<WebHost> {
     },
     async dispose() {
       clearInterval(idleTimer);
-      await ideEndpoint.dispose();
       await sessions.endAll("app_exit");
       closeDatabase(database);
     }

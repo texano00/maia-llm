@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import {
   DEFAULT_GPU_STARTUP_RETRIES,
   type Estimate,
@@ -8,6 +8,7 @@ import {
   type ModelCapability,
   type PowerTier,
   type Session,
+  type SessionEndpoint,
   type SessionStart
 } from "@maia/contracts";
 import { buildEstimate } from "../cost/estimator";
@@ -39,7 +40,7 @@ export interface ComputeProvider {
   }): Promise<ComputeOffer | null>;
   createInstance(
     offer: ComputeOffer,
-    context: { label: string; modelId: string; contextScale?: number }
+    context: { label: string; modelId: string; contextScale?: number; apiKey?: string }
   ): Promise<{ instanceId: number }>;
   waitUntilReady(
     instanceId: number,
@@ -49,6 +50,8 @@ export interface ComputeProvider {
   destroyInstance(instanceId: number): Promise<void>;
   /** Instances carrying one of our labels, used to reclaim machines after a crash. */
   listLabelledInstances?(prefix: string): Promise<Array<{ instanceId: number; label: string }>>;
+  /** Mapped public host and port of a running instance, when the provider exposes one. */
+  resolveEndpoint?(instanceId: number): { host: string; port: number } | null;
   /**
    * The container's own log, used to explain a failed boot. Optional: providers
    * without log access simply report the status message.
@@ -171,6 +174,11 @@ interface SessionRuntime {
   /** Tokens produced across this run's turns and their generation time. */
   outputTokens: number;
   generationMs: number;
+  /**
+   * Key the model server requires. Generated per run, kept in memory only and
+   * never written to a session event, log or usage sample.
+   */
+  apiKey: string | null;
 }
 
 /**
@@ -219,7 +227,10 @@ export class SessionOrchestrator {
         lastActivityAt: this.now(),
         abort: null,
         outputTokens: 0,
-        generationMs: 0
+        generationMs: 0,
+        // An inherited session was started by a previous process: its key is
+        // gone, so it is reported as terminated on the next reconcile anyway.
+        apiKey: null
       });
     }
   }
@@ -344,6 +355,9 @@ export class SessionOrchestrator {
 
     let instanceId: number | null = null;
     let inserted = false;
+    // 24 random bytes: long enough that the address alone is worthless, short
+    // enough to paste into an editor config.
+    const apiKey = `maia_${randomBytes(18).toString("base64url")}`;
     const pendingLogs: Array<{ level: "info" | "warn" | "error"; message: string; at: Date }> = [];
 
     const log = (level: "info" | "warn" | "error", message: string): void => {
@@ -374,7 +388,8 @@ export class SessionOrchestrator {
         try {
           created = await this.options.compute.createInstance(offer, {
             label,
-            modelId: estimate.modelId
+            modelId: estimate.modelId,
+            apiKey
           });
         } catch (error) {
           lastError = error;
@@ -465,7 +480,8 @@ export class SessionOrchestrator {
         lastActivityAt: this.now(),
         abort: null,
         outputTokens: 0,
-        generationMs: 0
+        generationMs: 0,
+        apiKey
       });
 
       // Booting a model takes minutes. The caller must not be blocked for that
@@ -953,6 +969,34 @@ export class SessionOrchestrator {
   getSession(sessionId: string): Session | null {
     const runtime = this.runtimes.get(sessionId);
     return runtime ? this.refresh(runtime).session : null;
+  }
+
+  /**
+   * How another tool reaches a running model: its mapped base URL, the model id
+   * to request and the key that run was started with. Nothing is returned until
+   * the server is actually serving, and the answer disappears with the run.
+   */
+  describeEndpoint(sessionId: string): SessionEndpoint | null {
+    const runtime = this.runtimes.get(sessionId);
+    if (!runtime || !runtime.apiKey || runtime.session.state !== "active") {
+      return null;
+    }
+
+    const instanceId = runtime.session.instanceId;
+    if (instanceId === null) {
+      return null;
+    }
+
+    const mapped = this.options.compute.resolveEndpoint?.(instanceId);
+    if (!mapped) {
+      return null;
+    }
+
+    return {
+      baseUrl: `http://${mapped.host}:${mapped.port}/v1`,
+      modelId: runtime.session.modelId,
+      apiKey: runtime.apiKey
+    };
   }
 
   /** First running session for a model, used when reviving a conversation. */

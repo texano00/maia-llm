@@ -27,7 +27,8 @@ export function createModelPlanResolver(options: ModelPlanResolverOptions) {
   return async (
     modelId: string,
     offer: { gpuRamGb: number },
-    contextScale?: number
+    contextScale?: number,
+    apiKey?: string
   ): Promise<LaunchPlan> => {
     let artifacts = options.artifacts(modelId);
     if (artifacts.length === 0) {
@@ -57,7 +58,8 @@ export function createModelPlanResolver(options: ModelPlanResolverOptions) {
       parameterCount: model?.parameterCount ?? null,
       contextWindow: model?.contextWindow ?? null,
       contextScale: contextScale ?? null,
-      engine: options.engine?.(modelId) ?? null
+      engine: options.engine?.(modelId) ?? null,
+      apiKey: apiKey ?? null
     });
   };
 }

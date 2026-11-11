@@ -14,11 +14,6 @@ const ChatPage = lazy(() =>
 const ModelsPage = lazy(() =>
   import("../features/models/ModelsPage").then((module) => ({ default: module.ModelsPage }))
 );
-const IntegrationPage = lazy(() =>
-  import("../features/ide-integration/IntegrationPage").then((module) => ({
-    default: module.IntegrationPage
-  }))
-);
 const SettingsPage = lazy(() =>
   import("../features/settings/SettingsPage").then((module) => ({
     default: module.SettingsPage
@@ -33,7 +28,6 @@ export function AppRoutes() {
         <Route path="/catalogue" element={<CataloguePage />} />
         <Route path="/models" element={<ModelsPage />} />
         <Route path="/chat" element={<ChatPage />} />
-        <Route path="/integrations" element={<IntegrationPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/catalogue" replace />} />
       </Routes>

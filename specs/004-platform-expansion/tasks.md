@@ -311,38 +311,38 @@ Monorepo: desktop main process in `apps/desktop/src/main/`, renderer in `apps/de
 
 ### Tests for the hardening phase ⚠️
 
-- [ ] T100 [P] Write `apps/desktop/tests/unit/local-proxy-removed.test.ts`: no `integration.*` channel is allowlisted or registered, a stored settings row carrying `ideEndpointEnabled` and `ideEndpointPort` reads back without them and without an error, and nothing binds a loopback port at startup.
-- [ ] T101 [P] Write `apps/desktop/tests/unit/external-access.test.ts`: the snippet builder emits an OpenAI-compatible request and an editor configuration that both contain the base URL, the model identifier and the key; the panel shows a masked key until revealed; the endpoint lookup returns nothing for a session that is not serving.
-- [ ] T102 [P] Write `apps/desktop/tests/unit/balance-display.test.ts`: compact labels for 0, 9.97, 999.99, 1000, 1234.56 and 999999 stay within five glyphs, the exact amount is produced for the tooltip and the accessibility label, and the unknown state has its own label.
-- [ ] T103 [P] Write `scripts/tests/release-signing.test.ts`: the release workflow declares signing secrets, aborts before building when they are absent, verifies the signature of both the installer and the application executable before publishing, and the generated release body names the signing authority.
+- [X] T100 [P] Write `apps/desktop/tests/unit/local-proxy-removed.test.ts`: no `integration.*` channel is allowlisted or registered, a stored settings row carrying `ideEndpointEnabled` and `ideEndpointPort` reads back without them and without an error, and nothing binds a loopback port at startup.
+- [X] T101 [P] Write `apps/desktop/tests/unit/external-access.test.ts`: the snippet builder emits an OpenAI-compatible request and an editor configuration that both contain the base URL, the model identifier and the key; the panel shows a masked key until revealed; the endpoint lookup returns nothing for a session that is not serving.
+- [X] T102 [P] Write `apps/desktop/tests/unit/balance-display.test.ts`: compact labels for 0, 9.97, 999.99, 1000, 1234.56 and 999999 stay within five glyphs, the exact amount is produced for the tooltip and the accessibility label, and the unknown state has its own label.
+- [X] T103 [P] Write `scripts/tests/release-signing.test.ts`: the release workflow declares signing secrets, aborts before building when they are absent, verifies the signature of both the installer and the application executable before publishing, and the generated release body names the signing authority.
 
 ### Implementation for the hardening phase
 
 **Remove the local editor proxy (FR-063, FR-064)**
 
-- [ ] T104 [P] Remove `integration.status`, `integration.enable` and `integration.disable` from `packages/contracts/src/ipc.ts`, delete the constant and schema in `packages/contracts/src/integration.ts`, and drop `ideEndpointEnabled` and `ideEndpointPort` from `appSettingsSchema` so a previously stored row parses without them.
-- [ ] T105 [P] Delete `apps/desktop/src/renderer/features/ide-integration/IntegrationPage.tsx`, its lazy route in `apps/desktop/src/renderer/app/routes.tsx` (`/integrations`) and the `IDE` entry in `apps/desktop/src/renderer/app/Layout.tsx`.
-- [ ] T106 Delete `apps/desktop/src/main/ipc/integration.ts` and `apps/desktop/src/main/services/local-endpoint/`, and remove their construction from `apps/desktop/src/main/bootstrap/main.ts` and `apps/desktop/src/web/host.ts` so no turn recorder, lifecycle listener or port binder remains.
-- [ ] T107 [P] Delete `docs/ide-endpoint.md` and update `README.md`, `docs/development.md` and `docs/release-process.md` so no document advertises a local editor endpoint.
+- [X] T104 [P] Remove `integration.status`, `integration.enable` and `integration.disable` from `packages/contracts/src/ipc.ts`, delete the constant and schema in `packages/contracts/src/integration.ts`, and drop `ideEndpointEnabled` and `ideEndpointPort` from `appSettingsSchema` so a previously stored row parses without them.
+- [X] T105 [P] Delete `apps/desktop/src/renderer/features/ide-integration/IntegrationPage.tsx`, its lazy route in `apps/desktop/src/renderer/app/routes.tsx` (`/integrations`) and the `IDE` entry in `apps/desktop/src/renderer/app/Layout.tsx`.
+- [X] T106 Delete `apps/desktop/src/main/ipc/integration.ts` and `apps/desktop/src/main/services/local-endpoint/`, and remove their construction from `apps/desktop/src/main/bootstrap/main.ts` and `apps/desktop/src/web/host.ts` so no turn recorder, lifecycle listener or port binder remains.
+- [X] T107 [P] Delete `docs/ide-endpoint.md` and update `README.md`, `docs/development.md` and `docs/release-process.md` so no document advertises a local editor endpoint.
 
 **Expose the model's own endpoint (FR-065–FR-067)**
 
-- [ ] T108 [P] Document the `session.endpoint` channel and the per-run key in `specs/004-platform-expansion/contracts/desktop-ipc-additions.md` and `specs/004-platform-expansion/data-model.md`: request shape, response fields (`baseUrl`, `modelId`, `apiKey`), the serving-only lifetime, and the rule that the key never reaches logs, events or samples.
-- [ ] T109 Add `--api-key` to the vLLM arguments in `apps/desktop/src/main/services/inference/launch-plan.ts` and assert in `apps/desktop/tests/unit/launch-plan.test.ts` that a supplied key reaches the arguments and that none is passed when the plan has no key.
-- [ ] T110 Generate one key per run in `apps/desktop/src/main/services/sessions/orchestrator.ts` when the instance is created, keep it on the in-memory session runtime only, and keep it out of session events, diagnostic logs and usage samples.
-- [ ] T111 Add the `session.endpoint` contract to `packages/contracts/src/sessions.ts` and the allowlist in `packages/contracts/src/ipc.ts`, then register the handler in `apps/desktop/src/main/ipc/workspace.ts` returning `{ baseUrl, modelId, apiKey }` for a serving session and nothing otherwise.
-- [ ] T112 [P] Add `apps/desktop/src/renderer/features/models/external-access.ts`: a pure builder for the OpenAI-compatible request and the editor configuration snippet, plus the masked-key formatter used before the user reveals it.
-- [ ] T113 Add `apps/desktop/src/renderer/features/models/ExternalAccessPanel.tsx` and render it for every running model in `apps/desktop/src/renderer/features/models/ModelsPage.tsx`, with copy buttons, a reveal control, the "valid while this run lasts" note, and its styles in `apps/desktop/src/renderer/shared/theme.css`.
+- [X] T108 [P] Document the `session.endpoint` channel and the per-run key in `specs/004-platform-expansion/contracts/desktop-ipc-additions.md` and `specs/004-platform-expansion/data-model.md`: request shape, response fields (`baseUrl`, `modelId`, `apiKey`), the serving-only lifetime, and the rule that the key never reaches logs, events or samples.
+- [X] T109 Add `--api-key` to the vLLM arguments in `apps/desktop/src/main/services/inference/launch-plan.ts` and assert in `apps/desktop/tests/unit/launch-plan.test.ts` that a supplied key reaches the arguments and that none is passed when the plan has no key.
+- [X] T110 Generate one key per run in `apps/desktop/src/main/services/sessions/orchestrator.ts` when the instance is created, keep it on the in-memory session runtime only, and keep it out of session events, diagnostic logs and usage samples.
+- [X] T111 Add the `session.endpoint` contract to `packages/contracts/src/sessions.ts` and the allowlist in `packages/contracts/src/ipc.ts`, then register the handler in `apps/desktop/src/main/ipc/workspace.ts` returning `{ baseUrl, modelId, apiKey }` for a serving session and nothing otherwise.
+- [X] T112 [P] Add `apps/desktop/src/renderer/features/models/external-access.ts`: a pure builder for the OpenAI-compatible request and the editor configuration snippet, plus the masked-key formatter used before the user reveals it.
+- [X] T113 Add `apps/desktop/src/renderer/features/models/ExternalAccessPanel.tsx` and render it for every running model in `apps/desktop/src/renderer/features/models/ModelsPage.tsx`, with copy buttons, a reveal control, the "valid while this run lasts" note, and its styles in `apps/desktop/src/renderer/shared/theme.css`.
 
 **Balance control (FR-022)**
 
-- [ ] T114 [P] Add `apps/desktop/src/renderer/features/notifications/balance-display.ts` with the compact and exact formatting rules, rewrite `apps/desktop/src/renderer/features/notifications/BalanceBadge.tsx` to use it, and size the control in `apps/desktop/src/renderer/shared/theme.css` (fixed width, tabular figures) so no amount can push it out of its box.
+- [X] T114 [P] Add `apps/desktop/src/renderer/features/notifications/balance-display.ts` with the compact and exact formatting rules, rewrite `apps/desktop/src/renderer/features/notifications/BalanceBadge.tsx` to use it, and size the control in `apps/desktop/src/renderer/shared/theme.css` (fixed width, tabular figures) so no amount can push it out of its box.
 
 **Signed Windows builds (FR-054a, FR-054b)**
 
-- [ ] T115 Configure signing in `apps/desktop/electron-builder.yml` for the NSIS installer and the installed executables, using the certificate supplied through `CSC_LINK`/`CSC_KEY_PASSWORD` (or Microsoft Trusted Signing when that identity is used), without changing `win.target`.
-- [ ] T116 Make `.github/workflows/windows-dev-build.yml` fail before building when the signing secret is missing, sign both artifacts, verify them with `signtool verify /pa` or `Get-AuthenticodeSignature`, and stop before `publish_release` on any failure.
-- [ ] T117 Name the signing authority in the release body produced by `.github/workflows/windows-dev-build.yml` and document the upgrade expectation in `docs/release-process.md`, including what a user sees when Smart App Control is enabled.
+- [X] T115 Configure signing in `apps/desktop/electron-builder.yml` for the NSIS installer and the installed executables, using the certificate supplied through `CSC_LINK`/`CSC_KEY_PASSWORD` (or Microsoft Trusted Signing when that identity is used), without changing `win.target`.
+- [X] T116 Make `.github/workflows/windows-dev-build.yml` fail before building when the signing secret is missing, sign both artifacts, verify them with `signtool verify /pa` or `Get-AuthenticodeSignature`, and stop before `publish_release` on any failure.
+- [X] T117 Name the signing authority in the release body produced by `.github/workflows/windows-dev-build.yml` and document the upgrade expectation in `docs/release-process.md`, including what a user sees when Smart App Control is enabled.
 
 ---
 

@@ -84,7 +84,7 @@ before the instance is created:
 budget can hold, floored at 4 096 and capped at 32 768 (past that the KV cache
 dominates the bill and adds little). `--gpu-memory-utilization 0.90` leaves room for
 the CUDA context and activations; `--max-num-seqs 4` matches the concurrency the
-local IDE endpoint allows.
+chat and its external endpoint allow together.
 
 When a boot does fail, the orchestrator reads the **whole** container log, not just
 the tail: `extractRootCause` pulls the deepest error line (OOM, KV-cache sizing,

@@ -56,6 +56,12 @@ export interface PlanLaunchInput {
   contextScale?: number | null;
   /** Engine the catalogue pinned for this model, when it has an opinion. */
   engine?: LaunchEngine | null | undefined;
+  /**
+   * Key the server requires on every request. The instance is reachable from the
+   * internet, so without it anyone holding the address could spend the user's
+   * GPU time.
+   */
+  apiKey?: string | null | undefined;
 }
 
 const DEFAULT_CONTEXT = 32_768;
@@ -137,7 +143,10 @@ export function planLaunch(input: PlanLaunchInput): LaunchPlan {
       // Graph capture costs startup time and the graphs matter less than
       // answering sooner; per-request logging is pure noise on a rented box.
       "--enforce-eager",
-      "--disable-log-requests"
+      "--disable-log-requests",
+      // The mapped port answers on a public address, so the server itself must
+      // refuse anything that does not carry the key the app generated.
+      ...(input.apiKey ? ["--api-key", input.apiKey] : [])
     ],
     env: vllm.env,
     ...(vllm.onstart ? { onstart: vllm.onstart } : {}),
@@ -189,7 +198,8 @@ function planLlamaCpp(input: PlanLaunchInput & {
       // `-hf` also fetches the sibling `mmproj-*.gguf` vision projector, which
       // Maia's text chat never uses but which costs VRAM and load time.
       "--no-mmproj",
-      "--jinja"
+      "--jinja",
+      ...(input.apiKey ? ["--api-key", input.apiKey] : [])
     ],
     env: {},
     gguf: true,

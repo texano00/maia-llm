@@ -91,6 +91,16 @@ Indicator rule: red if any non-dismissed `error`; yellow if the highest non-dism
 
 Acknowledging = opening Models or dismissing that run's failure notification. A running run always wins over a failure.
 
+### External endpoint (transient, memory only)
+
+| Field | Rules |
+|---|---|
+| `baseUrl` | `http://<mapped host>:<mapped port>/v1`, resolved from the running instance and never stored. |
+| `modelId` | The catalogue id the run serves, which is also the name requests must ask for. |
+| `apiKey` | `maia_<18 random bytes, base64url>` generated when the run is created, passed to the server as its access key, held only on the in-memory runtime. Dropped when the run ends, never persisted, logged, sampled or exported. |
+
+An inherited session from a previous process has no key: it is reported as terminated on the next reconcile, so no endpoint is ever offered for it.
+
 ### Readiness notification
 
 Delivered when a run transitions to `running` and the app window is not focused and the run is not the visible one. Not persisted; duplicates are prevented by remembering the last notified session id per run.
