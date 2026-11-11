@@ -245,7 +245,7 @@ Monorepo: desktop main process in `apps/desktop/src/main/`, renderer in `apps/de
 - [X] T078 [US9] Remove image rows and files during deletion in `apps/desktop/src/main/ipc/workspace.ts` and keep `session_metrics` writing for image runs.
 - [X] T079 [US9] Include `capability` on usage samples from `apps/desktop/src/main/services/telemetry/usage.ts` with no image, prompt or dimension data.
 - [ ] T080 [US9] Extend conversation export in `apps/desktop/src/main/services/history/` to copy referenced image files while keeping everything local.
-- [ ] T080a [US9] Text-to-image: generate into `conversation_images` with `direction = 'output'` and render generated images in the transcript (scheduled for 0.9.2).
+- [ ] T118 [US9] Text-to-image: generate into `conversation_images` with `direction = 'output'` and render generated images in the transcript (scheduled for 0.9.2).
 
 ---
 
@@ -257,12 +257,12 @@ Monorepo: desktop main process in `apps/desktop/src/main/`, renderer in `apps/de
 
 ### Tests for User Story 10 ⚠️
 
-- [ ] T081 [P] [US10] Write `scripts/tests/release-resolver.test.ts` for the pure resolver `infra/landing/release.js`: per-OS architecture options, newest-asset selection by name pattern, unavailable combination, and Windows x64 fallback when detection fails.
+- [X] T081 [P] [US10] Write `scripts/tests/release-resolver.test.ts` for the pure resolver `infra/landing/release.js`: per-OS architecture options, newest-asset selection by name pattern, unavailable combination, and Windows x64 fallback when detection fails.
 
 ### Implementation for User Story 10
 
-- [ ] T082 [P] [US10] Extract asset resolution into `infra/landing/release.js` (pure, no DOM) and load it from `infra/landing/index.html`.
-- [ ] T083 [US10] Add the OS and architecture selects plus the unavailable state to `infra/landing/index.html`, keeping the existing caption format and newest-release API call.
+- [X] T082 [P] [US10] Extract asset resolution into `infra/landing/release.js` (ES module, no DOM) and load it from `infra/landing/index.html`.
+- [X] T083 [US10] Add the OS and architecture selects plus the unavailable state to `infra/landing/index.html`, keeping the existing caption format and newest-release API call. The platform list is rendered from the same resolver, and `infra/nginx/maiallm.conf` serves `/release.js` uncached.
 - [ ] T084 [US10] Add `mac` (dmg, arm64 + x64, `identity: null`) and `linux` (AppImage + deb, x64 + arm64) targets with artifact names matching the existing pattern to `apps/desktop/electron-builder.yml`.
 - [ ] T085 [US10] Extend `.github/workflows/windows-dev-build.yml` (or add a platform matrix workflow) to build on macOS and Ubuntu runners, upload installers, and publish `SHA256SUMS.txt` with the release.
 - [ ] T086 [US10] Document the unsigned-macOS first-launch confirmation, the checksum verification command and the platform support matrix in `docs/release-process.md` and `README.md`.
@@ -301,6 +301,51 @@ Monorepo: desktop main process in `apps/desktop/src/main/`, renderer in `apps/de
 
 ---
 
+## Phase 15: Hardening from the 2026-11-12 clarifications
+
+**Goal**: Ship the four fixes clarified on 2026-11-12 — signed Windows upgrades (FR-054a/FR-054b), the local editor proxy removed in favour of the model's own keyed endpoint (FR-063–FR-067), and a balance control that cannot overflow (FR-022).
+
+**Independent Test**: On a Windows 11 machine with Smart App Control enabled, upgrade from the previous release with no security block; on a fresh installation no local proxy port listens and no editor page exists; a running model exposes one endpoint plus its per-run key, the shown OpenAI and VS Code snippets work while the run lasts and fail afterwards; the header balance shows no clipped text at 0, 9.97, 999.99, 1 234.56 and the unknown state at 100% and 200% zoom.
+
+**Delivery note**: this phase runs immediately after Phase 12 (US10) and before US11, because signing gates every later release and the proxy removal removes a shipped surface that other work would otherwise rebuild on.
+
+### Tests for the hardening phase ⚠️
+
+- [X] T100 [P] Write `apps/desktop/tests/unit/local-proxy-removed.test.ts`: no `integration.*` channel is allowlisted or registered, a stored settings row carrying `ideEndpointEnabled` and `ideEndpointPort` reads back without them and without an error, and nothing binds a loopback port at startup.
+- [X] T101 [P] Write `apps/desktop/tests/unit/external-access.test.ts`: the snippet builder emits an OpenAI-compatible request and an editor configuration that both contain the base URL, the model identifier and the key; the panel shows a masked key until revealed; the endpoint lookup returns nothing for a session that is not serving.
+- [X] T102 [P] Write `apps/desktop/tests/unit/balance-display.test.ts`: compact labels for 0, 9.97, 999.99, 1000, 1234.56 and 999999 stay within five glyphs, the exact amount is produced for the tooltip and the accessibility label, and the unknown state has its own label.
+- [X] T103 [P] Write `scripts/tests/release-signing.test.ts`: the release workflow declares signing secrets, aborts before building when they are absent, verifies the signature of both the installer and the application executable before publishing, and the generated release body names the signing authority.
+
+### Implementation for the hardening phase
+
+**Remove the local editor proxy (FR-063, FR-064)**
+
+- [X] T104 [P] Remove `integration.status`, `integration.enable` and `integration.disable` from `packages/contracts/src/ipc.ts`, delete the constant and schema in `packages/contracts/src/integration.ts`, and drop `ideEndpointEnabled` and `ideEndpointPort` from `appSettingsSchema` so a previously stored row parses without them.
+- [X] T105 [P] Delete `apps/desktop/src/renderer/features/ide-integration/IntegrationPage.tsx`, its lazy route in `apps/desktop/src/renderer/app/routes.tsx` (`/integrations`) and the `IDE` entry in `apps/desktop/src/renderer/app/Layout.tsx`.
+- [X] T106 Delete `apps/desktop/src/main/ipc/integration.ts` and `apps/desktop/src/main/services/local-endpoint/`, and remove their construction from `apps/desktop/src/main/bootstrap/main.ts` and `apps/desktop/src/web/host.ts` so no turn recorder, lifecycle listener or port binder remains.
+- [X] T107 [P] Delete `docs/ide-endpoint.md` and update `README.md`, `docs/development.md` and `docs/release-process.md` so no document advertises a local editor endpoint.
+
+**Expose the model's own endpoint (FR-065–FR-067)**
+
+- [X] T108 [P] Document the `session.endpoint` channel and the per-run key in `specs/004-platform-expansion/contracts/desktop-ipc-additions.md` and `specs/004-platform-expansion/data-model.md`: request shape, response fields (`baseUrl`, `modelId`, `apiKey`), the serving-only lifetime, and the rule that the key never reaches logs, events or samples.
+- [X] T109 Add `--api-key` to the vLLM arguments in `apps/desktop/src/main/services/inference/launch-plan.ts` and assert in `apps/desktop/tests/unit/launch-plan.test.ts` that a supplied key reaches the arguments and that none is passed when the plan has no key.
+- [X] T110 Generate one key per run in `apps/desktop/src/main/services/sessions/orchestrator.ts` when the instance is created, keep it on the in-memory session runtime only, and keep it out of session events, diagnostic logs and usage samples.
+- [X] T111 Add the `session.endpoint` contract to `packages/contracts/src/sessions.ts` and the allowlist in `packages/contracts/src/ipc.ts`, then register the handler in `apps/desktop/src/main/ipc/workspace.ts` returning `{ baseUrl, modelId, apiKey }` for a serving session and nothing otherwise.
+- [X] T112 [P] Add `apps/desktop/src/renderer/features/models/external-access.ts`: a pure builder for the OpenAI-compatible request and the editor configuration snippet, plus the masked-key formatter used before the user reveals it.
+- [X] T113 Add `apps/desktop/src/renderer/features/models/ExternalAccessPanel.tsx` and render it for every running model in `apps/desktop/src/renderer/features/models/ModelsPage.tsx`, with copy buttons, a reveal control, the "valid while this run lasts" note, and its styles in `apps/desktop/src/renderer/shared/theme.css`.
+
+**Balance control (FR-022)**
+
+- [X] T114 [P] Add `apps/desktop/src/renderer/features/notifications/balance-display.ts` with the compact and exact formatting rules, rewrite `apps/desktop/src/renderer/features/notifications/BalanceBadge.tsx` to use it, and size the control in `apps/desktop/src/renderer/shared/theme.css` (fixed width, tabular figures) so no amount can push it out of its box.
+
+**Signed Windows builds (FR-054a, FR-054b)**
+
+- [X] T115 Configure signing in `apps/desktop/electron-builder.yml` for the NSIS installer and the installed executables, using the certificate supplied through `CSC_LINK`/`CSC_KEY_PASSWORD` (or Microsoft Trusted Signing when that identity is used), without changing `win.target`.
+- [X] T116 Make `.github/workflows/windows-dev-build.yml` fail before building when the signing secret is missing, sign both artifacts, verify them with `signtool verify /pa` or `Get-AuthenticodeSignature`, and stop before `publish_release` on any failure.
+- [X] T117 Name the signing authority in the release body produced by `.github/workflows/windows-dev-build.yml` and document the upgrade expectation in `docs/release-process.md`, including what a user sees when Smart App Control is enabled.
+
+---
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies
@@ -310,7 +355,8 @@ Monorepo: desktop main process in `apps/desktop/src/main/`, renderer in `apps/de
 - **Wave 1 stories (US1–US5)**: after Foundational. US2 depends on T007 settings; US3/US4 depend on T009–T012; US5 is independent of T008–T013.
 - **Wave 2 (US6–US9)**: US6 depends on T002/T004/T006; US7 depends on T005/T006/T008; US9 depends on T001/T006/T076 typing.
 - **Wave 3 (US10–US11)**: US10 depends on T001; US11 depends only on a stable build.
-- **Polish (Phase 14)**: after all desired stories.
+- **Hardening (Phase 15)**: after US10 and before US11/Polish; T100–T103 fail first, T104 blocks T105–T107, T109–T110 block T111, and T115–T116 block T117.
+- **Polish (Phase 14)**: after all desired stories and after Phase 15.
 
 ### User Story Dependencies
 
@@ -370,6 +416,22 @@ Task: "Map catalogue capabilities in apps/desktop/src/main/services/catalogue/"
 Task: "Implement image storage in apps/desktop/src/main/services/history/images.ts"
 ```
 
+## Parallel Example: Hardening (Phase 15)
+
+```bash
+# Four failure-first tests, four different files
+Task: "Write apps/desktop/tests/unit/local-proxy-removed.test.ts"
+Task: "Write apps/desktop/tests/unit/external-access.test.ts"
+Task: "Write apps/desktop/tests/unit/balance-display.test.ts"
+Task: "Write scripts/tests/release-signing.test.ts"
+
+# Then the independent removals and additions
+Task: "Remove integration channels and IDE settings in packages/contracts/src/ipc.ts"
+Task: "Delete the editor page, route and navigation entry"
+Task: "Add apps/desktop/src/renderer/features/models/external-access.ts"
+Task: "Add apps/desktop/src/renderer/features/notifications/balance-display.ts"
+```
+
 ---
 
 ## Implementation Strategy
@@ -384,8 +446,9 @@ Task: "Implement image storage in apps/desktop/src/main/services/history/images.
 2. US1 + US2 → demo the promise and wizard.
 3. US3 + US4 + US5 → complete Wave 1 and stop for validation (this is the release candidate for the privacy story).
 4. US6 → power tiers; US7 → telemetry + backoffice; US8 → settings layout; US9 → images; validate each independently.
-5. US10 → platform artifacts + landing selector; US11 → measured startup improvement.
-6. Polish and merge.
+5. US10 → platform artifacts + landing selector; **then Phase 15 (hardening)** — signing, the proxy removal, the keyed endpoint and the balance fix — because signing gates every later upgrade and the removed page must not be rebuilt on.
+6. US11 → measured startup improvement.
+7. Polish and merge.
 
 ### Parallel Team Strategy
 

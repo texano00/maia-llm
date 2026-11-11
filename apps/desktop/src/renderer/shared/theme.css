@@ -516,56 +516,7 @@ nav {
   color: #ffb3b3;
 }
 
-.session-log {
-  padding: 0.6rem 0.8rem;
-  border: 1px solid rgb(255 255 255 / 8%);
-  border-radius: 0.7rem;
-  background: rgb(255 255 255 / 2%);
-  font-size: 0.78rem;
-}
-
-.session-log summary {
-  cursor: pointer;
-  color: #8fa3c8;
-}
-
-.session-log ol {
-  display: grid;
-  gap: 0.2rem;
-  margin: 0.5rem 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.session-log li {
-  display: grid;
-  grid-template-columns: 5.5rem 3.2rem minmax(0, 1fr);
-  gap: 0.5rem;
-  color: #a9b7ce;
-}
-
-.session-log time {
-  color: #6f83a6;
-  font-variant-numeric: tabular-nums;
-}
-
-.log-level {
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  font-size: 0.68rem;
-  color: #6f83a6;
-}
-
-.log-error .log-level,
-.log-error {
-  color: #ffb3b3;
-}
-
-.log-warn .log-level {
-  color: #ffd8a1;
-}
-
-.model-meta {
+.log-warn .model-meta {
   color: #8fa3c8;
   font-size: 0.78rem;
 }
@@ -762,6 +713,46 @@ nav {
 .composer {
   display: grid;
   gap: 0.6rem;
+}
+
+/* How another tool reaches this run: copy-ready, but collapsed by default. */
+.external-access {
+  border: 1px solid rgb(255 255 255 / 8%);
+  border-radius: 0.7rem;
+  padding: 0.6rem 0.75rem;
+  background: rgb(255 255 255 / 2%);
+}
+
+.external-access > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.external-access-snippet {
+  margin-top: 0.6rem;
+  border: 1px solid rgb(255 255 255 / 8%);
+  border-radius: 0.6rem;
+  overflow: hidden;
+}
+
+.external-access-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  background: rgb(255 255 255 / 3%);
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.external-access pre {
+  margin: 0;
+  padding: 0.6rem;
+  overflow-x: auto;
+  font-size: 0.78rem;
+  line-height: 1.45;
 }
 
 /* Thumbnails of the images waiting to be sent with the next turn. */
@@ -1284,15 +1275,6 @@ button:hover {
 .session-bar {
   gap: 0.6rem;
   padding: 0.25rem 0;
-}
-
-.session-log {
-  padding: 0.9rem 1.1rem;
-}
-
-.session-log ol {
-  gap: 0.4rem;
-  margin-top: 0.75rem;
 }
 
 .transcript {
@@ -2012,13 +1994,19 @@ textarea {
 .balance-badge {
   display: inline-flex;
   align-items: center;
-  gap: 0.25rem;
-  padding: 0 0.45rem;
-  font-size: 0.8rem;
+  justify-content: center;
+  /* Wide enough for "$999.99" and never wider: the amount is abbreviated above
+     that, so the label can never escape the pill. */
+  min-width: 4.6rem;
+  padding: 0 0.55rem;
+  font-size: 0.78rem;
+  white-space: nowrap;
+  overflow: hidden;
 }
 
 .balance-amount {
   font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
 }
 
 .models-nav-indicator {

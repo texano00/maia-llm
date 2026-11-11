@@ -1,7 +1,6 @@
 import { z } from "zod";
 import { powerTierSchema, releaseChannelSchema } from "./domain";
 import { gpuFiltersSchema, microUsdSchema } from "./sessions";
-import { DEFAULT_IDE_ENDPOINT_PORT } from "./integration";
 
 export const errorCodeSchema = z.enum([
   "VALIDATION_FAILED",
@@ -93,6 +92,8 @@ export const ipcChannels = [
   "session.status",
   "session.start",
   "session.end",
+  /** Base URL, model id and per-run key for using a running model elsewhere. */
+  "session.endpoint",
   "conversation.list",
   "conversation.get",
   "conversation.rename",
@@ -103,9 +104,6 @@ export const ipcChannels = [
   "conversation.image",
   "chat.send",
   "chat.abort",
-  "integration.status",
-  "integration.enable",
-  "integration.disable",
   "notifications.list",
   "notifications.dismiss",
   "provider.health",
@@ -158,12 +156,6 @@ export const appSettingsSchema = z.object({
    * the first one, so the total is this value + 1.
    */
   gpuStartupRetries: z.number().int().min(0).max(10).default(DEFAULT_GPU_STARTUP_RETRIES),
-  /**
-   * Expose the running model to local IDE assistants over a loopback Ollama API.
-   * Off by default: nothing listens on the user's machine unless asked.
-   */
-  ideEndpointEnabled: z.boolean().default(false),
-  ideEndpointPort: z.number().int().min(1024).max(65_535).default(DEFAULT_IDE_ENDPOINT_PORT),
   /**
    * Opt-in, content-free usage measurements (tokens per second per run). Off by
    * default: nothing leaves the machine until the user enables it.

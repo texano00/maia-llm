@@ -30,20 +30,18 @@ is created, let Maia rent a matching GPU on vast.ai, chat in a normal LLM
 interface, and release the GPU the moment you stop. No terminal, no YAML, no
 forgotten instances burning credit.
 
-> **The model you rent is also a local API for your agents.** While a session
-> runs, Maia serves it on `http://127.0.0.1:11434` as an **Ollama-compatible
-> endpoint** — the same one Ollama itself uses. VS Code assistants (Continue,
-> Cline), agent frameworks, RAG pipelines and your own scripts can then call the
-> model as if it were installed locally: no API keys, no per-token billing, just
-> the GPU you are already paying for by the hour. Loopback only, opt-in, and it
-> stops when the session does — see
-> [docs/ide-endpoint.md](docs/ide-endpoint.md).
+> **The model you rent is also an API your own tools can call.** While a session
+> runs, the Models screen shows its base URL, model name and a key generated for
+> that run only. Paste them into any OpenAI-compatible client — VS Code
+> assistants, agent frameworks, your own scripts — and they use the GPU you are
+> already paying for by the hour. The address and key stop working when the
+> session ends; nothing listens on your machine.
 
 ```bash
-# Settings → IDE endpoint → enable, start a session, then anything Ollama-shaped works
-curl -s http://127.0.0.1:11434/api/tags
-curl -s http://127.0.0.1:11434/api/chat -H 'content-type: application/json' \
-  -d '{"model":"<the model you started>","stream":false,
+# Models → the running model → copy the snippet it shows
+curl -s "$MAIA_BASE_URL/chat/completions" \
+  -H "authorization: Bearer $MAIA_API_KEY" -H 'content-type: application/json' \
+  -d '{"model":"<the model you started>",
        "messages":[{"role":"user","content":"Draft a commit message for this diff."}]}'
 ```
 
@@ -63,11 +61,10 @@ Three ideas shape everything in the app:
 
 ## What you get
 
-- **Your agents get the model, locally.** A running session is exposed on
-  `127.0.0.1:11434` through an Ollama-compatible API (`/api/tags`, `/api/chat`,
-  `/api/generate`, streaming, thinking output), so token-hungry tools talk to the
-  GPU you rent instead of a per-token provider. Edit your Continue/Cline config,
-  or point a script at it — no SDK, no key. Off until you enable it.
+- **Your tools get the model directly.** A running session shows its OpenAI-compatible
+  base URL, model name and a per-run key in Models, so Continue/Cline, an agent
+  framework or a script can use the GPU you rent instead of a per-token provider.
+  The key is generated for that run and the endpoint disappears with it.
 - **A real catalogue** of open-weight models with license, size, context window,
   gated status, and feature filters (tool use, reasoning, vision, code, long
   context). Order by downloads, newest, likes, or size.
@@ -201,4 +198,7 @@ and the release checklist.
 
 ## License
 
-Proprietary. All rights reserved until a license is chosen.
+Apache License 2.0 — see [LICENSE](LICENSE). You may use, modify and redistribute
+the software, including commercially, provided you keep the copyright and
+attribution notices and state what you changed. The license does not grant rights
+to the Maia LLM name or logo.

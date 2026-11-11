@@ -2,8 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   DEFAULT_DIAGNOSTICS_URL,
   DEFAULT_GPU_FILTERS,
-  DEFAULT_GPU_STARTUP_RETRIES,
-  DEFAULT_IDE_ENDPOINT_PORT
+  DEFAULT_GPU_STARTUP_RETRIES
 } from "@maia/contracts";
 import { closeDatabase, openDatabase, type DatabaseConnection } from "../../src/main/storage/db";
 import { SettingsStore } from "../../src/main/services/settings/store";
@@ -26,8 +25,6 @@ describe("SettingsStore", () => {
       diagnosticsUrl: DEFAULT_DIAGNOSTICS_URL,
       gpuFilters: DEFAULT_GPU_FILTERS,
       gpuStartupRetries: DEFAULT_GPU_STARTUP_RETRIES,
-      ideEndpointEnabled: false,
-      ideEndpointPort: DEFAULT_IDE_ENDPOINT_PORT,
       usageReporting: false,
       walletWarnThresholdMicroUsd: 2_000_000,
       onboardingCompleted: false,
@@ -58,8 +55,6 @@ describe("SettingsStore", () => {
         diagnosticsUrl: "http://localhost:8787",
         gpuFilters: DEFAULT_GPU_FILTERS,
         gpuStartupRetries: DEFAULT_GPU_STARTUP_RETRIES,
-        ideEndpointEnabled: false,
-        ideEndpointPort: DEFAULT_IDE_ENDPOINT_PORT
       }),
       "2026-11-03T00:00:00.000Z"
     );
@@ -100,8 +95,6 @@ describe("SettingsStore", () => {
       diagnosticsUrl: DEFAULT_DIAGNOSTICS_URL,
       gpuFilters: DEFAULT_GPU_FILTERS,
       gpuStartupRetries: DEFAULT_GPU_STARTUP_RETRIES,
-      ideEndpointEnabled: false,
-      ideEndpointPort: DEFAULT_IDE_ENDPOINT_PORT,
       usageReporting: false,
       walletWarnThresholdMicroUsd: 2_000_000,
       onboardingCompleted: false,
@@ -120,8 +113,6 @@ describe("SettingsStore", () => {
       diagnosticsUrl: DEFAULT_DIAGNOSTICS_URL,
       gpuFilters: DEFAULT_GPU_FILTERS,
       gpuStartupRetries: DEFAULT_GPU_STARTUP_RETRIES,
-      ideEndpointEnabled: false,
-      ideEndpointPort: DEFAULT_IDE_ENDPOINT_PORT,
       usageReporting: false,
       walletWarnThresholdMicroUsd: 2_000_000,
       onboardingCompleted: false,

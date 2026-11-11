@@ -32,21 +32,20 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Prepare code-signing certificate
+      - name: Require code-signing certificate
         shell: pwsh
         env:
           CSC_LINK_BASE64: ${{ secrets.CSC_LINK_BASE64 }}
         run: |
+          # Smart App Control blocks unsigned installers outright, so an
+          # unsigned build must never reach a release.
           if ([string]::IsNullOrWhiteSpace($env:CSC_LINK_BASE64)) {
-            Write-Host "No CSC_LINK_BASE64 secret: building an unsigned installer."
-            "SIGNING_EXPECTED=false" >> $env:GITHUB_ENV
-            exit 0
+            throw "Signing secret is required: set CSC_LINK_BASE64 (and CSC_KEY_PASSWORD) on this repository. An unsigned Windows build is blocked by Smart App Control on upgrade."
           }
 
           $path = Join-Path $env:RUNNER_TEMP "maia-signing.pfx"
           [IO.File]::WriteAllBytes($path, [Convert]::FromBase64String($env:CSC_LINK_BASE64))
           "CSC_LINK=$path" >> $env:GITHUB_ENV
-          "SIGNING_EXPECTED=true" >> $env:GITHUB_ENV
       - run: npm run -w @maia/desktop dist:win
         env:
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
@@ -54,13 +53,27 @@ jobs:
       - name: Verify Authenticode signature
         shell: pwsh
         run: |
-          $installer = Get-ChildItem apps/desktop/release -Filter 'MaiaLLM-Setup-*.exe' | Select-Object -First 1
-          if (-not $installer) { throw "Installer not found" }
-          $signature = Get-AuthenticodeSignature $installer.FullName
-          Write-Host "Signature status: $($signature.Status) ($($signature.SignerCertificate.Subject))"
-          if ($env:SIGNING_EXPECTED -eq 'true' -and $signature.Status -ne 'Valid') {
-            throw "Signing was configured but the installer signature is $($signature.Status)"
+          # Both the installer and the installed application must carry a valid
+          # signature: Smart App Control inspects the executable that runs.
+          $targets = @(
+            (Get-ChildItem apps/desktop/release -Filter 'MaiaLLM-Setup-*.exe' | Select-Object -First 1),
+            (Get-ChildItem apps/desktop/release/win-unpacked -Filter '*.exe' | Select-Object -First 1)
+          )
+
+          $signer = $null
+          foreach ($target in $targets) {
+            if (-not $target) { throw "Signed binary not found" }
+
+            $signature = Get-AuthenticodeSignature $target.FullName
+            Write-Host "$($target.Name): $($signature.Status) ($($signature.SignerCertificate.Subject))"
+            if ($signature.Status -ne 'Valid') {
+              throw "$($target.Name) is not validly signed: $($signature.Status)"
+            }
+
+            if (-not $signer) { $signer = $signature.SignerCertificate.Subject }
           }
+
+          "MAIA_SIGNER=$signer" >> $env:GITHUB_ENV
       - name: Generate checksums
         shell: pwsh
         run: |
@@ -99,7 +112,10 @@ jobs:
 
           gh release view $tag 2>$null | Out-Null
           if ($LASTEXITCODE -ne 0) {
-            $flags = @("--title", "Maia LLM $version", "--notes", "Automated build $env:GITHUB_RUN_NUMBER.")
+            $flags = @(
+              "--title", "Maia LLM $version",
+              "--notes", "Automated build $env:GITHUB_RUN_NUMBER.`n`nSigned by: $env:MAIA_SIGNER"
+            )
             if ($env:CHANNEL -eq "beta") { $flags += "--prerelease" } else { $flags += "--latest" }
 
             $created = $false

@@ -40,7 +40,8 @@ export interface VastComputeProviderOptions {
   getModelPlan?: (
     modelId: string,
     offer: ComputeOffer,
-    contextScale?: number
+    contextScale?: number,
+    apiKey?: string
   ) => Promise<LaunchPlan>;
   /**
    * Hard cap on the whole boot. Generous on purpose: pulling a multi-GB image
@@ -246,7 +247,8 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
       const plan = (await options.getModelPlan?.(
         context.modelId,
         offer,
-        context.contextScale
+        context.contextScale,
+        context.apiKey
       )) ?? fallbackVllmPlan(context.modelId);
 
       // `onstart` only runs as a shell script under Vast's SSH/Jupyter entrypoint.

@@ -18,8 +18,6 @@ function settings(overrides: Partial<AppSettings> = {}): AppSettings {
       minDiskBandwidthMBps: 500
     },
     gpuStartupRetries: 5,
-    ideEndpointEnabled: false,
-    ideEndpointPort: 11434,
     usageReporting: false,
     walletWarnThresholdMicroUsd: 2_000_000,
     onboardingCompleted: false,

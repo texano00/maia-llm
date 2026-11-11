@@ -43,12 +43,30 @@ gh workflow run windows-dev-build.yml --ref main \
 The workflow decodes the certificate into the runner's temp directory, exports
 `CSC_LINK`, and electron-builder signs both the app executable and the NSIS
 installer with a timestamp. A verification step then runs
-`Get-AuthenticodeSignature` and **fails the build** if signing was expected but the
-installer is not validly signed — so an unsigned artifact can never be published
-once the secret exists.
+`Get-AuthenticodeSignature` on **both** the installer and the application
+executable and **fails the build** unless each one reports `Valid`.
 
-Without the secret the build still succeeds and prints
-`No CSC_LINK_BASE64 secret: building an unsigned installer.`
+A missing certificate is now a hard failure: the workflow stops before building
+with `Signing secret is required` instead of quietly producing an unsigned
+installer. That is deliberate — an unsigned build cannot be installed on a
+machine with Smart App Control enabled, so publishing one would break upgrades
+for exactly the users the release is meant to help.
+
+The release notes written by the workflow name the signing authority
+(`Signed by: <certificate subject>`), so a download can be checked against the
+organization Microsoft trusts.
+
+### What an upgrade looks like once signed
+
+- Windows 11 with Smart App Control **on**: the updater downloads the new
+  installer, runs it, and no block appears. The signature is what SAC checks; the
+  previous unsigned 0.9.0 → 0.9.1 upgrade failed exactly there
+  (*"Smart App Control has blocked part of this app"*).
+- Windows 11 with Smart App Control **off**: the installer runs and SmartScreen
+  may still show a reputation prompt until the certificate collects history.
+- A user on an unsigned build who cannot upgrade: they must install the first
+  signed release manually from the Releases page (properties → *Unblock*), after
+  which in-app updates work.
 
 ## What end users should do meanwhile
 
@@ -58,7 +76,7 @@ Without the secret the build still succeeds and prints
 - If Windows reports that part of the app was blocked, check **Windows Security →
   App & browser control → Smart App Control**. With Smart App Control enabled an
   unsigned build cannot run; either switch it to evaluation/off (Windows requires a
-  reinstall of the OS for that setting) or use a signed build.
+  reinstall of the OS for that setting) or install the signed release.
 
 ### Smart App Control, precisely
 

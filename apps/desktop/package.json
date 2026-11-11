@@ -1,13 +1,13 @@
 {
   "name": "@maia/desktop",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "private": true,
   "productName": "Maia LLM",
   "description": "Maia LLM desktop client",
   "author": {
     "name": "texano00"
   },
-  "license": "UNLICENSED",
+  "license": "Apache-2.0",
   "main": "./out/main/main.js",
   "scripts": {
     "dev": "npm run rebuild:native && electron-vite dev",

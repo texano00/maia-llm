@@ -4,6 +4,7 @@ import { formatUsd } from "../../shared/format";
 import { DEFAULT_STATUS_FILTER, filterRuns, emptyStateFor, STATUS_FILTERS, type StatusFilter } from "./filter";
 import { describeRun } from "./run-details";
 import { isChatEligible, type VisibleStatus } from "./status";
+import { ExternalAccessPanel } from "./ExternalAccessPanel";
 import { acknowledgeFailures, failedRunIds } from "./indicator";
 import { useModelRuns } from "./useModelRuns";
 import { useProviderHealth } from "../../shared/health/useProviderHealth";
@@ -184,6 +185,8 @@ export function ModelsPage() {
                 ) : null}
 
                 {details.accruedMicroUsd !== null ? <p className="muted small">{details.note}</p> : null}
+
+                {run.state === "active" ? <ExternalAccessPanel sessionId={run.id} /> : null}
 
                 {isChatEligible(run.state) ? (
                   <div className="model-run-actions">

@@ -86,6 +86,29 @@ describe("launch planning", () => {
     expect(plan.args).toContain(String(plan.limits?.maxModelLen));
   });
 
+  it("starts the server with the run key so the public port is not open to anyone", () => {
+    const plan = planLaunch({
+      modelId: "Qwen/Qwen3-14B",
+      artifacts: safetensors,
+      vramGb: 48,
+      apiKey: "maia_test_key"
+    });
+
+    const keyIndex = plan.args.indexOf("--api-key");
+    expect(keyIndex).toBeGreaterThan(-1);
+    expect(plan.args[keyIndex + 1]).toBe("maia_test_key");
+  });
+
+  it("omits the key when the plan has none", () => {
+    const plan = planLaunch({
+      modelId: "Qwen/Qwen3-14B",
+      artifacts: safetensors,
+      vramGb: 48
+    });
+
+    expect(plan.args).not.toContain("--api-key");
+  });
+
   it("keeps transformers checkpoints on vLLM", () => {
     const plan = planLaunch({
       modelId: "Qwen/Qwen3-14B",

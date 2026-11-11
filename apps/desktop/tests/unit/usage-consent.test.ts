@@ -54,8 +54,6 @@ function settings(usageReporting: boolean): AppSettings {
       minDiskBandwidthMBps: 500
     },
     gpuStartupRetries: 5,
-    ideEndpointEnabled: false,
-    ideEndpointPort: 11434,
     usageReporting,
     walletWarnThresholdMicroUsd: 2_000_000,
     onboardingCompleted: true,

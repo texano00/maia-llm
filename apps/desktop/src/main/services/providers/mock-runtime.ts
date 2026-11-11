@@ -93,6 +93,15 @@ export function createMockComputeProvider(options: MockComputeOptions = {}): Com
 
     async destroyInstance(instanceId: number) {
       destroyed.push(instanceId);
+    },
+
+    /**
+     * Nothing is rented, so the "mapped" address is loopback: enough for the
+     * endpoint panel to render during a mock walkthrough without pretending a
+     * public host exists.
+     */
+    resolveEndpoint(instanceId: number) {
+      return { host: "127.0.0.1", port: 18_000 + (instanceId % 1000) };
     }
   };
 }

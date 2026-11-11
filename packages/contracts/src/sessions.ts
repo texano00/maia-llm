@@ -219,6 +219,21 @@ export const conversationDetailSchema = z.object({
 export const sessionEventChannel = "session.event" as const;
 export const chatEventChannel = "chat.event" as const;
 
+/**
+ * How an external tool reaches a running model. The key belongs to one run, is
+ * generated on the device, and is shown only while that run serves.
+ */
+export const sessionEndpointSchema = z.object({
+  /** OpenAI-compatible base URL, including host, port and `/v1`. */
+  baseUrl: z.string().min(1),
+  /** Model identifier to send in requests. */
+  modelId: z.string().min(1),
+  /** Bearer key the server requires. */
+  apiKey: z.string().min(1)
+});
+
+export type SessionEndpoint = z.infer<typeof sessionEndpointSchema>;
+
 /** What the catalogue power popup shows before an estimate exists. */
 export const estimatePreviewResultSchema = z.object({
   modelId: z.string().min(1),
