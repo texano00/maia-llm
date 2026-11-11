@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { artifactFormatSchema, gatedStatusSchema } from "./domain";
+import { artifactFormatSchema, gatedStatusSchema, type ModelCapability } from "./domain";
 
 /**
  * A basic-mode card: the curated use case plus the model the app would run.
@@ -86,6 +86,24 @@ export const CHAT_PIPELINE_TAGS: readonly string[] = [
  */
 export function isChatCapableModel(model: { pipelineTag: string | null }): boolean {
   return model.pipelineTag === null || CHAT_PIPELINE_TAGS.includes(model.pipelineTag);
+}
+
+/**
+ * What a run of this model can do. Text is the default so unknown or missing
+ * tags never claim an image capability the runtime cannot serve.
+ */
+export function capabilityForPipelineTag(pipelineTag: string | null): ModelCapability {
+  switch (pipelineTag) {
+    case "text-to-image":
+      return "text-to-image";
+    case "image-to-image":
+      return "image-to-image";
+    case "image-text-to-text":
+    case "visual-question-answering":
+      return "image-to-text";
+    default:
+      return "text";
+  }
 }
 
 /**

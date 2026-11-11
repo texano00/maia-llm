@@ -36,7 +36,7 @@ import { ReadinessNotifier } from "../services/notifications/desktop";
 import { createElectronNotificationBackend } from "../services/notifications/electron-backend";
 import { ReadinessWatcher } from "../services/notifications/readiness-watcher";
 import type { ProviderHealth } from "@maia/contracts";
-import { readyEventChannel } from "@maia/contracts";
+import { capabilityForPipelineTag, readyEventChannel } from "@maia/contracts";
 import { SessionOrchestrator } from "../services/sessions/orchestrator";
 import { SessionStore } from "../services/sessions/store";
 import { GpuGuardian, guardianPaths } from "../services/sessions/guardian";
@@ -352,6 +352,8 @@ async function bootstrap(): Promise<void> {
       await assertChatRunnable(catalogue, modelId);
     },
     isGatedModel: (modelId) => catalogueRepository.get(modelId)?.gated !== "none",
+    capabilityFor: (modelId) =>
+      capabilityForPipelineTag(catalogueRepository.get(modelId)?.pipelineTag ?? null),
     reportFailure,
     onRunFinished: (session) => {
       const metric = sessionStore.metricFor(session.id);

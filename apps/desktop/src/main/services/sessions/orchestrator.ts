@@ -5,6 +5,7 @@ import {
   type EstimatePreview,
   type FailureEvent,
   type GpuFilters,
+  type ModelCapability,
   type PowerTier,
   type Session,
   type SessionStart
@@ -148,6 +149,8 @@ export interface SessionOrchestratorOptions {
    * implementation must never throw or block the teardown path.
    */
   reportFailure?: (event: FailureEvent) => void;
+  /** What a run of this model can do; defaults to text when unknown. */
+  capabilityFor?: (modelId: string) => ModelCapability;
   /** Called once when a run reaches a terminal state, after metrics are stored. */
   onRunFinished?: (session: Session) => void;
 }
@@ -428,7 +431,8 @@ export class SessionOrchestrator {
         estimatedTotalMicroUsd: estimate.projectedTotalMicroUsd,
         startedAt,
         containerImage: "vllm/vllm-openai:latest",
-        powerTier: estimate.powerTier
+        powerTier: estimate.powerTier,
+        capability: this.options.capabilityFor?.(estimate.modelId) ?? "text"
       });
       this.options.store.setInstance(sessionId, instanceId, offer.offerId);
       inserted = true;
