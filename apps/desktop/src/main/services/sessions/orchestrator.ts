@@ -5,6 +5,7 @@ import {
   type EstimatePreview,
   type FailureEvent,
   type GpuFilters,
+  type ModelCapability,
   type PowerTier,
   type Session,
   type SessionStart
@@ -88,12 +89,20 @@ export interface ProvisioningProgress {
   elapsedMs: number;
 }
 
+/** One image on its way to a vision model, already base64 encoded. */
+export interface InferenceImage {
+  mimeType: string;
+  dataBase64: string;
+}
+
 export interface InferenceRuntime {
   stream(input: {
     sessionId: string;
     modelId: string;
     instanceId: number | null;
     prompt: string;
+    /** Images for vision runs; empty for text-only models. */
+    images?: InferenceImage[] | undefined;
     signal: AbortSignal;
     onDelta: (kind: StreamKind, text: string) => void;
   }): Promise<{ tokens: number; text: string }>;
@@ -105,6 +114,7 @@ export type SessionErrorCode =
   | "SESSION_CONFLICT"
   | "MODEL_NOT_READY"
   | "PROVIDER_UNAVAILABLE"
+  | "CAPABILITY_UNSUPPORTED"
   | "NOT_FOUND";
 
 export class SessionError extends Error {
@@ -148,6 +158,8 @@ export interface SessionOrchestratorOptions {
    * implementation must never throw or block the teardown path.
    */
   reportFailure?: (event: FailureEvent) => void;
+  /** What a run of this model can do; defaults to text when unknown. */
+  capabilityFor?: (modelId: string) => ModelCapability;
   /** Called once when a run reaches a terminal state, after metrics are stored. */
   onRunFinished?: (session: Session) => void;
 }
@@ -428,7 +440,8 @@ export class SessionOrchestrator {
         estimatedTotalMicroUsd: estimate.projectedTotalMicroUsd,
         startedAt,
         containerImage: "vllm/vllm-openai:latest",
-        powerTier: estimate.powerTier
+        powerTier: estimate.powerTier,
+        capability: this.options.capabilityFor?.(estimate.modelId) ?? "text"
       });
       this.options.store.setInstance(sessionId, instanceId, offer.offerId);
       inserted = true;
@@ -961,7 +974,8 @@ export class SessionOrchestrator {
   async send(
     sessionId: string,
     content: string,
-    onDelta: (kind: StreamKind, text: string) => void
+    onDelta: (kind: StreamKind, text: string) => void,
+    images: InferenceImage[] = []
   ): Promise<{ tokens: number; text: string }> {
     const runtime = this.runtimes.get(sessionId);
     if (!runtime) {
@@ -977,6 +991,15 @@ export class SessionOrchestrator {
       );
     }
 
+    // A text model would silently ignore the pixels, so refuse before the GPU
+    // spends tokens on a question that was never actually asked.
+    if (images.length > 0 && runtime.session.capability !== "image-to-text") {
+      throw new SessionError(
+        "CAPABILITY_UNSUPPORTED",
+        "This model only reads text. Start a model that accepts images to send one."
+      );
+    }
+
     this.touchActivity(sessionId);
     const abort = new AbortController();
     runtime.abort = abort;
@@ -988,6 +1011,7 @@ export class SessionOrchestrator {
         modelId: runtime.session.modelId,
         instanceId: runtime.session.instanceId,
         prompt: content,
+        images,
         signal: abort.signal,
         onDelta
       });

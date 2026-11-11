@@ -2,6 +2,7 @@ import { z } from "zod";
 import type {
   CatalogueResult,
   ConversationDetail,
+  ConversationImageResult,
   ConversationSummary,
   ModelDetail,
   Session,
@@ -12,6 +13,7 @@ import {
   chatAbortSchema,
   chatSendSchema,
   conversationDeleteSchema,
+  conversationImageRequestSchema,
   powerTierSchema,
   sessionEndSchema,
   sessionStartSchema,
@@ -21,6 +23,7 @@ import type { IpcRegistry } from "./registry";
 import type { CatalogueService } from "../services/catalogue/service";
 import type { SessionOrchestrator } from "../services/sessions/orchestrator";
 import type { HistoryRepository } from "../services/history/repository";
+import type { ConversationImageStore } from "../services/history/images";
 
 const modelIdSchema = z.object({ id: z.string().min(1).max(200) });
 
@@ -64,6 +67,8 @@ export interface WorkspaceHandlersOptions {
   catalogue: CatalogueService;
   sessions: SessionOrchestrator;
   history: HistoryRepository;
+  /** Image bytes for vision turns; transcripts only carry their metadata. */
+  images: ConversationImageStore;
   broadcastChat: (payload: ChatChunk) => void;
   /** Basic-mode cards; absent when the app never talks to a portal. */
   useCases?: (() => Promise<UseCaseCard[]>) | undefined;
@@ -77,7 +82,7 @@ const TITLE_MAX_LENGTH = 60;
  * swapped once the user confirms the switch.
  */
 export function registerWorkspaceHandlers(options: WorkspaceHandlersOptions): void {
-  const { registry, catalogue, sessions, history, broadcastChat } = options;
+  const { registry, catalogue, sessions, history, broadcastChat, images } = options;
 
   registry.register("catalogue.search", catalogueQuerySchema, (query): Promise<CatalogueResult> => {
     return catalogue.search(query);
@@ -151,40 +156,16 @@ export function registerWorkspaceHandlers(options: WorkspaceHandlersOptions): vo
 
   registry.register("conversation.rename", renameConversationSchema, (payload) => {
     history.renameConversation(payload.id, payload.title);
-    return registryResult(history, sessions, payload.id);
+    return describeConversation(history, sessions, images, payload.id);
   });
 
   registry.register("conversation.setPinned", pinConversationSchema, (payload) => {
     history.setPinned(payload.id, payload.pinned);
-    return registryResult(history, sessions, payload.id);
+    return describeConversation(history, sessions, images, payload.id);
   });
 
   registry.register("conversation.get", conversationIdSchema, (payload): ConversationDetail => {
-    const found = history.getConversation(payload.id);
-    if (!found) {
-      throw Object.assign(new Error("Conversation not found"), { code: "NOT_FOUND" });
-    }
-
-    const running = new Map(sessions.listSessions().map((session) => [session.modelId, session]));
-
-    return {
-      conversation: {
-        id: found.conversation.id,
-        title: found.conversation.title,
-        modelId: found.conversation.modelId,
-        sessionId: found.conversation.sessionId,
-        updatedAt: found.conversation.updatedAt
-      },
-      messages: found.messages.map((message) => ({
-        id: message.id,
-        role: message.role,
-        content: message.content,
-        reasoning: message.reasoning,
-        createdAt: message.createdAt
-      })),
-      frozen:
-        found.conversation.modelId !== null && !running.has(found.conversation.modelId)
-    };
+    return describeConversation(history, sessions, images, payload.id);
   });
 
   registry.register("conversation.switchModel", switchModelSchema, (payload): ConversationDetail => {
@@ -200,7 +181,7 @@ export function registerWorkspaceHandlers(options: WorkspaceHandlersOptions): vo
 
     const previousModelId = found.conversation.modelId;
     if (previousModelId === session.modelId) {
-      return registryResult(history, sessions, payload.conversationId);
+      return describeConversation(history, sessions, images, payload.conversationId);
     }
 
     history.appendMessage({
@@ -212,13 +193,22 @@ export function registerWorkspaceHandlers(options: WorkspaceHandlersOptions): vo
     });
     history.updateConversationModel(payload.conversationId, session.modelId, session.id);
 
-    return registryResult(history, sessions, payload.conversationId);
+    return describeConversation(history, sessions, images, payload.conversationId);
   });
 
   registry.register("chat.send", chatSendSchema, async (payload) => {
     const session = sessions.getSession(payload.sessionId);
     if (!session) {
       throw Object.assign(new Error("That model is not running any more."), { code: "NOT_FOUND" });
+    }
+
+    // Checked before anything is written: a text model would either ignore the
+    // images or fail mid-turn, leaving a user message that was never answered.
+    if (payload.images.length > 0 && session.capability !== "image-to-text") {
+      throw Object.assign(
+        new Error("This model only reads text. Start a model that accepts images to send one."),
+        { code: "CAPABILITY_UNSUPPORTED" }
+      );
     }
 
     const conversationId =
@@ -235,30 +225,46 @@ export function registerWorkspaceHandlers(options: WorkspaceHandlersOptions): vo
       throw Object.assign(new Error("Conversation not found"), { code: "NOT_FOUND" });
     }
 
-    history.appendMessage({
+    const userMessage = history.appendMessage({
       conversationId,
       role: "user",
       content: payload.content
     });
 
+    // Saved before inference so the turn survives a failed or aborted reply.
+    for (const image of payload.images) {
+      await images.save({
+        conversationId,
+        messageId: userMessage.id,
+        direction: "input",
+        mimeType: image.mimeType,
+        dataBase64: image.dataBase64
+      });
+    }
+
     let text = "";
     // Reasoning models stream their thinking first; it is stored next to the
     // answer so the chat can show it on demand once the turn has finished.
     let reasoning = "";
-    const result = await sessions.send(session.id, payload.content, (kind, delta) => {
-      if (kind === "content") {
-        text += delta;
-      } else {
-        reasoning += delta;
-      }
-      broadcastChat({
-        sessionId: session.id,
-        conversationId,
-        kind,
-        delta,
-        done: false
-      });
-    });
+    const result = await sessions.send(
+      session.id,
+      payload.content,
+      (kind, delta) => {
+        if (kind === "content") {
+          text += delta;
+        } else {
+          reasoning += delta;
+        }
+        broadcastChat({
+          sessionId: session.id,
+          conversationId,
+          kind,
+          delta,
+          done: false
+        });
+      },
+      payload.images
+    );
 
     history.appendMessage({
       conversationId,
@@ -287,7 +293,7 @@ export function registerWorkspaceHandlers(options: WorkspaceHandlersOptions): vo
 
   // Deleting is permanent, so any reply in flight is stopped first: a late chunk
   // must never recreate rows for a conversation the user just removed.
-  registry.register("conversation.delete", conversationDeleteSchema, (payload) => {
+  registry.register("conversation.delete", conversationDeleteSchema, async (payload) => {
     const found = history.getConversation(payload.id);
     if (!found) {
       throw Object.assign(new Error("Conversation not found"), { code: "NOT_FOUND" });
@@ -298,12 +304,32 @@ export function registerWorkspaceHandlers(options: WorkspaceHandlersOptions): vo
     }
 
     history.deleteConversation(payload.id);
+    // The rows cascade, but the bytes are files: without this the image folder
+    // would outlive the conversation forever.
+    await images.deleteForConversation(payload.id);
     return { deleted: true as const, id: payload.id };
-  });}
+  });
 
-function registryResult(
+  registry.register(
+    "conversation.image",
+    conversationImageRequestSchema,
+    async (payload): Promise<ConversationImageResult> => {
+      const image = await images.load(payload.id);
+      if (!image) {
+        throw Object.assign(new Error("That image is no longer available."), {
+          code: "NOT_FOUND"
+        });
+      }
+
+      return image;
+    }
+  );
+}
+
+function describeConversation(
   history: HistoryRepository,
   sessions: SessionOrchestrator,
+  images: ConversationImageStore,
   conversationId: string
 ): ConversationDetail {
   const found = history.getConversation(conversationId);
@@ -312,6 +338,7 @@ function registryResult(
   }
 
   const running = new Map(sessions.listSessions().map((session) => [session.modelId, session]));
+  const grouped = images.imagesByMessage(conversationId);
 
   return {
     conversation: {
@@ -326,8 +353,10 @@ function registryResult(
       role: message.role,
       content: message.content,
       reasoning: message.reasoning,
+      images: grouped.get(message.id) ?? [],
       createdAt: message.createdAt
     })),
-    frozen: found.conversation.modelId !== null && !running.has(found.conversation.modelId)
+    frozen:
+      found.conversation.modelId !== null && !running.has(found.conversation.modelId)
   };
 }

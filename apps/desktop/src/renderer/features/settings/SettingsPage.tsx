@@ -13,6 +13,8 @@ import {
 } from "@maia/contracts";
 import { useUpdates } from "../../shared/updates/UpdatesProvider";
 import { describeUpdateStatus } from "../../shared/updates/UpdateToast";
+import { SettingsSection } from "./SettingsSection";
+import { initialExpanded, sectionForError, toggleSection, type SettingsSectionId } from "./sections";
 
 function toPositiveInt(value: string): number | null {
   const trimmed = value.trim();
@@ -59,6 +61,19 @@ export function SettingsPage() {
   const [hfError, setHfError] = useState<string | null>(null);
   const [vastError, setVastError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [expandedSections, setExpandedSections] = useState<SettingsSectionId[]>(() => initialExpanded());
+
+  // A validation failure must never be hidden inside a collapsed card.
+  useEffect(() => {
+    const target = sectionForError(error);
+    if (target) {
+      setExpandedSections((current) => (current.includes(target) ? current : [...current, target]));
+    }
+  }, [error]);
+
+  function handleSectionToggle(id: SettingsSectionId, open: boolean): void {
+    setExpandedSections((current) => (open ? toggleSection(current, id) : current.filter((entry) => entry !== id)));
+  }
 
   useEffect(() => {
     const bridge = window.maia;
@@ -296,6 +311,13 @@ export function SettingsPage() {
         </p>
       )}
 
+      <SettingsSection
+        id="updates"
+        title="Application updates"
+        summary={`Installed ${appInfo?.app ?? "—"} on the ${status?.channel ?? "stable"} channel`}
+        expanded={expandedSections.includes("updates")}
+        onToggle={handleSectionToggle}
+      >
       <div className="settings-card">
         <div>
           <h2>Application updates</h2>
@@ -328,7 +350,15 @@ export function SettingsPage() {
           )}
         </div>
       </div>
+      </SettingsSection>
 
+      <SettingsSection
+        id="vastai"
+        title="vast.ai API key"
+        summary={credentialStatus?.vastai ? "Key saved" : "No key saved"}
+        expanded={expandedSections.includes("vastai")}
+        onToggle={handleSectionToggle}
+      >
       <form
         className="settings-card settings-card-stacked"
         onSubmit={(event) => {
@@ -373,7 +403,15 @@ export function SettingsPage() {
           </button>
         </div>
       </form>
+      </SettingsSection>
 
+      <SettingsSection
+        id="huggingface"
+        title="Hugging Face access token"
+        summary={credentialStatus?.huggingface ? "Token saved" : "No token saved"}
+        expanded={expandedSections.includes("huggingface")}
+        onToggle={handleSectionToggle}
+      >
       <form
         className="settings-card settings-card-stacked"
         onSubmit={(event) => {
@@ -420,7 +458,15 @@ export function SettingsPage() {
           </button>
         </div>
       </form>
+      </SettingsSection>
 
+      <SettingsSection
+        id="gpu"
+        title="GPU preferences"
+        summary={`Startup retries ${gpuStartupRetries} · warn below $${walletWarnUsd}`}
+        expanded={expandedSections.includes("gpu")}
+        onToggle={handleSectionToggle}
+      >
       <form
         className="settings-card settings-card-stacked"
         onSubmit={(event) => {
@@ -569,7 +615,15 @@ export function SettingsPage() {
           </button>
         </div>
       </form>
+      </SettingsSection>
 
+      <SettingsSection
+        id="diagnostics"
+        title="Telemetry and diagnostics host"
+        summary={diagnosticsUrl}
+        expanded={expandedSections.includes("diagnostics")}
+        onToggle={handleSectionToggle}
+      >
       <form
         className="settings-card settings-card-stacked"
         onSubmit={(event) => {
@@ -621,7 +675,15 @@ export function SettingsPage() {
           </button>
         </div>
       </form>
+      </SettingsSection>
 
+      <SettingsSection
+        id="usage"
+        title="Usage reporting"
+        summary={settings?.usageReporting ? "On — content-free samples" : "Off"}
+        expanded={expandedSections.includes("usage")}
+        onToggle={handleSectionToggle}
+      >
       <section className="settings-card settings-card-stacked">
         <div>
           <h2>Usage reporting</h2>
@@ -648,6 +710,7 @@ export function SettingsPage() {
           <span className="pill">{settings?.usageReporting ? "On" : "Off"}</span>
         </div>
       </section>
+      </SettingsSection>
     </section>
   );
 }

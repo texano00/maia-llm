@@ -9,6 +9,8 @@ export interface AppPaths {
   logsDir: string;
   modelsDir: string;
   backupsDir: string;
+  /** Image attachments of vision conversations, one folder per chat. */
+  imagesDir: string;
 }
 
 export function resolveAppPaths(): AppPaths {
@@ -20,7 +22,8 @@ export function resolveAppPaths(): AppPaths {
     vaultDir: join(userData, "vault"),
     logsDir: join(userData, "logs"),
     modelsDir: join(userData, "models"),
-    backupsDir: join(userData, "backups")
+    backupsDir: join(userData, "backups"),
+    imagesDir: join(userData, "images")
   };
 }
 
@@ -30,6 +33,7 @@ export async function ensureAppDirectories(paths: AppPaths): Promise<void> {
     mkdir(paths.vaultDir, { recursive: true }),
     mkdir(paths.logsDir, { recursive: true }),
     mkdir(paths.modelsDir, { recursive: true }),
-    mkdir(paths.backupsDir, { recursive: true })
+    mkdir(paths.backupsDir, { recursive: true }),
+    mkdir(paths.imagesDir, { recursive: true })
   ]);
 }

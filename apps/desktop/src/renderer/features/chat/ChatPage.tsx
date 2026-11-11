@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type {
+  ChatImage,
   ConversationDetail,
   ConversationSummary,
   Estimate,
@@ -10,10 +11,23 @@ import { useWorkspace } from "../../shared/session/WorkspaceProvider";
 import { accruedMicroUsd, formatElapsed, formatUsd } from "../../shared/format";
 import { MessageContent } from "./MessageContent";
 import { ReasoningPanel } from "./ReasoningPanel";
+import {
+  IMAGE_ACCEPT,
+  canAttachImages,
+  dataUrlFor,
+  readImageFile,
+  type PendingImage
+} from "./attachments";
 
 interface StreamingBubble {
   reasoning: string;
   content: string;
+}
+
+/** Echoed until the stored transcript arrives for the first turn of a chat. */
+interface PendingUserTurn {
+  content: string;
+  previews: string[];
 }
 
 export function ChatPage() {
@@ -32,10 +46,13 @@ export function ChatPage() {
   const [streaming, setStreaming] = useState<StreamingBubble | null>(null);
   // First turn of a new chat: the transcript does not exist yet, so the user's
   // own message is echoed from here until the stored conversation loads.
-  const [pendingUser, setPendingUser] = useState<string | null>(null);
+  const [pendingUser, setPendingUser] = useState<PendingUserTurn | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  // Images picked for the next turn; cleared once the turn is accepted.
+  const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [creating, setCreating] = useState(false);
@@ -162,6 +179,7 @@ export function ChatPage() {
                         role: "assistant",
                         content: current.content,
                         reasoning: current.reasoning.length > 0 ? current.reasoning : null,
+                        images: [],
                         createdAt: new Date().toISOString()
                       }
                     ]
@@ -322,11 +340,20 @@ export function ChatPage() {
       return;
     }
 
+    const outgoing = pendingImages;
     setDraft("");
+    setPendingImages([]);
     setBusy(true);
     inFlightRef.current = true;
     setError(null);
-    setPendingUser(activeConversationId ? null : content);
+    setPendingUser(
+      activeConversationId
+        ? null
+        : {
+            content,
+            previews: outgoing.map((image) => dataUrlFor(image.mimeType, image.dataBase64))
+          }
+    );
     setDetail((existing) =>
       existing
         ? {
@@ -338,6 +365,7 @@ export function ChatPage() {
                 role: "user",
                 content,
                 reasoning: null,
+                images: [],
                 createdAt: new Date().toISOString()
               }
             ]
@@ -349,7 +377,11 @@ export function ChatPage() {
     const result = await bridge.invoke<{ conversationId: string }>("chat.send", {
       sessionId: activeSession.id,
       conversationId: activeConversationId ?? undefined,
-      content
+      content,
+      images: outgoing.map((image) => ({
+        mimeType: image.mimeType,
+        dataBase64: image.dataBase64
+      }))
     });
 
     if (!result.ok) {
@@ -357,6 +389,9 @@ export function ChatPage() {
       inFlightRef.current = false;
       setStreaming(null);
       setError(result.error.message);
+      // The turn never happened, so the draft and its images are kept.
+      setDraft((current) => (current.length > 0 ? current : content));
+      setPendingImages((current) => (current.length > 0 ? current : outgoing));
       return;
     }
 
@@ -380,6 +415,35 @@ export function ChatPage() {
 
     inFlightRef.current = false;
     setBusy(false);
+  }
+
+  /** Picks up files from the hidden input; each one is validated before it joins the turn. */
+  async function attachFiles(files: FileList | null): Promise<void> {
+    if (!files || files.length === 0) {
+      return;
+    }
+
+    let count = pendingImages.length;
+    const added: PendingImage[] = [];
+
+    for (const file of Array.from(files)) {
+      const result = await readImageFile(file, count);
+      if (!result.ok) {
+        setError(result.error);
+        continue;
+      }
+
+      added.push(result.image);
+      count += 1;
+    }
+
+    if (added.length > 0) {
+      setPendingImages((current) => [...current, ...added]);
+    }
+  }
+
+  function removeImage(id: string): void {
+    setPendingImages((current) => current.filter((image) => image.id !== id));
   }
 
   async function switchModel(session: Session): Promise<void> {
@@ -764,13 +828,19 @@ export function ChatPage() {
               role={message.role}
               content={message.content}
               reasoning={message.reasoning}
+              images={message.images}
               studentMode={studentMode}
             />
           ))}
           {detail === null && pendingUser ? (
             <article className="bubble bubble-user">
               <header>You</header>
-              <p>{pendingUser}</p>
+              <div className="bubble-images">
+                {pendingUser.previews.map((preview) => (
+                  <img key={preview.slice(-32)} src={preview} alt="" />
+                ))}
+              </div>
+              <p>{pendingUser.content}</p>
             </article>
           ) : null}
           {streaming ? (
@@ -808,6 +878,24 @@ export function ChatPage() {
             void send();
           }}
         >
+          {pendingImages.length > 0 ? (
+            <div className="composer-attachments">
+              {pendingImages.map((image) => (
+                <figure key={image.id} className="composer-attachment">
+                  <img src={dataUrlFor(image.mimeType, image.dataBase64)} alt={image.name} />
+                  <button
+                    type="button"
+                    className="icon-mini"
+                    title={`Remove ${image.name}`}
+                    aria-label={`Remove ${image.name}`}
+                    onClick={() => removeImage(image.id)}
+                  >
+                    ×
+                  </button>
+                </figure>
+              ))}
+            </div>
+          ) : null}
           <textarea
             rows={3}
             value={draft}
@@ -830,6 +918,31 @@ export function ChatPage() {
             }}
           />
           <div className="update-actions">
+            {canAttachImages(activeSession) ? (
+              <>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept={IMAGE_ACCEPT}
+                  multiple
+                  hidden
+                  onChange={(event) => {
+                    void attachFiles(event.target.files);
+                    // Clearing lets the same file be picked again after removal.
+                    event.target.value = "";
+                  }}
+                />
+                <button
+                  type="button"
+                  className="ghost-button"
+                  title="Attach an image for this model to look at"
+                  disabled={!activeSession || activeSession.state !== "active" || busy}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  Attach image
+                </button>
+              </>
+            ) : null}
             <button type="submit" disabled={!activeSession || activeSession.state !== "active" || busy || draft.trim().length === 0}>
               {busy ? "Generating…" : "Send"}
             </button>
@@ -914,16 +1027,19 @@ const MessageBubble = memo(function MessageBubble({
   role,
   content,
   reasoning,
+  images,
   studentMode
 }: {
   role: string;
   content: string;
   reasoning?: string | null;
+  images?: ChatImage[];
   studentMode: boolean;
 }) {
   return (
     <article className={`bubble bubble-${role}`}>
       <header>{roleLabel(role)}</header>
+      {images && images.length > 0 ? <MessageImages images={images} /> : null}
       {reasoning ? (
         <ReasoningPanel text={reasoning} streaming={false} studentMode={studentMode} variant="inline" />
       ) : null}
@@ -931,6 +1047,58 @@ const MessageBubble = memo(function MessageBubble({
     </article>
   );
 });
+
+/**
+ * Stored images load one at a time over IPC: a transcript with four 20 MB images
+ * must not arrive as a single payload just because the chat was reopened.
+ */
+function MessageImages({ images }: { images: ChatImage[] }) {
+  const [sources, setSources] = useState<Record<string, string>>({});
+  const ids = images.map((image) => image.id).join(",");
+
+  useEffect(() => {
+    const bridge = window.maia;
+    if (!bridge || ids.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+
+    for (const id of ids.split(",")) {
+      void bridge
+        .invoke<{ id: string; mimeType: string; dataBase64: string }>("conversation.image", { id })
+        .then((result) => {
+          if (cancelled || !result.ok) {
+            return;
+          }
+
+          const source = dataUrlFor(result.data.mimeType, result.data.dataBase64);
+          setSources((current) => (current[id] ? current : { ...current, [id]: source }));
+        });
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [ids]);
+
+  return (
+    <div className="bubble-images">
+      {images.map((image) =>
+        sources[image.id] ? (
+          <img
+            key={image.id}
+            src={sources[image.id]}
+            alt=""
+            width={image.width}
+            height={image.height}
+            loading="lazy"
+          />
+        ) : null
+      )}
+    </div>
+  );
+}
 
 const LAST_CONVERSATION_KEY = "maia:last-conversation";
 const STUDENT_MODE_KEY = "maia:student-mode";

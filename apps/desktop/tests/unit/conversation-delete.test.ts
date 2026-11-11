@@ -1,6 +1,10 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { closeDatabase, openDatabase, type DatabaseConnection } from "../../src/main/storage/db";
 import { HistoryRepository } from "../../src/main/services/history/repository";
+import { ConversationImageStore } from "../../src/main/services/history/images";
 import { IpcRegistry } from "../../src/main/ipc/registry";
 import { registerWorkspaceHandlers } from "../../src/main/ipc/workspace";
 import type { CatalogueService } from "../../src/main/services/catalogue/service";
@@ -9,12 +13,14 @@ import type { SessionOrchestrator } from "../../src/main/services/sessions/orche
 interface Harness {
   registry: IpcRegistry;
   history: HistoryRepository;
+  images: ConversationImageStore;
   aborted: string[];
 }
 
-function harness(db: DatabaseConnection): Harness {
+function harness(db: DatabaseConnection, imagesDir: string): Harness {
   const registry = new IpcRegistry();
   const history = new HistoryRepository(db);
+  const images = new ConversationImageStore(db, imagesDir);
   const aborted: string[] = [];
   const sessions = {
     listSessions: () => [],
@@ -28,23 +34,27 @@ function harness(db: DatabaseConnection): Harness {
     catalogue: {} as CatalogueService,
     sessions,
     history,
+    images,
     broadcastChat: () => undefined
   });
 
-  return { registry, history, aborted };
+  return { registry, history, images, aborted };
 }
 
 describe("conversation.delete", () => {
   let db: DatabaseConnection;
   let rig: Harness;
+  let imagesDir: string;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     db = openDatabase(":memory:");
-    rig = harness(db);
+    imagesDir = await mkdtemp(join(tmpdir(), "maia-chat-images-"));
+    rig = harness(db, imagesDir);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     closeDatabase(db);
+    await rm(imagesDir, { recursive: true, force: true });
   });
 
   function seed(title: string, sessionId: string | null = null) {

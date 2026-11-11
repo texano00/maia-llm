@@ -1,4 +1,4 @@
-import type { InferenceRuntime, StreamKind } from "../sessions/orchestrator";
+import type { InferenceImage, InferenceRuntime, StreamKind } from "../sessions/orchestrator";
 
 export interface VllmRuntimeOptions {
   /** Resolves the mapped host/port for a running instance. */
@@ -23,7 +23,7 @@ export function createVllmRuntime(options: VllmRuntimeOptions): InferenceRuntime
   const fetchImpl = options.fetchImpl ?? fetch;
 
   return {
-    async stream({ modelId, instanceId, prompt, signal, onDelta }) {
+    async stream({ modelId, instanceId, prompt, images, signal, onDelta }) {
       if (instanceId === null) {
         throw new Error("The model instance is not available.");
       }
@@ -38,7 +38,7 @@ export function createVllmRuntime(options: VllmRuntimeOptions): InferenceRuntime
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           model: modelId,
-          messages: [{ role: "user", content: prompt }],
+          messages: [{ role: "user", content: buildContent(prompt, images) }],
           stream: true,
           stream_options: { include_usage: true }
         }),
@@ -99,6 +99,34 @@ export function createVllmRuntime(options: VllmRuntimeOptions): InferenceRuntime
       return { tokens: tokens || Math.max(1, Math.ceil(text.length / 4)), text };
     }
   };
+}
+
+type ChatContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } };
+
+/**
+ * A text-only turn keeps the plain string form: some chat templates and older
+ * vLLM builds reject the content-array shape, so it is only used when there is
+ * actually an image to send.
+ */
+export function buildContent(
+  prompt: string,
+  images: InferenceImage[] | undefined
+): string | ChatContentPart[] {
+  if (!images || images.length === 0) {
+    return prompt;
+  }
+
+  return [
+    { type: "text", text: prompt },
+    ...images.map(
+      (image): ChatContentPart => ({
+        type: "image_url",
+        image_url: { url: `data:${image.mimeType};base64,${image.dataBase64}` }
+      })
+    )
+  ];
 }
 
 export function parseChunk(raw: string): ChatCompletionChunk | null {

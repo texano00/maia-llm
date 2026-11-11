@@ -6,6 +6,7 @@ import { updateEventChannel, chatEventChannel } from "@maia/contracts";
 import { createModelPlanResolver } from "../services/inference/model-plan-resolver";
 import { closeDatabase, openDatabase, type DatabaseConnection } from "../storage/db";
 import { HistoryRepository } from "../services/history/repository";
+import { ConversationImageStore } from "../services/history/images";
 import { CredentialVault } from "../services/credentials/vault";
 import { UpdateService, type UpdateLogger } from "../services/updates/updater";
 import {
@@ -36,7 +37,7 @@ import { ReadinessNotifier } from "../services/notifications/desktop";
 import { createElectronNotificationBackend } from "../services/notifications/electron-backend";
 import { ReadinessWatcher } from "../services/notifications/readiness-watcher";
 import type { ProviderHealth } from "@maia/contracts";
-import { readyEventChannel } from "@maia/contracts";
+import { capabilityForPipelineTag, readyEventChannel } from "@maia/contracts";
 import { SessionOrchestrator } from "../services/sessions/orchestrator";
 import { SessionStore } from "../services/sessions/store";
 import { GpuGuardian, guardianPaths } from "../services/sessions/guardian";
@@ -270,6 +271,7 @@ async function bootstrap(): Promise<void> {
   });
 
   const repository = new HistoryRepository(database);
+  const conversationImages = new ConversationImageStore(database, paths.imagesDir);
   const vault = new CredentialVault(paths.vaultDir);
   const credentials = new CredentialStore(database, vault);
 
@@ -352,6 +354,8 @@ async function bootstrap(): Promise<void> {
       await assertChatRunnable(catalogue, modelId);
     },
     isGatedModel: (modelId) => catalogueRepository.get(modelId)?.gated !== "none",
+    capabilityFor: (modelId) =>
+      capabilityForPipelineTag(catalogueRepository.get(modelId)?.pipelineTag ?? null),
     reportFailure,
     onRunFinished: (session) => {
       const metric = sessionStore.metricFor(session.id);
@@ -585,6 +589,7 @@ async function bootstrap(): Promise<void> {
     catalogue,
     sessions,
     history: repository,
+    images: conversationImages,
     useCases: createUseCaseResolver({
       list: portal.configured() ? () => portal.useCases() : null,
       catalogue,
