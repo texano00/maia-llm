@@ -25,8 +25,11 @@ function sourceFiles(directory: string): string[] {
 const PENDING_CHANNELS = new Set<string>();
 
 describe("IPC channel contract", () => {
+  // A Windows checkout has CRLF line endings, and several channels are
+  // registered across two lines: normalise before matching, or the CI runner
+  // reports registrations that exist as missing.
   const sources = sourceFiles(MAIN_ROOT)
-    .map((file) => readFileSync(file, "utf8"))
+    .map((file) => readFileSync(file, "utf8").replace(/\r\n/g, "\n"))
     .join("\n");
 
   it("registers every allowlisted channel in the main process", () => {
