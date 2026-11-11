@@ -62,6 +62,22 @@ Expected focused files (created during implementation):
 
 14. **Download selector**: open the landing page; confirm the OS and architecture selectors default to the detected platform, that the architecture options change with the OS, that each combination resolves the newest matching asset with version, platform, architecture and size, and that a missing combination shows "unavailable" instead of a broken link.
 15. **Platform smoke**: install the published build on Windows x64, Linux x64, Linux arm64, macOS arm64 and macOS x64; confirm the app starts, the wizard appears, a mock run completes, and macOS documents the first-launch confirmation and checksum command.
+
+    Per target, tick each line before the release is announced:
+
+    | Check | Windows x64 | Linux x64 | Linux arm64 | macOS arm64 | macOS x64 |
+    |---|---|---|---|---|---|
+    | Installer runs on a clean machine | ☐ | ☐ | ☐ | ☐ | ☐ |
+    | App starts from the applications menu | ☐ | ☐ | ☐ | ☐ | ☐ |
+    | Checksum matches `SHA256SUMS-*.txt` | ☐ | ☐ | ☐ | ☐ | ☐ |
+    | Signature valid (`Get-AuthenticodeSignature` / `codesign -dv`) | ☐ | n/a | n/a | ☐ unsigned, expected | ☐ unsigned, expected |
+    | First launch allowed per `docs/release-process.md` | ☐ | ☐ | ☐ | ☐ | ☐ |
+    | Onboarding wizard appears once | ☐ | ☐ | ☐ | ☐ | ☐ |
+    | Catalogue loads from the offline snapshot | ☐ | ☐ | ☐ | ☐ | ☐ |
+    | Mock run starts, answers, and releases the GPU | ☐ | ☐ | ☐ | ☐ | ☐ |
+    | Models shows the endpoint and per-run key | ☐ | ☐ | ☐ | ☐ | ☐ |
+    | Chats and images survive a restart | ☐ | ☐ | ☐ | ☐ | ☐ |
+    | Landing page resolves this exact asset | ☐ | ☐ | ☐ | ☐ | ☐ |
 16. **Startup**: on the reference machine (16 GB RAM, 8-core CPU, NVMe SSD, Windows 11, warm install), record the baseline before changes and the result after, 5 launches each, median of time-to-interactive-catalogue and time-to-readable-history. Confirm ≤2 s and ≤3 s respectively and at least a 40% improvement, then confirm a mock session start/end still meters cost and releases the GPU.
 
 ## Privacy checks (every wave)

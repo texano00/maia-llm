@@ -122,15 +122,69 @@ warn — that is the reputation gap only a real certificate closes.
 
 `latest.yml` published next to each installer is what the in-app updater reads.
 Updates install silently (`quitAndInstall(true, true)`), so the same signing rules
-apply to the version being installed.
+apply to the version being installed. macOS and Linux builds have no update feed
+in this release: they are downloaded again.
+
+## Platform matrix
+
+| Target | Workflow | Artifacts | Signing |
+|---|---|---|---|
+| Windows x64 | `windows-dev-build.yml` | `MaiaLLM-Setup-<v>-x64.exe`, `.blockmap`, `latest.yml`, `SHA256SUMS.txt` | required (Smart App Control) |
+| macOS arm64 | `desktop-platform-build.yml` | `MaiaLLM-<v>-arm64.dmg`, `SHA256SUMS-mac.txt` | none (`identity: null`) |
+| macOS x64 | `desktop-platform-build.yml` | `MaiaLLM-<v>-x64.dmg`, `SHA256SUMS-mac.txt` | none |
+| Linux x64 / arm64 | `desktop-platform-build.yml` | `MaiaLLM-<v>-<arch>.AppImage`, `MaiaLLM-<v>-<arch>.deb`, `SHA256SUMS-linux.txt` | none required |
+
+Order matters for a release: run `windows-dev-build` first (it creates the
+release), then `desktop-platform-build` with `publish_release=true` to attach the
+macOS and Linux assets to the same tag. The landing page resolves whichever of
+these the release actually contains and shows "coming soon" for the rest.
+
+### Verifying a download
+
+```bash
+# macOS
+shasum -a 256 MaiaLLM-0.9.2-arm64.dmg
+# Linux
+sha256sum MaiaLLM-0.9.2-x64.AppImage
+# Windows (PowerShell)
+Get-FileHash .\MaiaLLM-Setup-0.9.2-x64.exe -Algorithm SHA256
+```
+
+Compare against the matching `SHA256SUMS-*.txt` asset. A checksum proves the file
+arrived intact from GitHub; the Authenticode signature is what proves who built it.
+
+### macOS first launch (unsigned build)
+
+The `.dmg` is not notarized. macOS stores the quarantine flag on downloaded files,
+so the first launch is blocked with *"Maia LLM cannot be opened because the
+developer cannot be verified"*. Confirm it once:
+
+1. Open the `.dmg`, drag **Maia LLM** into *Applications*.
+2. In *Applications*, right-click the app → **Open** → **Open** in the dialog.
+   (Double-clicking only offers *Move to Bin*.)
+3. If the dialog does not appear, allow it in **System Settings → Privacy &
+   Security → Security** ("Open Anyway"), then launch again.
+
+After that the app starts normally, including from the Dock. `xattr -dr
+com.apple.quarantine "/Applications/Maia LLM.app"` achieves the same thing from a
+terminal, and is what the release note suggests for scripted installs.
 
 ## Version and release checklist
 
 1. Bump `version` in `package.json` and `apps/desktop/package.json` (must match).
 2. `npm run lint && npm run typecheck && npm test && npm run build && npm run verify:preload`
-3. Trigger the workflow with `publish_release=true` (and `channel=beta` for
-   prereleases).
-4. Verify the release assets: installer, `.blockmap`, `latest.yml`,
-   `SHA256SUMS.txt`.
-5. Install the previous stable build and confirm the in-app banner offers the new
+3. Trigger `windows-dev-build.yml` with `publish_release=true` (and `channel=beta`
+   for prereleases).
+4. Trigger `desktop-platform-build.yml` with `publish_release=true` so macOS and
+   Linux assets land on the same tag.
+5. Verify the release assets: installer, `.blockmap`, `latest.yml`,
+   `SHA256SUMS.txt`, both `.dmg` files, both AppImages, both `.deb` files and the
+   two platform checksum files.
+6. Install the previous stable build and confirm the in-app banner offers the new
    version, installs silently, and reopens on the new version.
+7. Smoke-test each platform with the checklist in
+   `specs/004-platform-expansion/quickstart.md`.
+
+> If a platform build is missing from the release, the landing page shows that
+> combination as "coming soon" rather than linking to a 404 — a partially
+> published release degrades instead of breaking.
