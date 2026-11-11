@@ -28,13 +28,13 @@ Monorepo: desktop main process in `apps/desktop/src/main/`, renderer in `apps/de
 
 **Purpose**: Governance and the shared contract/schema surface every story compiles against.
 
-- [ ] T001 Amend `.specify/memory/constitution.md`: replace the text-only/model restriction with image and multimodal support, expand Principle V's shipping targets to Windows x64, Linux x64/arm64 and macOS arm64/x64, record unsigned macOS as an explicit exception with mandatory checksums and documented first-launch confirmation, authorise opt-in indefinite full-address retention outside application logs, and reconcile the stale "exactly one active session" statement with shipped parallel sessions.
-- [ ] T002 [P] Add `capabilitySchema` (`text` | `text-to-image` | `image-to-text` | `image-to-image`) and `powerTierSchema` (`economy` | `balanced` | `performance`) to `packages/contracts/src/domain.ts` with exported types.
-- [ ] T003 [P] Add `"notifications.list"`, `"notifications.dismiss"`, `"provider.health"`, `"conversation.delete"` and `"estimate.preview"` to the `ipcChannels` allowlist in `packages/contracts/src/ipc.ts` and define their Zod payloads (`{ key: string }` 1..120 chars, `{ id: string }` 1..100 chars, `{ modelId: string }` 1..200 chars plus `powerTier`).
-- [ ] T004 [P] Extend `packages/contracts/src/sessions.ts`: add `powerTier` to `estimateSchema` and `sessionSchema`, `capability` to `sessionSchema`, and `attachments` (max 4 × `{ imageId, mimeType: image/png|image/jpeg|image/webp, width > 0, height > 0 }`) to `chatSendSchema`.
-- [ ] T005 [P] Create `packages/contracts/src/usage.ts` with `usageSampleSchema` exactly matching `contracts/usage-telemetry-api.md` (no prompts, responses, images, paths, credentials; numbers `outputTokens >= 0`, `generationMs >= 0`, `tokensPerSecond > 0` or null) and export it from `packages/contracts/src/index.ts`.
-- [ ] T006 Add `apps/desktop/src/main/storage/migrations/0010_usage.sql` creating `session_metrics` and `conversation_images` per `data-model.md` (including `(model_id, recorded_at DESC)` and `(recorded_at)` indexes, cascade deletes) and register it in `apps/desktop/src/main/storage/migrations/index.ts`.
-- [ ] T007 [P] Add settings keys `usageReporting` (default `false`), `walletWarnThresholdMicroUsd` (default `2_000_000`, `> 0`), `onboardingCompleted` (`false`), `onboardingDismissedAt` (nullable ISO timestamp) and `dismissedNotificationKeys` (`string[]`, default `[]`) to `appSettingsSchema` in `packages/contracts/src/ipc.ts` and `apps/desktop/src/main/services/settings/store.ts`.
+- [X] T001 Amend `.specify/memory/constitution.md`: replace the text-only/model restriction with image and multimodal support, expand Principle V's shipping targets to Windows x64, Linux x64/arm64 and macOS arm64/x64, record unsigned macOS as an explicit exception with mandatory checksums and documented first-launch confirmation, authorise opt-in indefinite full-address retention outside application logs, and reconcile the stale "exactly one active session" statement with shipped parallel sessions.
+- [X] T002 [P] Add `capabilitySchema` (`text` | `text-to-image` | `image-to-text` | `image-to-image`) and `powerTierSchema` (`economy` | `balanced` | `performance`) to `packages/contracts/src/domain.ts` with exported types.
+- [X] T003 [P] Add `"notifications.list"`, `"notifications.dismiss"`, `"provider.health"`, `"conversation.delete"` and `"estimate.preview"` to the `ipcChannels` allowlist in `packages/contracts/src/ipc.ts` and define their Zod payloads (`{ key: string }` 1..120 chars, `{ id: string }` 1..100 chars, `{ modelId: string }` 1..200 chars plus `powerTier`).
+- [X] T004 [P] Extend `packages/contracts/src/sessions.ts`: add `powerTier` to `estimateSchema` and `sessionSchema`, `capability` to `sessionSchema`, and `attachments` (max 4 × `{ imageId, mimeType: image/png|image/jpeg|image/webp, width > 0, height > 0 }`) to `chatSendSchema`.
+- [X] T005 [P] Create `packages/contracts/src/usage.ts` with `usageSampleSchema` exactly matching `contracts/usage-telemetry-api.md` (no prompts, responses, images, paths, credentials; numbers `outputTokens >= 0`, `generationMs >= 0`, `tokensPerSecond > 0` or null) and export it from `packages/contracts/src/index.ts`.
+- [X] T006 Add `apps/desktop/src/main/storage/migrations/0010_usage.sql` creating `session_metrics` and `conversation_images` per `data-model.md` (including `(model_id, recorded_at DESC)` and `(recorded_at)` indexes, cascade deletes) and register it in `apps/desktop/src/main/storage/migrations/index.ts`.
+- [X] T007 [P] Add settings keys `usageReporting` (default `false`), `walletWarnThresholdMicroUsd` (default `2_000_000`, `> 0`), `onboardingCompleted` (`false`), `onboardingDismissedAt` (nullable ISO timestamp) and `dismissedNotificationKeys` (`string[]`, default `[]`) to `appSettingsSchema` in `packages/contracts/src/ipc.ts` and `apps/desktop/src/main/services/settings/store.ts`.
 
 ---
 
@@ -44,12 +44,12 @@ Monorepo: desktop main process in `apps/desktop/src/main/`, renderer in `apps/de
 
 **⚠️ CRITICAL**: Wave 1 story work starts only after this phase.
 
-- [ ] T008 [P] Implement installation identity in `apps/desktop/src/main/services/telemetry/identity.ts`: random UUID stored in settings, device facts from `app.getVersion()`, `process.platform`, `process.arch` and `deviceClass: "desktop"`, plus a reset helper used when local data is removed; no serials, MAC addresses or hostnames.
-- [ ] T009 Implement the notification centre in `apps/desktop/src/main/services/notifications/center.ts`: condition-keyed entries, `warning`/`error` severities, ordering (errors first, newest first), dismissal persisted through `dismissedNotificationKeys`, and automatic clearing of a key when its condition resolves.
-- [ ] T010 Implement `apps/desktop/src/main/services/notifications/desktop.ts` wrapping Electron `Notification`: `isSupported()` check, focus-suppression callback, click handler that returns a route, and a no-op when the platform refuses notifications.
-- [ ] T011 Implement `apps/desktop/src/main/services/health/monitor.ts`: Hugging Face token verification through the existing credential test path, vast.ai key verification through the existing provider client, balance read with `known`/`unknown` state and `checkedAt`, threshold from settings, and a snapshot consumed by IPC.
-- [ ] T012 Register `notifications.list`, `notifications.dismiss` and `provider.health` in `apps/desktop/src/main/ipc/system.ts` using the existing `Result<T>` registry, returning snapshots rather than throwing on provider failure.
-- [ ] T013 Wire the notification centre, desktop notifier, health monitor and identity service into `apps/desktop/src/main/bootstrap/main.ts` (construct after the first window is created; no new network work on the startup path).
+- [X] T008 [P] Implement installation identity in `apps/desktop/src/main/services/telemetry/identity.ts`: random UUID stored in settings, device facts from `app.getVersion()`, `process.platform`, `process.arch` and `deviceClass: "desktop"`, plus a reset helper used when local data is removed; no serials, MAC addresses or hostnames.
+- [X] T009 Implement the notification centre in `apps/desktop/src/main/services/notifications/center.ts`: condition-keyed entries, `warning`/`error` severities, ordering (errors first, newest first), dismissal persisted through `dismissedNotificationKeys`, and automatic clearing of a key when its condition resolves.
+- [X] T010 Implement `apps/desktop/src/main/services/notifications/desktop.ts` wrapping Electron `Notification`: `isSupported()` check, focus-suppression callback, click handler that returns a route, and a no-op when the platform refuses notifications.
+- [X] T011 Implement `apps/desktop/src/main/services/health/monitor.ts`: Hugging Face token verification through the existing credential test path, vast.ai key verification through the existing provider client, balance read with `known`/`unknown` state and `checkedAt`, threshold from settings, and a snapshot consumed by IPC.
+- [X] T012 Register `notifications.list`, `notifications.dismiss` and `provider.health` in `apps/desktop/src/main/ipc/system.ts` using the existing `Result<T>` registry, returning snapshots rather than throwing on provider failure.
+- [X] T013 Wire the notification centre, desktop notifier, health monitor and identity service into `apps/desktop/src/main/bootstrap/main.ts` (construct after the first window is created; no new network work on the startup path).
 - [ ] T014 [P] Write `apps/desktop/tests/contract/ipc-channels.test.ts` asserting every `ipcChannels` entry is registered exactly once by the desktop registry and that the web host exposes the same set.
 
 **Checkpoint**: contracts compile, migrations apply, and the shared health/notification/identity services exist without any renderer changes.
@@ -64,13 +64,13 @@ Monorepo: desktop main process in `apps/desktop/src/main/`, renderer in `apps/de
 
 ### Tests for User Story 1 ⚠️
 
-- [ ] T015 [P] [US1] Write the failing content test `scripts/tests/privacy-promise.test.ts` asserting `README.md` and `infra/landing/index.html` contain the free/open/no-account/no-data-selling statements before the download link, and contain no `sign in`, `sign up`, `newsletter` or `subscribe` strings.
+- [X] T015 [P] [US1] Write the failing content test `scripts/tests/privacy-promise.test.ts` asserting `README.md` and `infra/landing/index.html` contain the free/open/no-account/no-data-selling statements before the download link, and contain no `sign in`, `sign up`, `newsletter` or `subscribe` strings.
 
 ### Implementation for User Story 1
 
-- [ ] T016 [P] [US1] Rewrite the first screen of `README.md`: motto, what the app is, "free and fully open", "no account, no email, no data selling", how it is funded (users pay providers directly), and the link to `maiallm.com`, keeping developer details further down.
-- [ ] T017 [P] [US1] Update the motto and copy in `infra/landing/index.html` so the promise precedes the download call to action, and keep the page free of account, email or analytics affordances.
-- [ ] T018 [US1] Add the same promise to the first app screen in `apps/desktop/src/renderer/features/catalogue/CataloguePage.tsx` (intro copy) and confirm `apps/desktop/src/renderer/features/settings/SettingsPage.tsx` contains no account concept.
+- [X] T016 [P] [US1] Rewrite the first screen of `README.md`: motto, what the app is, "free and fully open", "no account, no email, no data selling", how it is funded (users pay providers directly), and the link to `maiallm.com`, keeping developer details further down.
+- [X] T017 [P] [US1] Update the motto and copy in `infra/landing/index.html` so the promise precedes the download call to action, and keep the page free of account, email or analytics affordances.
+- [X] T018 [US1] Add the same promise to the first app screen in `apps/desktop/src/renderer/features/catalogue/CataloguePage.tsx` (intro copy) and confirm `apps/desktop/src/renderer/features/settings/SettingsPage.tsx` contains no account concept.
 
 ---
 
@@ -147,14 +147,14 @@ Monorepo: desktop main process in `apps/desktop/src/main/`, renderer in `apps/de
 
 ### Tests for User Story 5 ⚠️
 
-- [ ] T042 [P] [US5] Write `apps/desktop/tests/unit/conversation-delete.test.ts` over in-memory SQLite and a fake streaming session: abort is requested before the row is removed, messages are gone, other conversations are untouched, and an unknown id returns `NOT_FOUND`.
+- [X] T042 [P] [US5] Write `apps/desktop/tests/unit/conversation-delete.test.ts` over in-memory SQLite and a fake streaming session: abort is requested before the row is removed, messages are gone, other conversations are untouched, and an unknown id returns `NOT_FOUND`.
 
 ### Implementation for User Story 5
 
-- [ ] T043 [US5] Register `conversation.delete` in `apps/desktop/src/main/ipc/workspace.ts`, calling `HistoryRepository.deleteConversation` in `apps/desktop/src/main/services/history/repository.ts` and returning `{ deleted: true, id }`.
-- [ ] T044 [US5] Abort any in-flight reply for the conversation before deletion in `apps/desktop/src/main/ipc/workspace.ts` (reusing the existing abort path) so no late chunk recreates rows.
-- [ ] T045 [US5] Add the delete action with a confirmation naming the conversation to the chat history rail in `apps/desktop/src/renderer/features/chat/ChatPage.tsx`, including an explicit "cannot be undone" warning.
-- [ ] T046 [US5] Refresh the list from the delete result and render the empty-state copy when the last conversation is removed in `apps/desktop/src/renderer/features/chat/ChatPage.tsx`.
+- [X] T043 [US5] Register `conversation.delete` in `apps/desktop/src/main/ipc/workspace.ts`, calling `HistoryRepository.deleteConversation` in `apps/desktop/src/main/services/history/repository.ts` and returning `{ deleted: true, id }`.
+- [X] T044 [US5] Abort any in-flight reply for the conversation before deletion in `apps/desktop/src/main/ipc/workspace.ts` (reusing the existing abort path) so no late chunk recreates rows.
+- [X] T045 [US5] Add the delete action with a confirmation naming the conversation to the chat history rail in `apps/desktop/src/renderer/features/chat/ChatPage.tsx`, including an explicit "cannot be undone" warning.
+- [X] T046 [US5] Refresh the list from the delete result and render the empty-state copy when the last conversation is removed in `apps/desktop/src/renderer/features/chat/ChatPage.tsx`.
 
 ---
 

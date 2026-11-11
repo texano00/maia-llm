@@ -10,6 +10,12 @@
 </p>
 
 <p align="center">
+  <strong>Free and fully open. No account, no email, no data selling.</strong><br />
+  You bring your own provider keys and pay those providers directly. Maia LLM charges
+  nothing, sells nothing, and keeps your conversations on your machine.
+</p>
+
+<p align="center">
   <sub>
     <a href="https://maiallm.com">maiallm.com</a>&nbsp;&nbsp;·&nbsp;&nbsp;Windows 10/11 x64&nbsp;&nbsp;·&nbsp;&nbsp;vLLM + llama.cpp&nbsp;&nbsp;·&nbsp;&nbsp;GGUF + safetensors&nbsp;&nbsp;·&nbsp;&nbsp;Ollama-compatible local API
   </sub>

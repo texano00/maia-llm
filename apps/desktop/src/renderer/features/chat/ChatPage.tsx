@@ -232,8 +232,31 @@ export function ChatPage() {
     }
   }
 
-  async function commitRename(id: string): Promise<void> {
+  /** Permanent, with a confirmation that names the conversation. */
+  async function deleteConversation(conversation: ConversationSummary): Promise<void> {
     const bridge = window.maia;
+    if (!bridge) {
+      return;
+    }
+
+    if (!window.confirm(`Delete "${conversation.title}"? This cannot be undone.`)) {
+      return;
+    }
+
+    const result = await bridge.invoke("conversation.delete", { id: conversation.id });
+    if (!result.ok) {
+      setError(result.error.message);
+      return;
+    }
+
+    if (conversation.id === activeConversationId) {
+      startNewChat();
+    }
+
+    await loadConversations();
+  }
+
+  async function commitRename(id: string): Promise<void> {    const bridge = window.maia;
     const title = renameDraft.trim();
     setRenamingId(null);
 
@@ -524,6 +547,15 @@ export function ChatPage() {
                       }}
                     >
                       ✎
+                    </button>
+                    <button
+                      type="button"
+                      className="icon-mini"
+                      title="Delete chat"
+                      aria-label="Delete chat"
+                      onClick={() => void deleteConversation(conversation)}
+                    >
+                      🗑
                     </button>
                   </div>
                 </>

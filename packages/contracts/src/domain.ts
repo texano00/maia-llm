@@ -13,6 +13,20 @@ export const sessionStateSchema = z.enum([
 
 export const inferenceRuntimeSchema = z.enum(["vllm", "llamacpp"]);
 
+/**
+ * What the model can do. `text` keeps its historical meaning, so existing
+ * sessions and callers need no migration.
+ */
+export const modelCapabilitySchema = z.enum([
+  "text",
+  "text-to-image",
+  "image-to-text",
+  "image-to-image"
+]);
+
+/** Compute power the user picks in the catalogue popup. */
+export const powerTierSchema = z.enum(["economy", "balanced", "performance"]);
+
 export const conversationOriginSchema = z.enum(["app", "ide"]);
 
 export const messageRoleSchema = z.enum(["system", "user", "assistant", "tool"]);
@@ -47,6 +61,8 @@ export const artifactFormatSchema = z.enum(["safetensors", "gguf", "other"]);
 
 export type SessionState = z.infer<typeof sessionStateSchema>;
 export type InferenceRuntime = z.infer<typeof inferenceRuntimeSchema>;
+export type ModelCapability = z.infer<typeof modelCapabilitySchema>;
+export type PowerTier = z.infer<typeof powerTierSchema>;
 export type ConversationOrigin = z.infer<typeof conversationOriginSchema>;
 export type MessageRole = z.infer<typeof messageRoleSchema>;
 export type BackupStatus = z.infer<typeof backupStatusSchema>;

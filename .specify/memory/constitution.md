@@ -10,7 +10,10 @@ S3-compatible bucket. The application MUST NOT upload conversation content for
 storage, analytics, or training. Telemetry MUST be disabled by default, enabled
 only after explicit consent, and limited to allowlisted, content-free events;
 credentials, prompts, responses, API keys, absolute paths, and backup contents
-are prohibited from every telemetry payload. Provider credentials MUST be stored
+are prohibited from every telemetry payload. Network addresses MAY be retained
+in the telemetry store, in full and without expiry, only for installations that
+explicitly enabled usage reporting; addresses MUST never appear in application
+logs. Provider credentials MUST be stored
 only in operating-system protected storage and MUST never appear in SQLite,
 logs, exported history, backups, or release artifacts. The local IDE endpoint
 MUST bind to loopback only, MUST be disabled by default, and MUST NOT be
@@ -66,11 +69,11 @@ leakage, and unsigned distribution; none are safely caught by manual testing.
 
 ### V. Cross-Platform Desktop Foundation
 
-Windows 10/11 x64 is the only shipping target for the 1.x line. macOS and common
-Linux distributions are future targets and MUST remain structurally buildable
-through packaging dry runs. Platform-specific behavior — filesystem paths,
-credential storage, process supervision, and installers — MUST be isolated
-behind adapters. Application services and renderer workflows MUST NOT depend on
+Windows 10/11 x64, Linux x64/arm64 and macOS arm64/x64 are the shipping targets
+for the 1.x line. Every target MUST remain structurally buildable through
+packaging dry runs, and each shipped installer MUST be produced by the release
+pipeline. Platform-specific behavior — filesystem paths, credential storage,
+process supervision, and installers — MUST be isolated behind adapters. Application services and renderer workflows MUST NOT depend on
 Windows-only APIs. Enabling a new platform MUST NOT require re-architecture of
 catalogue, session, cost, history, backup, or telemetry services.
 
@@ -81,8 +84,12 @@ retrofitting platform assumptions is far more expensive than isolating them now.
 
 All user-facing artifacts MUST be built by the automated pipeline from a tagged
 commit; manual publishing is prohibited. Windows installers MUST be
-Authenticode-signed. Every release MUST publish SHA-256 and SHA-512 checksums, a
-CycloneDX SBOM, and a verifiable build-provenance attestation. The release
+Authenticode-signed and Linux packages MUST be signed. macOS builds are the one
+permitted exception: they MAY ship unsigned, provided every release publishes
+SHA-256 and SHA-512 checksums and the documentation states the first-launch
+confirmation the operating system requires. Every release MUST publish SHA-256
+and SHA-512 checksums, a CycloneDX SBOM, and a verifiable build-provenance
+attestation. The release
 pipeline MUST fail closed: no artifact is published when tests, signing, or
 checksum verification fails. Published versions and assets MUST be immutable;
 rollback and promotion MUST reuse the same signed artifacts. CI actions MUST be
@@ -99,14 +106,15 @@ users must be able to verify origin, integrity, and reproducibility.
   conversations, host model artifacts, or expose chat or backup endpoints.
 - The product is single-user and locally installed. Multi-user workspaces,
   team sharing, and cross-device chat synchronization are out of scope for 1.x.
-- Exactly one inference session may be active per installation. The UI MUST
-  explain the limit rather than silently queueing a second session.
+- Several inference sessions MAY be active at once, at most one per model
+  conversation. The UI MUST explain any concurrency limit it enforces rather
+  than silently queueing a request.
 - Chat history MUST remain readable and exportable without network access.
 - Users bring their own Hugging Face, vast.ai, and S3 credentials and pay those
   providers directly; the product does not resell compute or storage.
-- Supported models are text and chat-oriented open-weight models. Training,
-  fine-tuning, embedding, image, audio, and multimodal workflows are out of
-  scope for 1.x.
+- Supported models are text, chat and image open-weight models: text to text,
+  text to image, image to text and image to image. Training, fine-tuning,
+  embedding, audio and video workflows remain out of scope for 1.x.
 - Costs are displayed in USD with a statement that provider fees and taxes may
   vary.
 - The local IDE endpoint speaks the Ollama-compatible interface; other interface
@@ -117,8 +125,9 @@ users must be able to verify origin, integrity, and reproducibility.
 - Feature work follows the Spec Kit sequence: specification, plan, tasks, and
   implementation. The specification is the source of truth for user-visible
   behavior; the plan is the source of truth for technical decisions.
-- Every pull request MUST pass linting, type checking, unit tests, contract
-  tests, mock-provider end-to-end tests, and the telemetry allowlist test.
+- Every merge to `main` MUST pass linting, type checking, unit tests, contract
+  tests, mock-provider end-to-end tests, and the telemetry allowlist test before
+  it is released; CI runs on merge rather than on every pull-request push.
   Backend changes MUST additionally pass PostgreSQL and MinIO integration tests.
 - Contracts, data model, quickstart validation, and user-facing documentation
   MUST be updated when behavior or interfaces change.

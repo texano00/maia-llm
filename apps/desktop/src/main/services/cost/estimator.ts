@@ -1,4 +1,4 @@
-import { CURRENCY, type Estimate } from "@maia/contracts";
+import { CURRENCY, type Estimate, type PowerTier } from "@maia/contracts";
 
 export interface EstimateOffer {
   gpuName: string;
@@ -14,6 +14,8 @@ export interface EstimateInput {
   expectedMinutes: number;
   now: Date;
   simulated: boolean;
+  /** Compute power tier the user picked; defaults to Balanced. */
+  powerTier?: PowerTier;
 }
 
 /** vast.ai bills per second but applies a minimum charge; state it explicitly. */
@@ -48,6 +50,7 @@ export function buildEstimate(input: EstimateInput): Estimate {
       high: Math.ceil(input.offer.expectedWaitMinutes * 2)
     },
     currency: CURRENCY,
+    powerTier: input.powerTier ?? "balanced",
     assumptions: [
       `Billed per second with a ${MINIMUM_BILLABLE_MINUTES}-minute minimum`,
       `Assumes the session runs for about ${expectedMinutes} minutes`,

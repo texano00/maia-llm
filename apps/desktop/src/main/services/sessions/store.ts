@@ -1,4 +1,4 @@
-import type { Session, SessionEvent, SessionState } from "@maia/contracts";
+import type { ModelCapability, PowerTier, Session, SessionEvent, SessionState } from "@maia/contracts";
 import { randomUUID } from "node:crypto";
 import type { DatabaseConnection } from "../../storage/db";
 
@@ -17,6 +17,8 @@ interface SessionRow {
   ended_at: string | null;
   end_reason: Session["endReason"];
   instance_id: number | null;
+  power_tier: PowerTier;
+  capability: ModelCapability;
 }
 
 /** Persistence for the session lifecycle; the schema enforces one active row. */
@@ -35,15 +37,17 @@ export class SessionStore {
     estimatedTotalMicroUsd: number;
     startedAt: string;
     containerImage: string;
+    powerTier?: PowerTier;
+    capability?: ModelCapability;
   }): void {
     this.database
       .prepare(
         `INSERT INTO sessions
            (id, model_id, provider, state, runtime, container_image, gpu_name, gpu_ram_gb,
-            hourly_rate_microusd, estimated_total_microusd, label, started_at)
+            hourly_rate_microusd, estimated_total_microusd, label, started_at, power_tier, capability)
          VALUES
            (@id, @modelId, 'vastai', @state, @runtime, @containerImage, @gpuName, @gpuRamGb,
-            @hourlyRateMicroUsd, @estimatedTotalMicroUsd, @label, @startedAt)`
+            @hourlyRateMicroUsd, @estimatedTotalMicroUsd, @label, @startedAt, @powerTier, @capability)`
       )
       .run({
         id: input.id,
@@ -56,7 +60,9 @@ export class SessionStore {
         hourlyRateMicroUsd: input.hourlyRateMicroUsd,
         estimatedTotalMicroUsd: input.estimatedTotalMicroUsd,
         label: input.label,
-        startedAt: input.startedAt
+        startedAt: input.startedAt,
+        powerTier: input.powerTier ?? "balanced",
+        capability: input.capability ?? "text"
       });
   }
 
@@ -175,6 +181,8 @@ function toSession(row: SessionRow, events: SessionEvent[] = []): Session {
     endedAt: row.ended_at,
     endReason: row.end_reason,
     instanceId: row.instance_id,
+    powerTier: row.power_tier,
+    capability: row.capability,
     simulated: row.label.startsWith("maia:mock:"),
     events
   };

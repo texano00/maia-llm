@@ -27,6 +27,8 @@ import { createHuggingFaceSource, testHuggingFaceToken } from "../services/catal
 import { assertChatRunnable } from "../services/catalogue/runnable";
 import { createUseCaseResolver } from "../services/catalogue/use-cases";
 import { CredentialStore } from "../services/credentials/store";
+import { NotificationCenter } from "../services/notifications/center";
+import { deriveHealthNotifications, ProviderHealthMonitor } from "../services/health/monitor";
 import { SessionOrchestrator } from "../services/sessions/orchestrator";
 import { SessionStore } from "../services/sessions/store";
 import { GpuGuardian, guardianPaths } from "../services/sessions/guardian";
@@ -40,6 +42,7 @@ import { registerUpdateHandlers } from "../ipc/updates";
 import { registerSettingsHandlers } from "../ipc/settings";
 import { registerWorkspaceHandlers } from "../ipc/workspace";
 import { registerIntegrationHandlers } from "../ipc/integration";
+import { registerSystemHandlers } from "../ipc/system";
 import { LocalEndpointService } from "../services/local-endpoint/lifecycle";
 import { createTurnRecorder } from "../services/local-endpoint/recorder";
 import { loadConfig } from "./config";
@@ -422,6 +425,21 @@ async function bootstrap(): Promise<void> {
           message: error instanceof Error ? error.message : `${provider} request failed`
         };
       }
+    }
+  });
+  // Header health surface: one snapshot feeds the bell, the balance badge and the
+  // missing-key prompts. Provider checks never throw; `unknown` is a valid state.
+  const notifications = new NotificationCenter(settings);
+  const health = new ProviderHealthMonitor({
+    hasHuggingFace: async () => Boolean(await credentials.get("huggingface")),
+    hasVastai: async () => Boolean(await credentials.get("vastai")),
+    getBalanceMicroUsd: async () => null,
+    getThresholdMicroUsd: () => settings.get().walletWarnThresholdMicroUsd
+  });
+  registerSystemHandlers({ registry, notifications, health });
+  void health.refresh().then((snapshot) => {
+    for (const entry of deriveHealthNotifications(snapshot)) {
+      notifications.set(entry);
     }
   });
   // The IDE endpoint re-exposes the running model on 127.0.0.1 so VS Code can use

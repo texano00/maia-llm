@@ -23,7 +23,13 @@ export const defaultAppSettings: AppSettings = {
   gpuFilters: DEFAULT_GPU_FILTERS,
   gpuStartupRetries: DEFAULT_GPU_STARTUP_RETRIES,
   ideEndpointEnabled: false,
-  ideEndpointPort: DEFAULT_IDE_ENDPOINT_PORT
+  ideEndpointPort: DEFAULT_IDE_ENDPOINT_PORT,
+  usageReporting: false,
+  walletWarnThresholdMicroUsd: 2_000_000,
+  onboardingCompleted: false,
+  onboardingDismissedAt: null,
+  dismissedNotificationKeys: [],
+  installationId: null
 };
 
 function migrate(settings: AppSettings): AppSettings {
