@@ -186,6 +186,20 @@ export const conversationDetailSchema = z.object({
 export const sessionEventChannel = "session.event" as const;
 export const chatEventChannel = "chat.event" as const;
 
+/** What the catalogue power popup shows before an estimate exists. */
+export const estimatePreviewResultSchema = z.object({
+  modelId: z.string().min(1),
+  powerTier: powerTierSchema,
+  hourlyRateMicroUsd: microUsdSchema,
+  projectedTotalMicroUsd: microUsdSchema,
+  projectedTokensPerSecond: z.number().positive(),
+  projectionSource: z.enum(["measured", "default"]),
+  sampleCount: z.number().int().nonnegative(),
+  simulated: z.boolean()
+});
+
+export type EstimatePreview = z.infer<typeof estimatePreviewResultSchema>;
+
 export type Estimate = z.infer<typeof estimateSchema>;
 export type Session = z.infer<typeof sessionSchema>;
 export type SessionEvent = z.infer<typeof sessionEventSchema>;

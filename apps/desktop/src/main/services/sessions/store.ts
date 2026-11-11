@@ -117,6 +117,19 @@ export class SessionStore {
     return row ? toSession(row, this.eventsFor(sessionId)) : null;
   }
 
+  /** Most recent measured output rates for a model, newest first. */
+  recentSpeeds(modelId: string, limit = 20): number[] {
+    const rows = this.database
+      .prepare(
+        `SELECT tokens_per_second FROM session_metrics
+          WHERE model_id = ? AND tokens_per_second IS NOT NULL
+          ORDER BY recorded_at DESC LIMIT ?`
+      )
+      .all(modelId, limit) as Array<{ tokens_per_second: number }>;
+
+    return rows.map((row) => row.tokens_per_second);
+  }
+
   /**
    * Terminal and teardown rows for the Models view. Ordered newest first and
    * deliberately unbounded: a run stays in history until its session history is

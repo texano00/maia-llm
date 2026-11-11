@@ -12,6 +12,7 @@ import {
   chatAbortSchema,
   chatSendSchema,
   conversationDeleteSchema,
+  powerTierSchema,
   sessionEndSchema,
   sessionStartSchema,
   type ChatChunk
@@ -25,6 +26,13 @@ const modelIdSchema = z.object({ id: z.string().min(1).max(200) });
 
 const estimateRequestSchema = z.object({
   modelId: z.string().min(1).max(200),
+  expectedMinutes: z.number().int().min(1).max(600).optional(),
+  powerTier: powerTierSchema.optional()
+});
+
+const estimatePreviewRequestSchema = z.object({
+  modelId: z.string().min(1).max(200),
+  powerTier: powerTierSchema,
   expectedMinutes: z.number().int().min(1).max(600).optional()
 });
 
@@ -88,7 +96,19 @@ export function registerWorkspaceHandlers(options: WorkspaceHandlersOptions): vo
   });
 
   registry.register("estimate.create", estimateRequestSchema, async (payload) => {
-    return sessions.createEstimate(payload.modelId, payload.expectedMinutes ?? 30);
+    return sessions.createEstimate(
+      payload.modelId,
+      payload.expectedMinutes ?? 30,
+      payload.powerTier
+    );
+  });
+
+  registry.register("estimate.preview", estimatePreviewRequestSchema, async (payload) => {
+    return sessions.previewEstimate(
+      payload.modelId,
+      payload.powerTier,
+      payload.expectedMinutes ?? 30
+    );
   });
 
   registry.register("session.list", z.unknown(), (): Session[] => sessions.listSessions());

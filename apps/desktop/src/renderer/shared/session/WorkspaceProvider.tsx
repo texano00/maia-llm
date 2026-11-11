@@ -14,6 +14,7 @@ import type {
   CatalogueSort,
   Estimate,
   ModelDetail,
+  PowerTier,
   Session,
   UseCaseCard
 } from "@maia/contracts";
@@ -54,7 +55,7 @@ interface WorkspaceValue {
   clearFocusSession(): void;
   error: string | null;
   clearError(): void;
-  prepareEstimate(modelId: string): Promise<void>;
+  prepareEstimate(modelId: string, powerTier?: PowerTier): Promise<void>;
   startSession(modelId: string, confirmGatedAccess?: boolean): Promise<Session | null>;
   reloadSessions(): Promise<void>;
 }
@@ -224,7 +225,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const prepareEstimate = useCallback(async (modelId: string) => {
+  const prepareEstimate = useCallback(async (modelId: string, powerTier?: PowerTier) => {
     const bridge = window.maia;
     if (!bridge) {
       return;
@@ -233,6 +234,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setPreparing(true);
     const result = await bridge.invoke<Estimate>("estimate.create", {
       modelId,
+      ...(powerTier ? { powerTier } : {}),
       expectedMinutes: 30
     });
     setPreparing(false);

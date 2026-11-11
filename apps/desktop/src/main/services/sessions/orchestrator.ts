@@ -2,13 +2,16 @@ import { randomUUID } from "node:crypto";
 import {
   DEFAULT_GPU_STARTUP_RETRIES,
   type Estimate,
+  type EstimatePreview,
   type FailureEvent,
   type GpuFilters,
+  type PowerTier,
   type Session,
   type SessionStart
 } from "@maia/contracts";
 import { buildEstimate } from "../cost/estimator";
 import { describeMemoryFailure, describeModelFailure, extractRootCause } from "./failure";
+import { DEFAULT_POWER_TIER, projectTokensPerSecond, tierFilters } from "./power";
 import type { SessionStore } from "./store";
 
 export type StreamKind = "content" | "reasoning";
@@ -198,12 +201,16 @@ export class SessionOrchestrator {
     }
   }
 
-  async createEstimate(modelId: string, expectedMinutes = 30): Promise<Estimate> {
+  async createEstimate(
+    modelId: string,
+    expectedMinutes = 30,
+    powerTier: PowerTier = DEFAULT_POWER_TIER
+  ): Promise<Estimate> {
     // Cheapest place to refuse a model that cannot chat: no offer search, no
     // booking, no boot.
     await this.options.assertRunnable?.(modelId);
 
-    const filters = this.options.filters?.();
+    const filters = tierFilters(this.options.filters?.(), powerTier);
     const offer = await this.options.compute.findOffer({ modelId, filters });
     if (!offer) {
       throw new SessionError("PROVIDER_UNAVAILABLE", noOfferMessage(filters));
@@ -215,11 +222,52 @@ export class SessionOrchestrator {
       offer,
       expectedMinutes,
       now: new Date(this.now()),
-      simulated: offer.simulated
+      simulated: offer.simulated,
+      powerTier
     });
 
     this.estimates.set(estimate.id, estimate);
     return estimate;
+  }
+
+  /**
+   * Pure read for the catalogue popup: prices the selected tier and projects the
+   * output rate. No estimate is created and no provider is booked.
+   */
+  async previewEstimate(
+    modelId: string,
+    powerTier: PowerTier,
+    expectedMinutes = 30
+  ): Promise<EstimatePreview> {
+    await this.options.assertRunnable?.(modelId);
+
+    const filters = tierFilters(this.options.filters?.(), powerTier);
+    const offer = await this.options.compute.findOffer({ modelId, filters });
+    if (!offer) {
+      throw new SessionError("PROVIDER_UNAVAILABLE", noOfferMessage(filters));
+    }
+
+    const estimate = buildEstimate({
+      id: "preview",
+      modelId,
+      offer,
+      expectedMinutes,
+      now: new Date(this.now()),
+      simulated: offer.simulated,
+      powerTier
+    });
+    const projection = projectTokensPerSecond(this.options.store.recentSpeeds(modelId), powerTier);
+
+    return {
+      modelId,
+      powerTier,
+      hourlyRateMicroUsd: estimate.hourlyRateMicroUsd,
+      projectedTotalMicroUsd: estimate.projectedTotalMicroUsd,
+      projectedTokensPerSecond: projection.value,
+      projectionSource: projection.source,
+      sampleCount: projection.sampleCount,
+      simulated: offer.simulated
+    };
   }
 
   async start(input: SessionStart): Promise<Session> {
@@ -368,7 +416,8 @@ export class SessionOrchestrator {
         hourlyRateMicroUsd: offer.hourlyRateMicroUsd,
         estimatedTotalMicroUsd: estimate.projectedTotalMicroUsd,
         startedAt,
-        containerImage: "vllm/vllm-openai:latest"
+        containerImage: "vllm/vllm-openai:latest",
+        powerTier: estimate.powerTier
       });
       this.options.store.setInstance(sessionId, instanceId, offer.offerId);
       inserted = true;

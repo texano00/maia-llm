@@ -166,16 +166,16 @@ Monorepo: desktop main process in `apps/desktop/src/main/`, renderer in `apps/de
 
 ### Tests for User Story 6 ⚠️
 
-- [ ] T047 [P] [US6] Write `apps/desktop/tests/unit/power-projection.test.ts` against a pure projection module: tier → offer class mapping, measured projection when ≥3 local samples exist, labelled default below that, and monotonic rate ordering across tiers.
+- [X] T047 [P] [US6] Write `apps/desktop/tests/unit/power-projection.test.ts` against a pure projection module: tier → offer class mapping, measured projection when ≥3 local samples exist, labelled default below that, and monotonic rate ordering across tiers.
 
 ### Implementation for User Story 6
 
-- [ ] T048 [US6] Add the tier → offer-class mapping beside the existing offer ranking in `apps/desktop/src/main/services/inference/launch-plan.ts` and price it through `apps/desktop/src/main/services/cost/estimator.ts`.
-- [ ] T049 [US6] Implement the pure projection `apps/desktop/src/main/services/sessions/metrics.ts` reading `session_metrics` and returning `projectedTokensPerSecond`, `projectionSource` and `sampleCount`.
-- [ ] T050 [US6] Register `estimate.preview` in `apps/desktop/src/main/ipc/workspace.ts` returning the fields in `contracts/power-selection.md`, with `NO_OFFER` when no offer matches.
-- [ ] T051 [US6] Thread `powerTier` through `estimate.create` and `session.start` in `apps/desktop/src/main/services/sessions/orchestrator.ts`, persist it on `sessions`, and echo it on every read via `apps/desktop/src/main/services/sessions/store.ts`.
-- [ ] T052 [US6] Create `apps/desktop/src/renderer/features/catalogue/PowerPicker.tsx`: modal with a three-stop keyboard-operable slider, live projected token rate, hourly rate and projected total, "estimate, not a guarantee" note, and a measured/default disclosure.
-- [ ] T053 [US6] Open the picker from the run action in both catalogue modes in `apps/desktop/src/renderer/features/catalogue/CataloguePage.tsx`, passing the confirmed tier to estimate creation and leaving the existing confirmation step untouched.
+- [X] T048 [US6] Add the tier → offer-class mapping beside the existing offer ranking in `apps/desktop/src/main/services/inference/launch-plan.ts` and price it through `apps/desktop/src/main/services/cost/estimator.ts`.
+- [X] T049 [US6] Implement the pure projection `apps/desktop/src/main/services/sessions/metrics.ts` reading `session_metrics` and returning `projectedTokensPerSecond`, `projectionSource` and `sampleCount`.
+- [X] T050 [US6] Register `estimate.preview` in `apps/desktop/src/main/ipc/workspace.ts` returning the fields in `contracts/power-selection.md`, with `NO_OFFER` when no offer matches.
+- [X] T051 [US6] Thread `powerTier` through `estimate.create` and `session.start` in `apps/desktop/src/main/services/sessions/orchestrator.ts`, persist it on `sessions`, and echo it on every read via `apps/desktop/src/main/services/sessions/store.ts`.
+- [X] T052 [US6] Create `apps/desktop/src/renderer/features/catalogue/PowerPicker.tsx`: modal with a three-stop keyboard-operable slider, live projected token rate, hourly rate and projected total, "estimate, not a guarantee" note, and a measured/default disclosure.
+- [X] T053 [US6] Open the picker from the run action in both catalogue modes in `apps/desktop/src/renderer/features/catalogue/CataloguePage.tsx`, passing the confirmed tier to estimate creation and leaving the existing confirmation step untouched.
 - [ ] T054 [US6] Add the Playwright flow `apps/desktop/tests/e2e/power-picker.spec.ts` for keyboard movement, live updates, cancel-without-estimate and confirm-to-estimate.
 
 ---

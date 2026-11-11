@@ -5,6 +5,7 @@ import { describeGatedAccess, huggingFaceModelUrl, isChatCapableModel, isGgufRep
 import { useWorkspace } from "../../shared/session/WorkspaceProvider";
 import { useProviderHealth } from "../../shared/health/useProviderHealth";
 import { openOnboarding } from "../onboarding/open";
+import { PowerPicker } from "./PowerPicker";
 import { formatParameters, formatContext, formatBytes, formatUsd } from "../../shared/format";
 export function CataloguePage() {
   const { health } = useProviderHealth();
@@ -38,6 +39,7 @@ export function CataloguePage() {
     clearError
   } = useWorkspace();
   const navigate = useNavigate();
+  const [powerModelId, setPowerModelId] = useState<string | null>(null);
   const [gatedConsentModelId, setGatedConsentModelId] = useState<string | null>(null);
 
   /** A curated card resolves to one model; the estimate panel is where it lands. */
@@ -333,7 +335,7 @@ export function CataloguePage() {
                 <button
                   type="button"
                   disabled={preparing || !chatReady}
-                  onClick={() => void prepareEstimate(selected.model.id)}
+                  onClick={() => setPowerModelId(selected.model.id)}
                 >
                   {preparing
                     ? "Estimating…"
@@ -439,6 +441,18 @@ export function CataloguePage() {
           )}
         </div>
       </div>
+
+      {powerModelId ? (
+        <PowerPicker
+          modelId={powerModelId}
+          onCancel={() => setPowerModelId(null)}
+          onConfirm={(tier) => {
+            const modelId = powerModelId;
+            setPowerModelId(null);
+            void prepareEstimate(modelId, tier);
+          }}
+        />
+      ) : null}
     </section>
   );
 }
