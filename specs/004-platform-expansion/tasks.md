@@ -82,15 +82,15 @@ Monorepo: desktop main process in `apps/desktop/src/main/`, renderer in `apps/de
 
 ### Tests for User Story 2 ⚠️
 
-- [ ] T019 [P] [US2] Write `apps/desktop/tests/unit/onboarding.test.ts` against a pure helper `apps/desktop/src/renderer/features/onboarding/state.ts`: shows when `onboardingCompleted` is false and `onboardingDismissedAt` is null, never shows again after dismissal or completion, and exposes the step that a missing key should open.
+- [X] T019 [P] [US2] Write `apps/desktop/tests/unit/onboarding.test.ts` against a pure helper `apps/desktop/src/renderer/features/onboarding/state.ts`: shows when `onboardingCompleted` is false and `onboardingDismissedAt` is null, never shows again after dismissal or completion, and exposes the step that a missing key should open.
 
 ### Implementation for User Story 2
 
-- [ ] T020 [US2] Implement the pure state helper `apps/desktop/src/renderer/features/onboarding/state.ts` (visibility, current step, per-step status) consumed by the wizard and by missing-key prompts.
-- [ ] T021 [US2] Create `apps/desktop/src/renderer/features/onboarding/OnboardingWizard.tsx`: three steps (Hugging Face token, vast.ai key, "the app is free, you pay providers directly"), each submitting through `settings.credentials.set` / `settings.credentials.test`, showing failure inline without storing the key.
-- [ ] T022 [US2] Mount the wizard as an overlay in `apps/desktop/src/renderer/app/App.tsx`, closing it on completion (`onboardingCompleted = true`) or dismissal (`onboardingDismissedAt`), without blocking navigation.
-- [ ] T023 [US2] Add missing-key entry points in `apps/desktop/src/renderer/features/catalogue/CataloguePage.tsx` and `apps/desktop/src/renderer/features/models/ModelsPage.tsx` that open the wizard at the required step.
-- [ ] T024 [US2] Persist dismissal/completion through `apps/desktop/src/main/services/settings/store.ts` and expose it in the `settings.update` handler in `apps/desktop/src/main/ipc/workspace.ts`.
+- [X] T020 [US2] Implement the pure state helper `apps/desktop/src/renderer/features/onboarding/state.ts` (visibility, current step, per-step status) consumed by the wizard and by missing-key prompts.
+- [X] T021 [US2] Create `apps/desktop/src/renderer/features/onboarding/OnboardingWizard.tsx`: three steps (Hugging Face token, vast.ai key, "the app is free, you pay providers directly"), each submitting through `settings.credentials.set` / `settings.credentials.test`, showing failure inline without storing the key.
+- [X] T022 [US2] Mount the wizard as an overlay in `apps/desktop/src/renderer/app/App.tsx`, closing it on completion (`onboardingCompleted = true`) or dismissal (`onboardingDismissedAt`), without blocking navigation.
+- [X] T023 [US2] Add missing-key entry points in `apps/desktop/src/renderer/features/catalogue/CataloguePage.tsx` and `apps/desktop/src/renderer/features/models/ModelsPage.tsx` that open the wizard at the required step.
+- [X] T024 [US2] Persist dismissal/completion through `apps/desktop/src/main/services/settings/store.ts` and expose it in the `settings.update` handler in `apps/desktop/src/main/ipc/workspace.ts`.
 - [ ] T025 [US2] Add the Playwright flow `apps/desktop/tests/e2e/onboarding.spec.ts`: wizard appears on a clean profile, rejects an invalid mock key, completes with valid mock keys, and stays hidden after restart.
 
 ---
@@ -103,19 +103,19 @@ Monorepo: desktop main process in `apps/desktop/src/main/`, renderer in `apps/de
 
 ### Tests for User Story 3 ⚠️
 
-- [ ] T026 [P] [US3] Write `apps/desktop/tests/unit/provider-health.test.ts` covering `ok`/`missing`/`invalid`/`unknown` credential states, known vs unknown balance (never zero when unknown), and the threshold comparison.
-- [ ] T027 [P] [US3] Extend `apps/desktop/tests/unit/notifications.test.ts` for severity ordering (errors before warnings, newest first), dismissal persistence by condition key, and recurrence after a condition resolves.
-- [ ] T028 [P] [US3] Write `apps/desktop/tests/unit/models-indicator.test.ts` for the pure helper `apps/desktop/src/renderer/features/models/indicator.ts`: running beats failure, unacknowledged failure is red, acknowledged failure is orange, and acknowledgment is recorded on visiting Models or dismissing the failure notification.
+- [X] T026 [P] [US3] Write `apps/desktop/tests/unit/provider-health.test.ts` covering `ok`/`missing`/`invalid`/`unknown` credential states, known vs unknown balance (never zero when unknown), and the threshold comparison.
+- [X] T027 [P] [US3] Extend `apps/desktop/tests/unit/notifications.test.ts` for severity ordering (errors before warnings, newest first), dismissal persistence by condition key, and recurrence after a condition resolves.
+- [X] T028 [P] [US3] Write `apps/desktop/tests/unit/models-indicator.test.ts` for the pure helper `apps/desktop/src/renderer/features/models/indicator.ts`: running beats failure, unacknowledged failure is red, acknowledged failure is orange, and acknowledgment is recorded on visiting Models or dismissing the failure notification.
 
 ### Implementation for User Story 3
 
-- [ ] T029 [US3] Complete the provider checks in `apps/desktop/src/main/services/health/monitor.ts` (Hugging Face verify, vast.ai verify, balance read) with per-check timestamps and no key material in the snapshot.
-- [ ] T030 [US3] Feed the derived conditions (`credential:…`, `balance:below-threshold`) into `apps/desktop/src/main/services/notifications/center.ts` and expose the severity/indicator snapshot over `notifications.list`.
-- [ ] T031 [US3] Implement `apps/desktop/src/renderer/features/models/indicator.ts` and render the green blinking / red / orange badge next to the Models entry in `apps/desktop/src/renderer/app/Layout.tsx`, persisting acknowledgment via `notifications.dismiss`.
-- [ ] T032 [US3] Create `apps/desktop/src/renderer/features/notifications/NotificationBell.tsx`: icon coloured red/yellow/neutral, popover list with message and CTA, dismiss per entry, and keyboard access.
-- [ ] T033 [US3] Create `apps/desktop/src/renderer/features/notifications/BalanceBadge.tsx` showing the remaining balance (or "unknown") beside the bell, with no click action.
-- [ ] T034 [US3] Add the wallet threshold field to `apps/desktop/src/renderer/features/settings/SettingsPage.tsx`, backed by `walletWarnThresholdMicroUsd` through `settings.update`.
-- [ ] T035 [US3] Map notification CTAs to internal routes in `apps/desktop/src/renderer/app/routes.tsx` (`/settings` for keys and threshold, `/models` for runs) and verify navigation from the bell.
+- [X] T029 [US3] Complete the provider checks in `apps/desktop/src/main/services/health/monitor.ts` (Hugging Face verify, vast.ai verify, balance read) with per-check timestamps and no key material in the snapshot.
+- [X] T030 [US3] Feed the derived conditions (`credential:…`, `balance:below-threshold`) into `apps/desktop/src/main/services/notifications/center.ts` and expose the severity/indicator snapshot over `notifications.list`.
+- [X] T031 [US3] Implement `apps/desktop/src/renderer/features/models/indicator.ts` and render the green blinking / red / orange badge next to the Models entry in `apps/desktop/src/renderer/app/Layout.tsx`, persisting acknowledgment via `notifications.dismiss`.
+- [X] T032 [US3] Create `apps/desktop/src/renderer/features/notifications/NotificationBell.tsx`: icon coloured red/yellow/neutral, popover list with message and CTA, dismiss per entry, and keyboard access.
+- [X] T033 [US3] Create `apps/desktop/src/renderer/features/notifications/BalanceBadge.tsx` showing the remaining balance (or "unknown") beside the bell, with no click action.
+- [X] T034 [US3] Add the wallet threshold field to `apps/desktop/src/renderer/features/settings/SettingsPage.tsx`, backed by `walletWarnThresholdMicroUsd` through `settings.update`.
+- [X] T035 [US3] Map notification CTAs to internal routes in `apps/desktop/src/renderer/app/routes.tsx` (`/settings` for keys and threshold, `/models` for runs) and verify navigation from the bell.
 
 ---
 
