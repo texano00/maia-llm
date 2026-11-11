@@ -329,11 +329,12 @@ rejected otherwise.
 
 ### Landing page
 
-`infra/landing/` is a self-contained page (logo, motto, Windows download button
-pointing at the latest release, Linux/macOS "coming soon", no build step). It
-reads the newest release from the public GitHub API to link the exact installer
-and falls back to the release page when that call is unavailable. Deploy it
-after editing and whenever the logo changes:
+`infra/landing/` is a self-contained page (logo, motto, Windows download button,
+Linux/macOS "coming soon", no build step). The button links to the release page
+and is re-pointed on every load at the newest installer from the public GitHub
+API, so the page never carries a hard-coded version or filename; it falls back to
+the release page when that call is unavailable. Deploy it after editing and
+whenever the logo changes:
 
 ```bash
 sudo rsync -a --delete infra/landing/ /var/www/maiallm/

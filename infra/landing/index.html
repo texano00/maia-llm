@@ -263,6 +263,7 @@
 
         fetch("https://api.github.com/repos/texano00/maia-llm/releases/latest", {
           headers: { accept: "application/vnd.github+json" },
+          cache: "no-store",
         })
           .then(function (response) {
             return response.ok ? response.json() : Promise.reject(response.status);
@@ -273,12 +274,11 @@
             })[0];
             if (!installer || !installer.browser_download_url) return;
 
-            var version = String(release.tag_name || "").replace(/^v/, "");
+            // Never print a version number: the link is re-resolved on every
+            // load, so it always points at the newest installer.
             var megabytes = Math.round(installer.size / 1048576);
             button.href = installer.browser_download_url;
-            meta.textContent =
-              (version ? "Version " + version + " · " : "") +
-              "Windows 10/11 x64 · " + megabytes + " MB";
+            meta.textContent = "Windows 10/11 x64 · " + megabytes + " MB · latest release";
           })
           .catch(function () {
             // Private repo or offline: the release page link still works.
