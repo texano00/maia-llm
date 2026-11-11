@@ -11,7 +11,7 @@
 
 <p align="center">
   <sub>
-    Windows 10/11 x64&nbsp;&nbsp;·&nbsp;&nbsp;vLLM + llama.cpp&nbsp;&nbsp;·&nbsp;&nbsp;GGUF + safetensors&nbsp;&nbsp;·&nbsp;&nbsp;Ollama-compatible local API
+    <a href="https://maiallm.com">maiallm.com</a>&nbsp;&nbsp;·&nbsp;&nbsp;Windows 10/11 x64&nbsp;&nbsp;·&nbsp;&nbsp;vLLM + llama.cpp&nbsp;&nbsp;·&nbsp;&nbsp;GGUF + safetensors&nbsp;&nbsp;·&nbsp;&nbsp;Ollama-compatible local API
   </sub>
 </p>
 
@@ -124,8 +124,9 @@ model that just came up. Click the clip for the full-quality file.
 
 ## Install
 
-1. Open the [releases page](https://github.com/texano00/maia-llm/releases) and
-   download `MaiaLLM-Setup-<version>-x64.exe`.
+1. Open **[maiallm.com](https://maiallm.com)** (or the
+   [releases page](https://github.com/texano00/maia-llm/releases)) and download
+   `MaiaLLM-Setup-<version>-x64.exe`.
 2. Run it. The installer is per-user (no administrator rights) and detects an
    existing installation: it asks once, then updates in place and keeps your
    chats and settings.
