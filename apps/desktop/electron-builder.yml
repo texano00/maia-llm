@@ -44,6 +44,37 @@ nsis:
 msi:
   artifactName: MaiaLLM-${version}-${arch}.${ext}
 
+# macOS is published unsigned by decision: notarization needs a paid Apple
+# Developer account. The dmg is therefore shipped with published checksums and a
+# documented first-launch confirmation instead (docs/release-process.md).
+mac:
+  icon: icon.png
+  category: public.app-category.developer-tools
+  identity: null
+  hardenedRuntime: false
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+  artifactName: MaiaLLM-${version}-${arch}.${ext}
+
+linux:
+  icon: icon.png
+  category: Development
+  maintainer: texano00
+  synopsis: Run open-weight models on a GPU you rent by the minute
+  target:
+    - target: AppImage
+      arch:
+        - x64
+        - arm64
+    - target: deb
+      arch:
+        - x64
+        - arm64
+  artifactName: MaiaLLM-${version}-${arch}.${ext}
+
 publish:
   provider: github
   owner: texano00

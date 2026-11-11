@@ -128,16 +128,32 @@ model that just came up. Click the clip for the full-quality file.
 ## Install
 
 1. Open **[maiallm.com](https://maiallm.com)** (or the
-   [releases page](https://github.com/texano00/maia-llm/releases)) and download
-   `MaiaLLM-Setup-<version>-x64.exe`.
-2. Run it. The installer is per-user (no administrator rights) and detects an
-   existing installation: it asks once, then updates in place and keeps your
-   chats and settings.
-3. Optional: verify the download against `SHA256SUMS.txt` in the same release.
+   [releases page](https://github.com/texano00/maia-llm/releases)), pick your
+   platform and processor, and download the installer it offers.
+2. Run it. The Windows installer is per-user (no administrator rights) and detects
+   an existing installation: it asks once, then updates in place and keeps your
+   chats and settings. On Linux, `chmod +x` the AppImage and run it, or install the
+   `.deb`; on macOS, drag the app into *Applications*.
+3. Optional: verify the download against the platform's `SHA256SUMS-*.txt` in the
+   same release.
 
-**About the Windows warning.** Builds are currently unsigned, so Windows may show
-*"Windows protected your PC"* or, with Smart App Control enabled, *"part of this
-app has been blocked"*. Click *More info → Run anyway* to continue.
+| Platform | Artifact | Notes |
+|---|---|---|
+| Windows 10/11 x64 | `MaiaLLM-Setup-<version>-x64.exe` | signed; in-app updates |
+| macOS (Apple silicon) | `MaiaLLM-<version>-arm64.dmg` | unsigned — see below |
+| macOS (Intel) | `MaiaLLM-<version>-x64.dmg` | unsigned — see below |
+| Linux x64 / arm64 | `MaiaLLM-<version>-<arch>.AppImage`, `.deb` | no sandbox needed |
+
+**About the Windows warning.** Windows builds are signed from 0.9.2 on. If you are
+coming from an older unsigned build, install one signed release manually (right-click
+the downloaded file → *Properties* → *Unblock*) and in-app updates work from then on.
+With Smart App Control enabled an unsigned build cannot run at all.
+
+**About macOS.** The `.dmg` is not notarized — that needs a paid Apple Developer
+account. The first launch asks to confirm an app from an unidentified developer:
+right-click the app in *Applications* → *Open* → *Open*, or allow it under
+**System Settings → Privacy & Security**. Verify the download first with the command
+in [docs/release-process.md](docs/release-process.md).
 
 ## First run
 

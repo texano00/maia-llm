@@ -263,10 +263,10 @@ Monorepo: desktop main process in `apps/desktop/src/main/`, renderer in `apps/de
 
 - [X] T082 [P] [US10] Extract asset resolution into `infra/landing/release.js` (ES module, no DOM) and load it from `infra/landing/index.html`.
 - [X] T083 [US10] Add the OS and architecture selects plus the unavailable state to `infra/landing/index.html`, keeping the existing caption format and newest-release API call. The platform list is rendered from the same resolver, and `infra/nginx/maiallm.conf` serves `/release.js` uncached.
-- [ ] T084 [US10] Add `mac` (dmg, arm64 + x64, `identity: null`) and `linux` (AppImage + deb, x64 + arm64) targets with artifact names matching the existing pattern to `apps/desktop/electron-builder.yml`.
-- [ ] T085 [US10] Extend `.github/workflows/windows-dev-build.yml` (or add a platform matrix workflow) to build on macOS and Ubuntu runners, upload installers, and publish `SHA256SUMS.txt` with the release.
-- [ ] T086 [US10] Document the unsigned-macOS first-launch confirmation, the checksum verification command and the platform support matrix in `docs/release-process.md` and `README.md`.
-- [ ] T087 [US10] Add the five-target smoke checklist to `specs/004-platform-expansion/quickstart.md` results and verify the landing captions for each combination in a browser.
+- [X] T084 [US10] Add `mac` (dmg, arm64 + x64, `identity: null`) and `linux` (AppImage + deb, x64 + arm64) targets with artifact names matching the existing pattern to `apps/desktop/electron-builder.yml`.
+- [X] T085 [US10] Extend `.github/workflows/windows-dev-build.yml` (or add a platform matrix workflow) to build on macOS and Ubuntu runners, upload installers, and publish `SHA256SUMS.txt` with the release.
+- [X] T086 [US10] Document the unsigned-macOS first-launch confirmation, the checksum verification command and the platform support matrix in `docs/release-process.md` and `README.md`.
+- [X] T087 [US10] Add the five-target smoke checklist to `specs/004-platform-expansion/quickstart.md` results and verify the landing captions for each combination in a browser.
 
 ---
 
