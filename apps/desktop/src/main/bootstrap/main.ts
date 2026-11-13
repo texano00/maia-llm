@@ -53,12 +53,14 @@ import { registerWorkspaceHandlers } from "../ipc/workspace";
 import { registerSystemHandlers } from "../ipc/system";
 import { loadConfig } from "./config";
 import { ensureAppDirectories, resolveAppPaths } from "./paths";
+import { afterFirstPaint } from "./deferred";
 import { enforceSingleInstance, registerLifecycleHooks } from "./lifecycle";
 import { QuitCoordinator } from "./quit";
 import { createLogger } from "./logging";
 import { startCrashReporter } from "./crash-reporter";
 
 let mainWindow: BrowserWindow | null = null;
+let resolveFirstPaint: (() => void) | null = null;
 let database: DatabaseConnection | null = null;
 let registry: IpcRegistry | null = null;
 let updates: UpdateService | null = null;
@@ -116,7 +118,12 @@ function createWindow(quit: QuitCoordinator): void {
     }
   });
 
-  mainWindow.once("ready-to-show", () => mainWindow?.show());
+  mainWindow.once("ready-to-show", () => {
+    mainWindow?.show();
+    // Releases the deferred start-up work; see `afterFirstPaint` in bootstrap().
+    resolveFirstPaint?.();
+    resolveFirstPaint = null;
+  });
   // Closing the window is the usual quit path on Windows and Linux. Ask the
   // coordinator first, otherwise the window would be gone by the time Electron
   // asks about quitting, and there would be nothing on screen to warn with.
@@ -563,25 +570,6 @@ async function bootstrap(): Promise<void> {
     logger
   });
 
-  if (useLiveGpu) {
-    await guardian.start();
-    guardian.startSyncing(() =>
-      sessions
-        .listSessions()
-        .filter((session) => session.instanceId !== null)
-        .map((session) => ({ instanceId: session.instanceId as number, label: session.label }))
-    );
-
-    const previous = guardian.takeReport();
-    if (previous) {
-      logger.warn("The GPU guardian released instances after the previous run ended unexpectedly", {
-        released: previous.released,
-        failed: previous.failed,
-        finishedAt: previous.finishedAt
-      });
-    }
-  }
-
   const quit = new QuitCoordinator({
     describeRunningGpus: () => {
       const running = sessions
@@ -651,11 +639,61 @@ async function bootstrap(): Promise<void> {
 
   registerLifecycleHooks(quit);
 
-  // The window comes first: services that touch the network (reconcile, update
-  // checks) finish in the background instead of delaying the first paint.
+  // The window comes first, and nothing below it waits for the paint: the
+  // guardian, the orphan reconcile and the update check are safety nets, not
+  // prerequisites for showing a screen. `ready-to-show` resolves this promise.
+  const painted = new Promise<void>((resolve) => {
+    resolveFirstPaint = resolve;
+  });
+
   createWindow(quit);
-  void reconcileTask;
-  scheduleUpdateChecks(updates, config.updateCheckIntervalHours);
+
+  afterFirstPaint(
+    painted,
+    [
+      {
+        name: "guardian",
+        run: async () => {
+          if (!useLiveGpu) {
+            return;
+          }
+
+          await guardian.start();
+          guardian.startSyncing(() =>
+            sessions
+              .listSessions()
+              .filter((session) => session.instanceId !== null)
+              .map((session) => ({
+                instanceId: session.instanceId as number,
+                label: session.label
+              }))
+          );
+
+          const previous = guardian.takeReport();
+          if (previous) {
+            logger.warn(
+              "The GPU guardian released instances after the previous run ended unexpectedly",
+              {
+                released: previous.released,
+                failed: previous.failed,
+                finishedAt: previous.finishedAt
+              }
+            );
+          }
+        }
+      },
+      { name: "reconcile", run: () => reconcileTask },
+      {
+        name: "updates",
+        run: () => {
+          if (updates) {
+            scheduleUpdateChecks(updates, config.updateCheckIntervalHours);
+          }
+        }
+      }
+    ],
+    logger
+  );
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
