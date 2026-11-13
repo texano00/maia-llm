@@ -1,5 +1,9 @@
 # Production stack for maiallm.com.
 #
+# `web` serves web.maiallm.com (the product) and `portal` serves the API and
+# backoffice. Both track `latest`: CI publishes it on every merge to main and
+# Watchtower recreates each container when it moves.
+#
 #   cp infra/.env.production.example infra/.env   # then edit secrets
 #   docker compose -f infra/docker-compose.prod.yml pull
 #   docker compose -f infra/docker-compose.prod.yml up -d
@@ -14,6 +18,43 @@
 name: maiallm
 
 services:
+  # The product itself: renderer + /rpc + /events. Public at web.maiallm.com.
+  web:
+    image: ${MAIA_WEB_IMAGE:-ghcr.io/texano00/maia-llm-web}:${MAIA_IMAGE_TAG:-latest}
+    container_name: maia-web
+    restart: unless-stopped
+    # Watchtower moves this container when `latest` moves.
+    pull_policy: always
+    env_file:
+      - ./.env
+    environment:
+      NODE_ENV: production
+      MAIA_WEB_HOST: 0.0.0.0
+      MAIA_WEB_PORT: "5173"
+      MAIA_WEB_DATA: /data
+    ports:
+      - "127.0.0.1:5173:5173"
+    volumes:
+      - webdata:/data
+    stop_grace_period: 20s
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:5173/').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
+
   portal:
     image: ${MAIA_IMAGE:-ghcr.io/texano00/maia-llm}:${MAIA_IMAGE_TAG:-latest}
     container_name: maia-portal
@@ -73,4 +114,5 @@ services:
         max-file: "3"
 
 volumes:
+  webdata:
   portaldata:

@@ -13,7 +13,7 @@ export default defineConfig({
   },
   test: {
     include: [
-      "apps/desktop/tests/**/*.test.ts",
+      "apps/web/tests/**/*.test.ts",
       "apps/portal/tests/**/*.test.ts",
       "packages/**/tests/**/*.test.ts",
       "scripts/**/tests/**/*.test.ts"
@@ -22,6 +22,7 @@ export default defineConfig({
       "**/node_modules/**",
       "**/dist/**",
       "**/out/**",
+      "**/release/**",
       "**/tests/e2e/**",
       "**/*.spec.ts"
     ],

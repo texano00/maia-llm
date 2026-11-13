@@ -2,26 +2,29 @@
 
 ## Core Principles
 
-### I. Privacy and Local-First User Data (NON-NEGOTIABLE)
+### I. Privacy and User-Controlled Data (NON-NEGOTIABLE)
 
-Conversation content, prompts, model responses, and model files MUST remain on
-the user's machine unless the user explicitly initiates a backup to their own
-S3-compatible bucket. The application MUST NOT upload conversation content for
-storage, analytics, or training. Telemetry MUST be disabled by default, enabled
-only after explicit consent, and limited to allowlisted, content-free events;
-credentials, prompts, responses, API keys, absolute paths, and backup contents
-are prohibited from every telemetry payload. Network addresses MAY be retained
-in the telemetry store, in full and without expiry, only for installations that
-explicitly enabled usage reporting; addresses MUST never appear in application
-logs. Provider credentials MUST be stored
-only in operating-system protected storage and MUST never appear in SQLite,
-logs, exported history, backups, or release artifacts. The local IDE endpoint
-MUST bind to loopback only, MUST be disabled by default, and MUST NOT be
-reachable from other devices.
+The product is delivered as a web application. Conversation content, prompts,
+model responses and model files MUST be stored server-side only to serve the
+person who created them, MUST be readable and exportable by that person at any
+time, and MUST NOT be used for analytics, profiling, advertising or training.
+The application MUST NOT sell, share or publish conversation content. Telemetry
+MUST be disabled by default, enabled only after explicit consent, and limited to
+allowlisted, content-free events; credentials, prompts, responses, API keys,
+absolute paths are prohibited from every telemetry payload. Network addresses MAY
+be retained in the telemetry store, in full and without expiry, only for
+installations that explicitly enabled usage reporting; addresses MUST never
+appear in application logs. User identity MUST be the email address used to
+request an access code: it identifies the data owner and nothing else, is never
+shared with third parties, never used for marketing, and MUST be deletable on
+request together with everything attached to it. Provider credentials MUST be
+encrypted at rest with a key the application holds, MUST be decryptable only for
+the account that stored them, and MUST never appear in SQLite, logs, exported
+history, backups or release artifacts.
 
 Rationale: users bring private code and pay for their own compute; a single
 content leak or credential exposure destroys trust and can violate user
-confidentiality.
+confidentiality, whether the process runs on their machine or on ours.
 
 ### II. Cost Transparency and Spend Safety (NON-NEGOTIABLE)
 
@@ -67,49 +70,47 @@ critical path without corresponding tests MUST NOT merge.
 Rationale: the highest-risk failures are silent billing, data loss, privacy
 leakage, and unsigned distribution; none are safely caught by manual testing.
 
-### V. Cross-Platform Desktop Foundation
+### V. Web Delivery as the Only Distribution
 
-Windows 10/11 x64, Linux x64/arm64 and macOS arm64/x64 are the shipping targets
-for the 1.x line. Every target MUST remain structurally buildable through
-packaging dry runs, and each shipped installer MUST be produced by the release
-pipeline. Platform-specific behavior — filesystem paths, credential storage,
-process supervision, and installers — MUST be isolated behind adapters. Application services and renderer workflows MUST NOT depend on
-Windows-only APIs. Enabling a new platform MUST NOT require re-architecture of
-catalogue, session, cost, history, backup, or telemetry services.
+The product MUST be usable from a current browser at `web.maiallm.com` with no
+installation step, no platform-specific build and no local proxy. Renderer code
+MUST depend only on the documented transport contract (`/rpc` and `/events`) and
+MUST NOT assume a desktop runtime. Anything that requires local machine access —
+an OS keyring, a loopback server, an auto-updater — MUST NOT be part of the
+product. Server-side services MUST remain split so the storage layer can move
+between SQLite and a networked engine without touching the renderer.
 
-Rationale: the product's value is not tied to one operating system, and
-retrofitting platform assumptions is far more expensive than isolating them now.
+Rationale: one deployable artefact removes the whole signing, packaging and
+per-platform support surface, and makes the product inspectable and testable in
+a browser instead of an installed binary.
 
 ### VI. Supply-Chain Integrity and Immutable Releases
 
-All user-facing artifacts MUST be built by the automated pipeline from a tagged
-commit; manual publishing is prohibited. Windows installers MUST be
-Authenticode-signed and Linux packages MUST be signed. macOS builds are the one
-permitted exception: they MAY ship unsigned, provided every release publishes
-SHA-256 and SHA-512 checksums and the documentation states the first-launch
-confirmation the operating system requires. Every release MUST publish SHA-256
-and SHA-512 checksums, a CycloneDX SBOM, and a verifiable build-provenance
-attestation. The release
-pipeline MUST fail closed: no artifact is published when tests, signing, or
-checksum verification fails. Published versions and assets MUST be immutable;
-rollback and promotion MUST reuse the same signed artifacts. CI actions MUST be
-pinned to full commit SHAs, permissions MUST be least-privilege, signing secrets
-MUST exist only in a protected release environment, and provider credentials
-MUST never be available to CI.
+Every user-facing artefact MUST be built by the automated pipeline from a tagged
+commit; manual publishing is prohibited. The web application MUST be deployed
+from an image whose digest is pinned, and the landing page MUST be deployed from
+a reviewed commit. Every release MUST publish a CycloneDX SBOM and a verifiable
+build-provenance attestation. The pipeline MUST fail closed: no deployment
+happens when tests or the provenance step fail. Published versions MUST be
+immutable; rollback MUST reuse a previously published artefact rather than a
+rebuild. CI actions MUST be pinned to full commit SHAs, permissions MUST be
+least-privilege, and provider credentials MUST never be available to CI.
 
-Rationale: a downloadable desktop binary is the ultimate trust boundary, and
-users must be able to verify origin, integrity, and reproducibility.
+Rationale: the trust boundary moved from a download to a deployment, and users
+must be able to verify what is serving their data and what it was built from.
 
 ## Architectural and Product Constraints
 
-- The backend is telemetry-only. It MUST NOT proxy inference, store
-  conversations, host model artifacts, or expose chat or backup endpoints.
-- The product is single-user and locally installed. Multi-user workspaces,
-  team sharing, and cross-device chat synchronization are out of scope for 1.x.
+- The backend serves the web application and its own telemetry. It MUST NOT
+  resell inference or host model artifacts; conversations are stored only to
+  serve their owner and are never shared between accounts.
+- The product is multi-user and web-hosted. Accounts are passwordless: an email
+  address plus a one-time code. Team workspaces and cross-account sharing remain
+  out of scope for 1.x.
 - Several inference sessions MAY be active at once, at most one per model
   conversation. The UI MUST explain any concurrency limit it enforces rather
   than silently queueing a request.
-- Chat history MUST remain readable and exportable without network access.
+- Chat history MUST remain readable and exportable by its owner at any time.
 - Users bring their own Hugging Face, vast.ai, and S3 credentials and pay those
   providers directly; the product does not resell compute or storage.
 - Supported models are text, chat and image open-weight models: text to text,
@@ -117,8 +118,8 @@ users must be able to verify origin, integrity, and reproducibility.
   embedding, audio and video workflows remain out of scope for 1.x.
 - Costs are displayed in USD with a statement that provider fees and taxes may
   vary.
-- The local IDE endpoint speaks the Ollama-compatible interface; other interface
-  styles are out of scope unless added by a future constitution-compliant plan.
+- A running model is reachable from the user's own tools through its
+  OpenAI-compatible endpoint and per-run key; a loopback proxy is out of scope.
 
 ## Development Workflow and Quality Gates
 

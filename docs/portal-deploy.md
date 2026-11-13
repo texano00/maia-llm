@@ -1,6 +1,6 @@
 # Deploying maiallm.com (web + backend)
 
-One container runs the whole server side: the API the desktop talks to
+One container runs the whole server side: the API the web app talks to
 (`/v1/...`), the React backoffice at `/admin`, telemetry ingestion, the GPU
 reputation endpoints and the failure reports. The database is a SQLite file on a
 named volume, so there is nothing else to install.
@@ -179,6 +179,198 @@ API host has no route to `/v1/admin`.
 sudo mkdir -p /var/www/maiallm /etc/nginx/snippets
 sudo cp infra/nginx/maiallm.conf /etc/nginx/conf.d/maiallm.conf
 sudo cp infra/nginx/maia-proxy.conf /etc/nginx/snippets/maia-proxy.conf
+sudo rsync -a --delete infra/landing/ /var/www/maiallm/
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+Point the tunnel's ingress at the same port for each public hostname — the
+`Host` header is preserved, which is what lets nginx pick the right block:
+
+```yaml
+# ~/.cloudflared/config.yml (or the dashboard's public hostnames)
+ingress:
+  - hostname: maiallm.com
+    service: http://localhost:80
+  - hostname: www.maiallm.com # needed for the www block below
+    service: http://localhost:80
+  - hostname: api.maiallm.com
+    service: http://localhost:80
+  - hostname: pvt.maiallm.com
+    service: http://localhost:80
+  - service: http_status:404
+```
+
+Enable **SSL/TLS → Edge Certificates → Always Use HTTPS** on the zone. The
+origin deliberately does not redirect: without this switch `http://maiallm.com`
+answers 200 over plain HTTP, and a backoffice visit over HTTP silently loses its
+`Secure` session cookie.
+
+Then verify through the tunnel, not on the origin:
+
+```bash
+curl -s https://api.maiallm.com/health   # {"status":"ok","storage":"sqlite"}
+curl -sI https://pvt.maiallm.com         # 302 → /admin
+```
+
+What the config does:
+
+- every hostname listens on `:80` only; nothing else is exposed
+- `maia-proxy.conf` forwards `Host`, `X-Real-IP`, `X-Forwarded-For`,
+  `X-Forwarded-Proto` and keeps the upstream connection alive. Client address
+  and scheme come from `CF-Connecting-IP` and `X-Forwarded-Proto`, with the
+  socket values as fallback for a direct `curl` on the host
+- `/v1/installations` is rate-limited (20 requests/minute per address); it is the
+  only unauthenticated write
+- HSTS, TLS versions and the edge certificate belong to the Cloudflare zone
+  (SSL/TLS → Edge Certificates), not to this file
+
+Because nginx is the only client that reaches `127.0.0.1:8787`, keep
+`MAIA_TRUST_PROXY` at its default (`true`) so the container logs the real client
+address instead of the tunnel's.
+
+#### Keeping the backoffice private
+
+IP allow-lists do not work behind the tunnel — every request arrives from
+`cloudflared`. Use a **Cloudflare Access** policy on `pvt.maiallm.com` instead
+(Zero Trust → Access → Applications). The `allow`/`deny` block in the file stays
+commented for the case where nginx is reached directly, without the tunnel.
+
+Admin cookies are `Secure` when `NODE_ENV=production`. Through the tunnel the
+browser is always on HTTPS, so this works; opening the origin over plain HTTP
+directly (`http://<server-ip>/admin`) will silently drop the cookie.
+
+## Automatic image updates
+
+Watchtower polls GHCR every `WATCHTOWER_POLL_INTERVAL` seconds — the default in
+`infra/.env` is `300` (5 minutes); use `900` for a quarter of an hour,
+`60` while you are testing a release. When the digest behind `latest` changes it
+pulls the new image, recreates `maia-portal` in place (the `/data` volume
+survives), waits for the healthcheck and removes the superseded image
+(`WATCHTOWER_CLEANUP`). Only containers carrying
+`com.centurylinklabs.watchtower.enable: "true"` are touched, which is why
+Postgres/MinIO from the development file are never restarted.
+
+```bash
+docker logs --tail 20 watchtower     # "Found new image" → "Stopping/Starting"
+```
+
+A release therefore has to land on the server only once — no SSH needed:
+
+```
+push to main → portal-ci (verify) → publish :<version> and :latest
+             → watchtower (≤ N minutes) → container recreated
+```
+
+To skip the wait, run `maia pull && maia up -d`; to freeze the deployment, set
+`MAIA_IMAGE_TAG=0.8.3` in `infra/.env` (Watchtower then has nothing to
+do, because that tag never moves).
+
+### Rollback
+
+```bash
+MAIA_IMAGE_TAG=0.8.2 maia up -d       # one-off, back to a known version
+docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' maia-portal
+```
+
+Leave the tag pinned until the next release is verified; SQLite migrations are
+additive, so a rollback within the same schema generation reads the same file.
+Restore the volume only if a release changed the schema in a way the older image
+cannot read.
+
+Watchtower needs `/var/run/docker.sock`, which is root-equivalent on the host.
+Keep this host and its Compose file restricted to trusted administrators; that is
+the cost of unattended updates. If that trade is unacceptable, drop the
+`watchtower` service and update with `maia pull && maia up -d` on a schedule you
+control.
+
+The image is `nickfedor/watchtower`, the maintained fork. The original
+`containrrr/watchtower` was archived and fails against current daemons with
+`client version 1.25 is too old`; the fork is a drop-in with the same variables.
+
+## Environment
+
+| Variable                                   | Default                     | Purpose                                                                           |
+| ------------------------------------------ | --------------------------- | --------------------------------------------------------------------------------- |
+| `MAIA_IMAGE`                               | `ghcr.io/texano00/maia-llm` | Image repository                                                                  |
+| `MAIA_IMAGE_TAG`                           | `latest`                    | Pin a version to freeze the deployment                                            |
+| `WATCHTOWER_POLL_INTERVAL`                 | `300`                       | Seconds between registry checks                                                   |
+| `MAIA_DOMAIN`                              | `maiallm.com`               | Certificate name for the `tls` profile                                            |
+| `MAIA_PORTAL_TOKEN_SECRET`                 | —                           | HMAC key for installation access tokens; keep it stable across restarts           |
+| `MAIA_ADMIN_EMAIL` / `MAIA_ADMIN_PASSWORD` | —                           | First-boot administrator account                                                  |
+| `MAIA_PORTAL_HF_TOKEN` (or `HF_TOKEN`)     | —                           | Service token for building the catalogue snapshot                                 |
+| `MAIA_CATALOGUE_REFRESH_HOURS`             | `6`                         | Snapshot refresh interval                                                         |
+| `MAIA_CATALOGUE_LIMIT`                     | `300`                       | Models per snapshot pass                                                          |
+| `MAIA_PORTAL_ACCESS_TTL_MINUTES`           | `60`                        | Installation access-token lifetime                                                |
+| `MAIA_PORTAL_REFRESH_TTL_DAYS`             | `30`                        | Installation refresh-token lifetime                                               |
+| `MAIA_ADMIN_SESSION_HOURS`                 | `12`                        | Backoffice session lifetime                                                       |
+| `MAIA_TELEMETRY_RETENTION_DAYS`            | `30`                        | Diagnostics retention                                                             |
+| `MAIA_UNSTABLE_TTL_HOURS`                  | `6`                         | How long a failed GPU stays flagged                                               |
+| `MAIA_REQUIRE_CLIENT_AUTH`                 | `false`                     | Require installation tokens on ingestion routes                                   |
+| `MAIA_TRUST_PROXY`                         | `true`                      | Believe `X-Forwarded-For` from the proxy; set `false` if 8787 is exposed directly |
+
+Keep `MAIA_REQUIRE_CLIENT_AUTH` off until every desktop build in the field
+enrolls itself: older clients post diagnostics without a token and would be
+rejected otherwise.
+
+## First boot
+
+1. Confirm `GET /health` returns `200` (`curl https://api.maiallm.com/health`).
+2. Open `https://pvt.maiallm.com` (it redirects to `/admin`) and sign in with the
+   bootstrap credentials.
+3. **Operations → Force refresh** builds the first model catalogue snapshot. Until
+   it succeeds, `GET /v1/config/catalogue` returns `503 no_snapshot`.
+4. In **Use cases**, create the basic-mode cards in the order the desktop should
+   prefer them.
+5. A released desktop build already points at `https://api.maiallm.com`
+   (catalogue, telemetry and GPU reputation), so it is enough to check that
+   **Operations → Installations** lists the new row; `MAIA_PORTAL_URL`,
+   `MAIA_DIAGNOSTIC_LOG_URL` and `MAIA_REPUTATION_URL` exist only to override
+   that when testing against a local stack.
+
+## The web application container
+
+The product is served by its own container, separate from the API:
+
+| Container | Image | Serves |
+|---|---|---|
+| `maia-web` | `ghcr.io/texano00/maia-llm-web` | `web.maiallm.com` — renderer, `/rpc`, `/events` |
+| `maia-portal` | `ghcr.io/texano00/maia-llm` | `api.maiallm.com`, `pvt.maiallm.com` |
+
+Both images are built and pushed by `.github/workflows/images.yml` on **every
+merge to main**, tagged three ways:
+
+| Tag | Moves | Use |
+|---|---|---|
+| `latest` | every green build of `main` | what the server runs |
+| `<version>` | when `package.json` version changes | pinning a specific release |
+| `sha-<commit>` | never | rollback to an exact build |
+
+Because `latest` moves on merge, a version bump is a deployment: merge → CI
+builds → Watchtower notices the new digest within `WATCHTOWER_POLL_INTERVAL`
+(default 300 s) → the container is recreated. Nothing to run on the host.
+
+```bash
+# one-time, on the server
+docker compose -f infra/docker-compose.prod.yml pull
+docker compose -f infra/docker-compose.prod.yml up -d
+
+# after that: nothing. To deploy immediately instead of waiting for the poll:
+docker compose -f infra/docker-compose.prod.yml pull web portal
+docker compose -f infra/docker-compose.prod.yml up -d --no-deps web portal
+```
+
+Data lives in the `webdata` volume (`/data`: SQLite database and uploaded
+images). Keep it — recreating the container must not lose conversations.
+
+
+### Landing page
+
+`infra/landing/` is a self-contained page (logo, motto, one link to the web app,
+no build step). It has no download selector and no release metadata: the product
+is the web application at `web.maiallm.com`. Deploy it after editing and whenever
+the logo changes:
+
+```bash
 sudo rsync -a --delete infra/landing/ /var/www/maiallm/
 sudo nginx -t && sudo systemctl reload nginx
 ```

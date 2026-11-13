@@ -1,0 +1,76 @@
+name: images
+
+# Builds the two deployable images on every merge to main and publishes `latest`
+# beside an immutable tag. The server pulls `latest` (Watchtower polls it), so a
+# version bump on main is a deployment.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: web
+            image: maia-llm-web
+            dockerfile: apps/web/Dockerfile
+          - name: portal
+            image: maia-llm
+            dockerfile: apps/portal/Dockerfile
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Version and tags
+        id: meta
+        run: |
+          version=$(node -p "require('./package.json').version")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "short=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+          echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # `latest` only from main: a tag build must never move it backwards.
+      - name: Tags
+        id: tags
+        run: |
+          image="ghcr.io/${{ steps.meta.outputs.owner }}/${{ matrix.image }}"
+          refs="$image:${{ steps.meta.outputs.version }},$image:sha-${{ steps.meta.outputs.short }}"
+          if [ "${GITHUB_REF}" = "refs/heads/main" ]; then
+            refs="$refs,$image:latest"
+          fi
+          echo "images=$refs" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.tags.outputs.images }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.meta.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Summary
+        run: |
+          echo "### ${{ matrix.name }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Pushed: ${{ steps.tags.outputs.images }}" >> "$GITHUB_STEP_SUMMARY"
