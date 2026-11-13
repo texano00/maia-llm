@@ -77,10 +77,13 @@ jobs:
       - name: Generate checksums
         shell: pwsh
         run: |
+          # The governance rules ask for SHA-256 and SHA-512 on every artifact.
           Get-ChildItem apps/desktop/release -Filter *.exe | ForEach-Object {
-            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
-            "$hash  $($_.Name)"
+            "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name)"
           } | Set-Content apps/desktop/release/SHA256SUMS.txt
+          Get-ChildItem apps/desktop/release -Filter *.exe | ForEach-Object {
+            "$((Get-FileHash $_.FullName -Algorithm SHA512).Hash.ToLower())  $($_.Name)"
+          } | Set-Content apps/desktop/release/SHA512SUMS.txt
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: maia-llm-windows-${{ github.run_number }}
@@ -89,6 +92,7 @@ jobs:
             apps/desktop/release/*.blockmap
             apps/desktop/release/latest.yml
             apps/desktop/release/SHA256SUMS.txt
+            apps/desktop/release/SHA512SUMS.txt
           if-no-files-found: error
           retention-days: 14
       - name: Publish GitHub release
@@ -104,7 +108,8 @@ jobs:
             "apps/desktop/release/MaiaLLM-Setup-$version-x64.exe",
             "apps/desktop/release/MaiaLLM-Setup-$version-x64.exe.blockmap",
             "apps/desktop/release/latest.yml",
-            "apps/desktop/release/SHA256SUMS.txt"
+            "apps/desktop/release/SHA256SUMS.txt",
+            "apps/desktop/release/SHA512SUMS.txt"
           )
           foreach ($asset in $assets) {
             if (-not (Test-Path $asset)) { throw "Missing release asset: $asset" }
