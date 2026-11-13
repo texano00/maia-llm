@@ -278,15 +278,15 @@ Monorepo: desktop main process in `apps/desktop/src/main/`, renderer in `apps/de
 
 ### Tests for User Story 11 ⚠️
 
-- [ ] T088 [P] [US11] Write `apps/desktop/tests/perf/startup-budget.test.ts` asserting first paint does not await catalogue, history or telemetry work in mock mode (instrumented bootstrap with injected slow services).
+- [X] T088 [P] [US11] Write `apps/desktop/tests/perf/startup-budget.test.ts` asserting first paint does not await catalogue, history or telemetry work in mock mode (instrumented bootstrap with injected slow services).
 
 ### Implementation for User Story 11
 
-- [ ] T089 [US11] Capture the pre-change baseline (median of 5 launches: launch → interactive catalogue, launch → readable history) in `docs/startup-baseline.md` with the reference-machine specification.
-- [ ] T090 [US11] Defer non-critical service construction (health monitor, usage sampler, diagnostics flush, guardian setup) until after the first window paints in `apps/desktop/src/main/bootstrap/main.ts`.
-- [ ] T091 [US11] Move catalogue snapshot loading and lifecycle-log hydration off the first-paint path in `apps/desktop/src/main/bootstrap/main.ts` and `apps/desktop/src/renderer/app/App.tsx` while keeping offline behaviour.
-- [ ] T092 [US11] Re-measure and record the post-change results and the percentage improvement in `docs/startup-baseline.md`, including the five-launch procedure.
-- [ ] T093 [US11] Re-run the session lifecycle, cost and teardown suites (`apps/desktop/tests/unit/us1-sessions.test.ts`, `apps/desktop/tests/unit/quit.test.ts`, `apps/desktop/tests/unit/guardian.test.ts`) to prove startup changes altered nothing protective.
+- [ ] T089 [US11] Capture the pre-change baseline (median of 5 launches: launch → interactive catalogue, launch → readable history) in `docs/startup-baseline.md` with the reference-machine specification (procedure and table landed; numbers pending the reference machine).
+- [X] T090 [US11] Defer non-critical service construction (health monitor, usage sampler, diagnostics flush, guardian setup) until after the first window paints in `apps/desktop/src/main/bootstrap/main.ts`.
+- [X] T091 [US11] Keep the catalogue snapshot and conversation history off the first-paint path: the renderer loads both in effects after mount, `CatalogueService` constructs without touching the snapshot, and the instance reconcile stays fire-and-forget, so an offline snapshot still answers immediately (verified in `bootstrap/main.ts` and `shared/session/WorkspaceProvider.tsx`).
+- [ ] T092 [US11] Re-measure and record the post-change results and the percentage improvement in `docs/startup-baseline.md`, including the five-launch procedure (pending the reference machine).
+- [X] T093 [US11] Re-run the session lifecycle, cost and teardown suites (`apps/desktop/tests/unit/us1-sessions.test.ts`, `apps/desktop/tests/unit/quit.test.ts`, `apps/desktop/tests/unit/guardian.test.ts`) to prove startup changes altered nothing protective.
 
 ---
 
