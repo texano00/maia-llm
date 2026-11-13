@@ -9,13 +9,12 @@ WORKDIR /app
 
 # Workspace manifests only, so a source edit never invalidates the install.
 COPY package.json package-lock.json ./
-COPY apps/desktop/package.json apps/desktop/package.json
+COPY apps/web/package.json apps/web/package.json
 COPY apps/portal/package.json apps/portal/package.json
 COPY packages/contracts/package.json packages/contracts/package.json
 COPY packages/shared/package.json packages/shared/package.json
 
-# Install just the portal tree: the desktop workspace pulls Electron, which
-# this image never runs. `--ignore-scripts` skips the Electron postinstall.
+# Install just the portal tree; the web workspace is never built here.
 RUN npm ci --workspace @maia/portal --ignore-scripts --no-audit --no-fund
 
 COPY tsconfig.base.json ./

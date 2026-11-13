@@ -119,98 +119,61 @@ model that just came up. Click the clip for the full-quality file.
 
 ## Requirements
 
-- Windows 10 or 11, x64
-- A vast.ai account with an API key (and credit) for real GPU runs
-- Internet access to huggingface.co and vast.ai
-- Optional: an S3-compatible bucket if you want model backups
-- Optional: an IDE assistant or agent that speaks the Ollama API
+- A current browser. Nothing to install, no platform build, no local proxy.
+- A [vast.ai](https://vast.ai) API key — the GPU is rented in your name and paid
+  by you directly.
+- A [Hugging Face](https://huggingface.co) token, only if you want gated models.
 
-## Install
+## Access
 
-1. Open **[maiallm.com](https://maiallm.com)** (or the
-   [releases page](https://github.com/texano00/maia-llm/releases)), pick your
-   platform and processor, and download the installer it offers.
-2. Run it. The Windows installer is per-user (no administrator rights) and detects
-   an existing installation: it asks once, then updates in place and keeps your
-   chats and settings. On Linux, `chmod +x` the AppImage and run it, or install the
-   `.deb`; on macOS, drag the app into *Applications*.
-3. Optional: verify the download against the platform's `SHA256SUMS-*.txt` in the
-   same release.
+1. Open **[web.maiallm.com](https://web.maiallm.com)**.
+2. Type your email on the access page and press *Send code*. There is no password
+   and no sign-up form: the same page creates your account the first time and
+   signs you in afterwards.
+3. Enter the six-digit code from the email. It is valid for ten minutes and can
+   be used once.
+4. The session stays signed in on that browser until you sign out.
 
-| Platform | Artifact | Notes |
-|---|---|---|
-| Windows 10/11 x64 | `MaiaLLM-Setup-<version>-x64.exe` | signed; in-app updates |
-| macOS (Apple silicon) | `MaiaLLM-<version>-arm64.dmg` | unsigned — see below |
-| macOS (Intel) | `MaiaLLM-<version>-x64.dmg` | unsigned — see below |
-| Linux x64 / arm64 | `MaiaLLM-<version>-<arch>.AppImage`, `.deb` | no sandbox needed |
-
-**About the Windows warning.** Windows builds are signed from 0.9.2 on. If you are
-coming from an older unsigned build, install one signed release manually (right-click
-the downloaded file → *Properties* → *Unblock*) and in-app updates work from then on.
-With Smart App Control enabled an unsigned build cannot run at all.
-
-**About macOS.** The `.dmg` is not notarized — that needs a paid Apple Developer
-account. The first launch asks to confirm an app from an unidentified developer:
-right-click the app in *Applications* → *Open* → *Open*, or allow it under
-**System Settings → Privacy & Security**. Verify the download first with the command
-in [docs/release-process.md](docs/release-process.md).
+Your email is the identifier for your models, chats and provider keys. It is
+used to send access codes and to find your data — never for marketing, never
+shared, and deleting it deletes everything attached to it.
 
 ## First run
 
 1. **Settings → vast.ai API key** — paste your key and press *Test connection*.
-   Restart Maia LLM so it picks up the key. Without a key the app stays in
-   simulation mode: the whole flow works, but no real GPU is rented.
+   Without a key the app stays in simulation mode: the whole flow works, but no
+   real GPU is rented.
 2. **Settings → Hugging Face token** (optional) — needed only for gated models.
-   For a gated model, open its Hugging Face page and accept the terms or request
-   access before starting. Sign in there with the same account as the token saved
-   in Maia; manual access requests must be approved by the repository owner.
-3. **Settings → GPU preferences** (optional) — limit offers to countries,
-   machines, a reliability floor or a price ceiling. The startup gates
-   (1000 Mbps down, 200 Mbps up, 500 MB/s disk) are on by default: a cold start
-   moves about 25 GB, so a slower host turns a two-minute boot into a ten-minute
-   one. Clear a gate to disable it.
-4. **Catalogue** — search a model, open it, press *Estimate a session*, review the
-   price, then *Confirm and start session*.
-5. The first run downloads and loads the model on the GPU, which can take 5–20
-   minutes. The provisioning log shows each step with timestamps.
-6. **Chat** — send messages, watch the live cost meter, rename or pin the
-   conversation in the sidebar, and press *Pause and release GPU* when you are
-   done.
-
-Closing the app releases every running GPU.
-
-## Updates
-
-Maia LLM checks for a new version at startup and every 24 hours. When one exists,
-a banner appears in the top-right corner: *Update now* downloads it, *Restart and
-install* applies it and reopens the app. Nothing is downloaded without that click.
-
-Beta builds are opt-in by launching the app with `MAIA_RELEASE_CHANNEL=beta`.
+3. Pick a model in the catalogue, confirm the estimate, and start chatting. The
+   Models screen shows every run, its cost, and the endpoint your own tools can
+   call.
 
 ## Where things are stored
 
-| Data | Location |
-| --- | --- |
-| Chats, settings, catalogue cache | `%APPDATA%\Maia LLM\maia.db` |
-| Logs | `%APPDATA%\Maia LLM\logs\maia.log` |
-| Provider credentials | Windows credential vault (`safeStorage`) |
-| Model backups (optional) | Your own S3-compatible bucket |
+- Chats, conversations and attached images are stored on the server for your
+  account and are exportable from the app at any time.
+- Provider keys are encrypted at rest and only decrypted to call the provider you
+  chose.
+- Optional usage measurements are content-free, off by default, and can be turned
+  off at any time.
+
 
 ## For developers
 
 ```bash
 npm install
-npm run -w @maia/desktop dev          # desktop app, simulated GPU by default
-MAIA_PROVIDER_MODE=live npm run -w @maia/desktop dev
+npm run dev                 # builds the renderer and serves the web app on :5173
+MAIA_PROVIDER_MODE=live npm run dev   # rents real GPUs (needs a vast.ai key)
 ```
 
-Installers are built by GitHub Actions on a Windows runner
-(`windows-dev-build.yml`); lint, typecheck, tests and build run locally with
-`npm run lint && npm run typecheck && npm test && npm run build`. See
-[docs/development.md](docs/development.md) for setup, environment variables and
-log mirroring, [docs/troubleshooting.md](docs/troubleshooting.md) for diagnosing
-a stuck UI, and [docs/release-process.md](docs/release-process.md) for signing
-and the release checklist.
+Everything runs as one Node process: the renderer bundle is served by
+`apps/web/src/web/server.ts`, which answers `/rpc` and `/events` from the same
+service layer the UI talks to. There is no installer, no signing step and no
+platform build — `npm run lint && npm run typecheck && npm test && npm run build`
+is the whole gate, and CI runs it on every merge to `main`.
+
+See [docs/development.md](docs/development.md) for environment variables and
+[docs/troubleshooting.md](docs/troubleshooting.md) for diagnosing a stuck run.
 
 ## License
 

@@ -28,7 +28,7 @@ at startup.
 
 | Symptom | First thing to check |
 | --- | --- |
-| A button does nothing | Is there a line in the log? If not, the click never reached the main process — suspect the preload bridge (`window.maia`). |
+| A button does nothing | Is there a line in the server log? If not, the request never reached `/rpc` — check the browser console for a failed request or a stale bundle. |
 | "Not checked yet." stays | Look for `Checking for update`; if it appears without a follow-up, the feed request stalled (20 s timeout applies). |
 | Update banner never appears | Log line `Update for version X is not available` means the feed is healthy and the build is current. |
 | Settings do not persist | `settings.update` should be followed by no error; a validation failure returns `VALIDATION_FAILED`. |
@@ -49,14 +49,12 @@ at startup.
 | Startup takes 5–15 minutes | Check the host's `inet_down` (Mbps) in the log line `vast.ai offer search finished`. The default gates require 1000 Mbps down / 500 MB/s disk; lower them in Settings only if you accept a slower boot. |
 
 The main process now self-checks after the window loads and logs
-`Preload bridge missing: IPC is unavailable in this renderer` when the preload
-failed. That single line explains the entire class of "the UI is inert" bugs.
+`The application bridge is unavailable` when `/rpc` is unreachable — a stopped
+server, a failed deploy, or a blocked request. It explains the whole class of
+"the UI is inert" symptoms.
 
 ## 4. Guards that catch this before shipping
 
-- `npm run verify:preload` fails the build when the sandboxed preload requires
-  anything other than `electron`. This is what caught the `require("zod")` bug
-  that made every IPC call a silent no-op in 0.1.5.
 - Unit tests cover contracts, stores, and services; contract tests cover the
   telemetry HTTP surface.
 - The renderer shows explicit errors (`The application bridge is unavailable…`,
