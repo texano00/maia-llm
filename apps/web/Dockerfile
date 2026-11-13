@@ -26,17 +26,15 @@ COPY tsconfig.base.json ./
 COPY packages packages
 COPY apps/web apps/web
 
-# Renderer → out/renderer, server → out/server.js. The native driver and pino
-# are resolved at runtime from node_modules rather than bundled.
-RUN npm run -w @maia/web build \
-  && npx esbuild src/web/server.ts \
-       --bundle \
-       --platform=node \
-       --target=node22 \
-       --format=esm \
-       --outfile=out/server.js \
-       --external:better-sqlite3 \
-       --external:pino
+# Renderer → out/renderer, server → out/server.js. The `build` script already
+# runs both steps; the native driver and pino are resolved at runtime from
+# node_modules rather than bundled.
+RUN npm run -w @maia/web build
+
+# Drop vite, esbuild and the type definitions here: pruning keeps the compiled
+# `better-sqlite3` binary, which a fresh `--omit=dev` install in the runtime
+# image could not rebuild without a compiler.
+RUN npm prune --omit=dev --no-audit --no-fund && npm cache clean --force
 
 # ---- runtime --------------------------------------------------------------
 FROM node:22-bookworm-slim AS runtime
@@ -52,10 +50,8 @@ COPY --from=build /app/apps/portal/package.json apps/portal/package.json
 COPY --from=build /app/packages/contracts/package.json packages/contracts/package.json
 COPY --from=build /app/packages/shared/package.json packages/shared/package.json
 
-# Only what the server needs at runtime: no vite, no type definitions.
-RUN npm ci --workspace @maia/web --include-workspace-root --omit=dev --no-audit --no-fund \
-  && npm cache clean --force
-
+# Production dependencies only: no vite, no compilers, no type definitions.
+COPY --from=build /app/node_modules node_modules
 COPY --from=build /app/apps/web/out/renderer apps/web/out/renderer
 COPY --from=build /app/apps/web/out/server.js apps/web/out/server.js
 # The server applies these on boot; they stay readable, outside the bundle.
