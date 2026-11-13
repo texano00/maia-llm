@@ -29,4 +29,16 @@ describe("release signing", () => {
   it("names the signing authority in the release body", () => {
     expect(WORKFLOW).toMatch(/Signed by|signing authority/i);
   });
+
+  it("publishes both digests the governance rules require", () => {
+    expect(WORKFLOW).toContain("SHA256SUMS.txt");
+    expect(WORKFLOW).toContain("SHA512SUMS.txt");
+
+    const platform = readFileSync(
+      join(process.cwd(), ".github/workflows/desktop-platform-build.yml"),
+      "utf8"
+    );
+    expect(platform).toContain("SHA256SUMS-");
+    expect(platform).toContain("SHA512SUMS-");
+  });
 });
