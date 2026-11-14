@@ -20,6 +20,7 @@ import { SessionStore } from "../main/services/sessions/store";
 import { createMockComputeProvider, createMockInference } from "../main/services/providers/mock-runtime";
 import { createVastComputeProvider } from "../main/services/providers/vastai/compute-provider";
 import { createProviderRouter } from "../main/services/providers/provider-router";
+import { createPortalUseCaseReader } from "../main/services/catalogue/portal-use-cases";
 import { VastAiClient } from "../main/services/providers/vastai/client";
 import { createVllmRuntime } from "../main/services/inference/vllm";
 import { createModelPlanResolver } from "../main/services/inference/model-plan-resolver";
@@ -59,6 +60,8 @@ export interface AccountRuntimeOptions {
   catalogueRepository: CatalogueRepository;
   reputation: GpuReputationClient;
   providerMode: "live" | "mock";
+  /** `MAIA_PORTAL_URL`; absent means this deployment curates no basic-mode cards. */
+  portalUrl?: string | null;
   /** 32-byte AES key for provider credentials. */
   credentialKey: Buffer;
   access: AccessService;
@@ -255,12 +258,32 @@ export async function createAccountRuntime(
     }
   });
 
+  // Basic mode is the curated list the backoffice publishes. Without this the
+  // channel answered `[]` and the screen bounced straight back to the full grid.
+  const useCases = createPortalUseCaseReader({
+    portalUrl: options.portalUrl ?? null,
+    resolve: (modelId) => {
+      const entry = options.catalogueRepository.get(modelId);
+      if (!entry) {
+        return null;
+      }
+      const support = options.catalogue.supportFor(modelId);
+      return {
+        name: entry.name || modelId,
+        supported: support?.supported === true,
+        reason: support?.supported === false ? (support.reason ?? null) : null
+      };
+    },
+    logger
+  });
+
   registerWorkspaceHandlers({
     registry,
     catalogue: options.catalogue,
     sessions,
     history: repository,
     images: conversationImages,
+    useCases: () => useCases.list(),
     broadcastChat: (payload) => options.onEvent(accountId, chatEventChannel, payload)
   });
 

@@ -87,6 +87,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
     snapshot: context.snapshot,
     db: context.db,
     internal: options.internal ?? context.internal,
+    version: context.config.version,
     ...(options.now ? { now: options.now } : {})
   });
   registerAdminUi(app, options.adminUiRoot ? { root: options.adminUiRoot } : {});

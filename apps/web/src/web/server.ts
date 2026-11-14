@@ -12,7 +12,11 @@ const PORT = Number(process.env.MAIA_WEB_PORT ?? 5173);
 const HOST = process.env.MAIA_WEB_HOST ?? "127.0.0.1";
 const RENDERER_DIR = resolve(process.cwd(), "out/renderer");
 const DATA_DIR = resolve(process.env.MAIA_WEB_DATA ?? ".maia-web");
-const providerMode = process.env.MAIA_PROVIDER_MODE === "live" ? "live" : "mock";
+// Live is the default. Defaulting to the simulated provider meant a deployment
+// that simply forgot the variable showed a fake $25 wallet and simulated every
+// rental while telling people they were renting GPUs. Simulation is now opt-in,
+// and a live deployment without a key is refused rather than faked.
+const providerMode = process.env.MAIA_PROVIDER_MODE?.trim().toLowerCase() === "mock" ? "mock" : "live";
 const secureCookies = process.env.MAIA_COOKIE_SECURE !== "false";
 const trustProxy = process.env.MAIA_TRUST_PROXY?.trim().toLowerCase() ?? "";
 const publicOrigin = process.env.MAIA_PUBLIC_ORIGIN?.trim() || null;
@@ -97,7 +101,12 @@ async function main(): Promise<void> {
       }
 
       if (url.pathname === "/health") {
-        sendJson(response, 200, { ok: true, mode: providerMode });
+        // The backoffice reads this to show which product build it administers.
+        sendJson(response, 200, {
+          ok: true,
+          mode: providerMode,
+          version: platform.version
+        });
         return;
       }
 

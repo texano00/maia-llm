@@ -1,6 +1,7 @@
 import {
   createContext,
   useCallback,
+  useRef,
   useContext,
   useEffect,
   useMemo,
@@ -177,6 +178,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     };
   }, [reloadSessions]);
 
+  // Falling back to the full list happens at most once per page load, and never
+  // after the person has picked a mode. It used to run on every fetch, so
+  // choosing "Basic" on a deployment with no curated cards fetched, found none
+  // and switched straight back — the button looked broken.
+  const fellBack = useRef(false);
+
   const reloadUseCases = useCallback(async () => {
     const bridge = window.maia;
     if (!bridge) {
@@ -186,12 +193,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     const result = await bridge.invoke<UseCaseCard[]>("catalogue.useCases");
     if (result.ok) {
       setUseCases(result.data);
-      // No curated cards means this deployment is advanced-only.
-      if (result.data.length === 0 && mode === "basic") {
+      if (result.data.length === 0 && !fellBack.current) {
+        fellBack.current = true;
         setMode("advanced");
       }
     }
-  }, [mode, setMode]);
+  }, [setMode]);
 
   useEffect(() => {
     void reloadUseCases();

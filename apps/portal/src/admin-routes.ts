@@ -43,6 +43,8 @@ export interface AdminRouteOptions {
   db: SqlDatabase;
   /** The product's internal API: accounts and capabilities live there. */
   internal: InternalAccountsApi;
+  /** This portal build, e.g. `0.3.0`. */
+  version?: string;
   now?: () => number;
 }
 
@@ -67,6 +69,30 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRouteOpt
   };
 
   const unauthorized = { error: "not_authenticated" } as const;
+
+  // Which builds are running: this backoffice, and the product behind it. An
+  // operator looking at a screen needs to know which release it came from, and
+  // "the product is unreachable" must not hide the portal's own version.
+  app.get("/admin-api/version", async (request, reply) => {
+    if (!(await requireAdmin(request))) {
+      return reply.status(401).send(unauthorized);
+    }
+
+    let product: { version: string; mode: string } | null = null;
+    try {
+      const info = await options.internal.productInfo();
+      product = { version: info.version, mode: info.mode };
+    } catch {
+      // Rendered as "unreachable" rather than as an error page.
+      product = null;
+    }
+
+    return {
+      portal: options.version ?? "unknown",
+      product,
+      serverTime: new Date(now()).toISOString()
+    };
+  });
 
   // One account in full. The projection is built by the product, which owns the
   // rows: the portal asks for it and renders it, so no rule about what may leave

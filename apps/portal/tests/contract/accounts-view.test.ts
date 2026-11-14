@@ -181,4 +181,28 @@ describe("accounts view", () => {
       expect(body.account.capabilities).toContain("debug");
     });
   });
+
+  describe("version readout", () => {
+    it("reports this backoffice and the product behind it", async () => {
+      const answered = await server.inject({
+        method: "GET",
+        url: "/admin-api/version",
+        headers: { cookie }
+      });
+
+      expect(answered.statusCode).toBe(200);
+      const body = answered.json() as {
+        portal: string;
+        product: { version: string; mode: string } | null;
+      };
+      expect(body.portal).toMatch(/^\d+\.\d+\.\d+/);
+      expect(body.product).toEqual({ version: "0.11.0", mode: "mock" });
+    });
+
+    it("requires a session", async () => {
+      const anonymous = await server.inject({ method: "GET", url: "/admin-api/version" });
+
+      expect(anonymous.statusCode).toBe(401);
+    });
+  });
 });

@@ -106,6 +106,24 @@ label {
   font-size: 0.85rem;
 }
 
+/* Which builds are running, kept quiet: it is a reference, not a headline. */
+.brand .build-info {
+  font-size: 0.76rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .brand {
+    flex-wrap: wrap;
+    row-gap: 0.35rem;
+  }
+
+  .brand .build-info {
+    white-space: normal;
+  }
+}
+
 .tabs {
   display: flex;
   gap: 0.4rem;

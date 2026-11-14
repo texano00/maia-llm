@@ -32,6 +32,7 @@ itself ships: older clients post diagnostics without a token.
 | POST | `/v1/installations/refresh` | refresh token | Rotate the pair; replay revokes the family |
 | POST | `/v1/admin/session` | admin credentials | Sign in, sets an HttpOnly `maia_admin` cookie |
 | GET/DELETE | `/v1/admin/session` | admin session | Current admin / sign out |
+| GET | `/admin-api/version` | admin session | This backoffice's version and the product's version plus provider mode |
 | GET | `/admin-api/accounts` | admin session | Accounts with capabilities and active runs |
 | GET | `/admin-api/accounts/:id` | admin session | One account in full: identity, running now, history, usage, storage, settings, credential presence |
 | POST | `/admin-api/accounts/:id/capabilities` | admin session | Grant or revoke `debug` / `operator` |
@@ -54,7 +55,14 @@ itself ships: older clients post diagnostics without a token.
   and judging only the repository root wrongly marked them empty. Safetensors
   still have to be at the root with a `config.json`, because `vllm serve` loads
   the repository as a whole.
-- `MAIA_CATALOGUE_REQUIRED` names repositories that are always included. The
+- The listing covers every pipeline tag a chat request can be served from
+  (`text-generation` and `image-text-to-text`), twice each: by downloads and by
+  last modification. A popularity-only, single-tag listing could not contain a
+  multimodal GGUF mirror however popular it became — `huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF`
+  is tagged `image-text-to-text`, which is why it never appeared.
+- `MAIA_CATALOGUE_REQUIRED` names repositories that are always included, and
+  `DEFAULT_REQUIRED_REPOSITORIES` in `src/config.ts` seeds the ones people ask for
+  by name. The
   ranked listing is the top `MAIA_CATALOGUE_LIMIT` text-generation models by
   downloads, so a newer or specialist finetune can never appear in it: each
   required id that the listing did not already return is read on its own, and a

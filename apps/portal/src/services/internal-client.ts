@@ -85,6 +85,13 @@ export const accountDetailSchema = z.object({
   )
 });
 
+/** The product's `/health`: which build answers, and whether it rents GPUs. */
+export const productInfoSchema = z.object({
+  ok: z.boolean().optional(),
+  version: z.string().min(1),
+  mode: z.string().min(1)
+});
+
 export type AccountDetail = z.infer<typeof accountDetailSchema>;
 export type AccountDetailRun = z.infer<typeof accountDetailRunSchema>;
 
@@ -129,6 +136,8 @@ export interface InternalAccountsApi {
     accountId: string,
     change: { grant?: Capability; revoke?: Capability }
   ): Promise<AccountSummary>;
+  /** Which product build is behind the backoffice, and its provider mode. */
+  productInfo(): Promise<{ version: string; mode: string }>;
   /** Everything the detail page shows, in one request. */
   accountDetail(
     accountId: string,
@@ -198,6 +207,42 @@ export class InternalClient implements InternalAccountsApi {
     }
 
     return parsed.data;
+  }
+
+  async productInfo(): Promise<{ version: string; mode: string }> {
+    // `/health` is unauthenticated by design: it says which build answers, not
+    // who is signed in.
+    const body = await this.requestHealth();
+    const parsed = productInfoSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new InternalApiError(502, "invalid_response");
+    }
+
+    return parsed.data;
+  }
+
+  private async requestHealth(): Promise<unknown> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    try {
+      const response = await this.fetchImpl(`${this.baseUrl}/health`, {
+        method: "GET",
+        signal: controller.signal
+      });
+      const text = await response.text();
+      if (!response.ok) {
+        throw new InternalApiError(response.status, "unavailable");
+      }
+
+      return text.length > 0 ? safeJson(text) : null;
+    } catch (error) {
+      if (error instanceof InternalApiError) {
+        throw error;
+      }
+      throw new InternalApiError(503, "unavailable", error instanceof Error ? error.message : undefined);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   async accountDetail(

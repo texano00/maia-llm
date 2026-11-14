@@ -200,6 +200,19 @@ export function CataloguePage() {
       </div>
 
       <div className="use-case-grid" hidden={mode !== "basic"}>
+        {useCases.length === 0 ? (
+          <div className="use-case-card">
+            <h2>No curated scenarios yet</h2>
+            <p>
+              This deployment has not published any basic-mode cards. Every model in
+              the catalogue is still available — the full list just asks you to pick
+              one yourself.
+            </p>
+            <button type="button" onClick={() => setMode("advanced")}>
+              Browse all models
+            </button>
+          </div>
+        ) : null}
         {useCases.map((useCase) => (
           <article key={useCase.id} className="use-case-card">
             {useCase.imageUrl ? (

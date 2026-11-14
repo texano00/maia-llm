@@ -21,6 +21,17 @@ export interface HuggingFaceCatalogueClientOptions {
 
 const DEFAULT_BASE_URL = "https://huggingface.co";
 
+/**
+ * Pipeline tags whose repositories can answer a chat request.
+ *
+ * Must stay in step with `CHAT_PIPELINE_TAGS` in `model.ts` and in
+ * `@maia/contracts`: the listing has to be able to *see* everything the mapping
+ * and the runtime accept.
+ */
+const LISTED_PIPELINE_TAGS = ["text-generation", "image-text-to-text"] as const;
+
+const LISTING_SORTS = ["downloads", "lastModified"] as const;
+
 export function modelPath(id: string): string {
   return id
     .split("/")
@@ -47,6 +58,27 @@ export function createHuggingFaceCatalogueClient(
 
   async function get(path: string): Promise<Response> {
     return fetchImpl(`${baseUrl}${path}`, { headers: headers(), signal: AbortSignal.timeout(timeoutMs) });
+  }
+
+  /** One page of the public listing for one pipeline tag. */
+  async function list(options: {
+    pipelineTag: string;
+    sort: "downloads" | "lastModified";
+    limit: number;
+  }): Promise<HubModelPayload[]> {
+    const params = new URLSearchParams({
+      filter: options.pipelineTag,
+      sort: options.sort,
+      direction: "-1",
+      limit: String(options.limit),
+      full: "true"
+    });
+    const response = await get(`/api/models?${params.toString()}`);
+    if (!response.ok) {
+      throw new Error(`Hugging Face catalogue listing failed with ${response.status}`);
+    }
+
+    return (await response.json()) as HubModelPayload[];
   }
 
   async function readOptional(path: string): Promise<string | null> {
@@ -80,19 +112,32 @@ export function createHuggingFaceCatalogueClient(
 
   return {
     async listModels(limit) {
-      const params = new URLSearchParams({
-        filter: "text-generation",
-        sort: "downloads",
-        direction: "-1",
-        limit: String(limit),
-        full: "true"
-      });
-      const response = await get(`/api/models?${params.toString()}`);
-      if (!response.ok) {
-        throw new Error(`Hugging Face catalogue listing failed with ${response.status}`);
+      // Chat models are declared under more than one pipeline tag, and the Hub
+      // filters on exactly one per request. `huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF`
+      // is tagged `image-text-to-text` (it ships an mmproj), so a
+      // `text-generation`-only listing could never contain it, however popular it
+      // became. Each tag is read twice as well: the download ranking never holds a
+      // repository published last week, and the recency ranking never holds the
+      // models people search for.
+      const pages = await Promise.all(
+        LISTED_PIPELINE_TAGS.flatMap((pipelineTag) =>
+          LISTING_SORTS.map((sort) => list({ pipelineTag, sort, limit }))
+        )
+      );
+
+      const seen = new Set<string>();
+      const merged: HubModelPayload[] = [];
+      for (const page of pages) {
+        for (const payload of page) {
+          if (!payload.id || seen.has(payload.id)) {
+            continue;
+          }
+          seen.add(payload.id);
+          merged.push(payload);
+        }
       }
 
-      return (await response.json()) as HubModelPayload[];
+      return merged;
     },
 
     async getFiles(modelId) {
