@@ -233,3 +233,221 @@ ul.models {
   border-radius: 0.5rem;
   border: 1px solid var(--border);
 }
+
+/* ---------------------------------------------------------------------------
+   Phone layout (specs/008-mobile-ready-surfaces)
+
+   The backoffice is a two-workflow tool — sign in, then read or change rows — so
+   the phone shape is deliberately plain: one column, tabs that fit, and tables
+   that become labelled stacks instead of scrolling sideways. The 640 px number
+   matches apps/web/src/renderer/shared/layout.ts and is asserted by the contract
+   test.
+--------------------------------------------------------------------------- */
+:root {
+  --tap-target: 44px;
+  --tap-gap: 8px;
+}
+
+@media (max-width: 1023px) {
+  button,
+  input,
+  select,
+  textarea {
+    min-height: var(--tap-target);
+    /* 16 px stops iOS from zooming the page when a field takes focus. */
+    font-size: max(16px, 0.9rem);
+  }
+
+  /* A checkbox is toggled by its label, which is the 44 px target; the box itself
+     keeps a visible, aimable size. */
+  input[type="checkbox"],
+  input[type="radio"] {
+    width: 1.5rem;
+    min-width: 1.5rem;
+    height: 1.5rem;
+    min-height: 1.5rem;
+  }
+
+  label:has(> input[type="checkbox"]),
+  label:has(> input[type="radio"]) {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-height: var(--tap-target);
+  }
+
+  .tabs .tab {
+    min-height: var(--tap-target);
+  }
+}
+
+@media (max-width: 640px) {
+  .shell {
+    padding: 0.85rem 0.75rem 2rem;
+    padding-top: max(0.85rem, env(safe-area-inset-top));
+    padding-bottom: max(1.5rem, env(safe-area-inset-bottom));
+  }
+
+  .brand {
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-bottom: 1rem;
+  }
+
+  .brand h1 {
+    font-size: 1.15rem;
+  }
+
+  .tabs {
+    /* All destinations stay visible: two rows of tabs is better than a strip that
+       hides the last one. The scroll stays as a fallback for a very long label. */
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin-bottom: 1rem;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .tab {
+    padding: 0.5rem 0.7rem;
+    white-space: nowrap;
+  }
+
+  .card {
+    padding: 0.85rem;
+  }
+
+  .card h2 {
+    font-size: 1rem;
+  }
+
+  .row {
+    gap: var(--tap-gap);
+  }
+
+  .row > input[type="search"],
+  .row > input[type="text"],
+  .row > input[type="email"],
+  .row > input[type="password"] {
+    flex: 1 1 100%;
+    width: 100%;
+  }
+
+  .grid-2 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .signin {
+    margin: 1rem 0.75rem;
+    padding: 1rem;
+  }
+
+  label {
+    display: block;
+  }
+
+  label input,
+  label select,
+  label textarea {
+    width: 100%;
+    margin-top: 0.3rem;
+  }
+
+  /* A checkbox is toggled by its label; the box still needs to be big enough to
+     see and aim at. */
+  label input[type="checkbox"],
+  label input[type="radio"] {
+    width: 1.35rem;
+    min-width: 1.35rem;
+    height: 1.35rem;
+    min-height: 1.35rem;
+    margin-top: 0;
+  }
+
+  /* Tables become stacks: the column name comes from `data-label`, written in the
+     markup so one DOM serves every width. */
+  table,
+  thead,
+  tbody,
+  tr,
+  td {
+    display: block;
+    width: 100%;
+  }
+
+  thead {
+    /* The header row is redundant once every cell names itself. */
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  tr {
+    margin-bottom: 0.75rem;
+    padding: 0.6rem 0.7rem;
+    border: 1px solid var(--border);
+    border-radius: 0.7rem;
+  }
+
+  td {
+    padding: 0.35rem 0;
+    border-bottom: 0;
+    overflow-wrap: anywhere;
+  }
+
+  td + td {
+    border-top: 1px dashed var(--border);
+  }
+
+  td[data-label]:not([data-label=""])::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 0.15rem;
+    color: var(--muted);
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  td.row {
+    flex-wrap: wrap;
+    gap: var(--tap-gap);
+  }
+
+  td.row button {
+    flex: 1 1 auto;
+  }
+
+  td.row button:only-child {
+    width: 100%;
+  }
+
+  .card form .row button {
+    flex: 1 1 auto;
+  }
+
+  ul.models {
+    padding-left: 0.9rem;
+    overflow-wrap: anywhere;
+  }
+
+  .alert {
+    margin-bottom: 0.75rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tab,
+  .card {
+    transition: none;
+  }
+}

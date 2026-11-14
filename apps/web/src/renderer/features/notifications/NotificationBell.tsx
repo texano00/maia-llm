@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { Notification, NotificationSnapshot } from "@maia/contracts";
 import { useWorkspace } from "../../shared/session/WorkspaceProvider";
@@ -14,6 +14,33 @@ export function NotificationBell() {
   const navigate = useNavigate();
   const [snapshot, setSnapshot] = useState<NotificationSnapshot | null>(null);
   const [open, setOpen] = useState(false);
+  const container = useRef<HTMLDivElement>(null);
+
+  // On a phone the list is a sheet over the page, so it must also close the way
+  // every other sheet does: a tap outside it, or Escape.
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    const onPointerDown = (event: MouseEvent): void => {
+      if (container.current && !container.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") {
+        setOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
 
   const reload = useCallback(async () => {
     const bridge = window.maia;
@@ -70,7 +97,7 @@ export function NotificationBell() {
   }
 
   return (
-    <div className="notifications">
+    <div className="notifications" ref={container}>
       <button
         type="button"
         className={`icon-button notifications-bell notifications-${indicator}`}

@@ -22,7 +22,6 @@ import { SettingsSection } from "./SettingsSection";
 import {
   initialExpanded,
   sectionForError,
-  toggleSection,
   type SettingsSectionId
 } from "./sections";
 import { isVisibleSection, requestedSection } from "./visibility";
@@ -105,8 +104,20 @@ export function SettingsPage() {
     return () => window.clearTimeout(handle);
   }, [location.search]);
 
+  /**
+   * The browser fires `toggle` for programmatic opens too, so this must be a
+   * setter, not a flip: opening a section from a deep link used to fire `toggle`
+   * with `open`, which the old flip read as "already open, close it again".
+   */
   function handleSectionToggle(id: SettingsSectionId, open: boolean): void {
-    setExpandedSections((current) => (open ? toggleSection(current, id) : current.filter((entry) => entry !== id)));
+    setExpandedSections((current) => {
+      const isOpen = current.includes(id);
+      if (open === isOpen) {
+        return current;
+      }
+
+      return open ? [...current, id] : current.filter((entry) => entry !== id);
+    });
   }
 
   useEffect(() => {
