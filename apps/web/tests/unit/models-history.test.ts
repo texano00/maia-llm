@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Session, SessionState } from "@maia/contracts";
 import { closeDatabase, openDatabase, type DatabaseConnection } from "../../src/main/storage/db";
+import { seedAccount } from "../helpers/accounts";
 import { SessionStore } from "../../src/main/services/sessions/store";
 
 const TERMINAL_STATES: SessionState[] = ["ending", "ended", "cancelled", "failed"];
@@ -15,7 +16,8 @@ describe("SessionStore history", () => {
 
   beforeEach(() => {
     db = openDatabase(":memory:");
-    store = new SessionStore(db);
+    seedAccount(db);
+    store = new SessionStore(db, "account-test");
   });
 
   afterEach(() => {

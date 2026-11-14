@@ -4,6 +4,7 @@ import type { DatabaseConnection } from "../../storage/db";
 import type { SecretVault } from "./ports";
 
 interface HandleRow {
+  account_id: string;
   id: string;
   provider: CredentialProvider;
   label: string;
@@ -13,32 +14,36 @@ interface HandleRow {
 }
 
 /**
- * Maps provider names to OS-vault handles. Secrets never reach the database: the
- * `credential_handles` row only stores the handle and verification state.
+ * Maps (account, provider) to a vault handle. Secrets never reach this table:
+ * the row only stores the handle and the verification state, and every query is
+ * bound to the account that owns it.
  */
 export class CredentialStore {
   constructor(
     private readonly database: DatabaseConnection,
-    private readonly vault: SecretVault
+    private readonly vault: SecretVault,
+    private readonly accountId: string
   ) {}
 
   async set(provider: CredentialProvider, secret: string): Promise<void> {
-    const { handle } = await this.vault.store(provider, provider, secret);
     const existing = this.getRow(provider);
-
     if (existing) {
       await this.vault.remove(existing.vault_handle).catch(() => undefined);
     }
 
+    const { handle } = await this.vault.store(provider, provider, secret);
+
     this.database
       .prepare(
-        `INSERT INTO credential_handles (id, provider, label, vault_handle, last_verified_at, status)
-         VALUES (@id, @provider, @provider, @handle, NULL, 'unknown')
-         ON CONFLICT(id) DO UPDATE SET vault_handle = excluded.vault_handle,
-                                       status = 'unknown',
-                                       last_verified_at = NULL`
+        `INSERT INTO credential_handles
+           (account_id, id, provider, label, vault_handle, last_verified_at, status)
+         VALUES (@accountId, @provider, @provider, @provider, @handle, NULL, 'unknown')
+         ON CONFLICT(account_id, id) DO UPDATE SET
+           vault_handle = excluded.vault_handle,
+           status = 'unknown',
+           last_verified_at = NULL`
       )
-      .run({ id: provider, provider, handle });
+      .run({ accountId: this.accountId, provider, handle });
   }
 
   async get(provider: CredentialProvider): Promise<string | undefined> {
@@ -61,7 +66,9 @@ export class CredentialStore {
     }
 
     await this.vault.remove(row.vault_handle).catch(() => undefined);
-    this.database.prepare("DELETE FROM credential_handles WHERE id = ?").run(provider);
+    this.database
+      .prepare("DELETE FROM credential_handles WHERE account_id = ? AND id = ?")
+      .run(this.accountId, provider);
   }
 
   status(): CredentialStatus {
@@ -75,15 +82,15 @@ export class CredentialStore {
   markVerified(provider: CredentialProvider, ok: boolean): void {
     this.database
       .prepare(
-        "UPDATE credential_handles SET status = ?, last_verified_at = ? WHERE id = ?"
+        "UPDATE credential_handles SET status = ?, last_verified_at = ? WHERE account_id = ? AND id = ?"
       )
-      .run(ok ? "valid" : "invalid", new Date().toISOString(), provider);
+      .run(ok ? "valid" : "invalid", new Date().toISOString(), this.accountId, provider);
   }
 
   private getRow(provider: CredentialProvider): HandleRow | undefined {
     return this.database
-      .prepare("SELECT * FROM credential_handles WHERE id = ?")
-      .get(provider) as HandleRow | undefined;
+      .prepare("SELECT * FROM credential_handles WHERE account_id = ? AND id = ?")
+      .get(this.accountId, provider) as HandleRow | undefined;
   }
 }
 

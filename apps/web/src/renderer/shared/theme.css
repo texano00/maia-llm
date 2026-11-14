@@ -2138,3 +2138,153 @@ textarea {
 .settings-section-body {
   padding-top: 0.6rem;
 }
+
+/* ---------------------------------------------------------------------------
+   Access page and account menu (specs/005-web-access)
+
+   The access page is the only screen that renders before a session exists, so
+   it owns the whole viewport instead of the app shell.
+--------------------------------------------------------------------------- */
+.access-shell {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: 2rem 1.25rem;
+}
+
+.access-card {
+  width: min(460px, 100%);
+  display: grid;
+  gap: 1rem;
+  padding: 2rem;
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 1rem;
+  background: rgb(12 17 27 / 86%);
+  box-shadow: 0 24px 60px rgb(0 0 0 / 45%);
+}
+
+.access-card h1 {
+  margin: 0;
+  font-size: 1.5rem;
+}
+
+.access-card .lede,
+.access-card .eyebrow {
+  margin: 0;
+}
+
+.access-form {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.access-captcha {
+  min-height: 65px;
+}
+
+.access-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.access-fineprint {
+  margin: 0;
+  color: #8fa3c8;
+  font-size: 0.78rem;
+  line-height: 1.6;
+}
+
+.link-button {
+  padding: 0;
+  border: none;
+  background: none;
+  color: #9db4ff;
+  font-size: 0.85rem;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.link-button:hover {
+  background: none;
+  color: #c3d0ff;
+}
+
+.link-button:disabled {
+  color: #6b7b96;
+  cursor: default;
+}
+
+button.danger {
+  background: rgb(214 69 69 / 24%);
+  border-color: rgb(214 69 69 / 45%);
+}
+
+button.danger:hover:not(:disabled) {
+  background: rgb(214 69 69 / 36%);
+}
+
+.account-menu {
+  position: relative;
+}
+
+.account-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  max-width: 220px;
+  padding: 0.4rem 0.7rem;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 5%);
+  border: 1px solid rgb(255 255 255 / 12%);
+}
+
+.account-trigger > span:first-child {
+  display: inline-grid;
+  place-items: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 50%;
+  background: rgb(72 104 255 / 40%);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.account-trigger-email {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.82rem;
+  color: #cfdaf0;
+}
+
+.account-panel {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  z-index: 20;
+  width: min(320px, 88vw);
+  display: grid;
+  gap: 0.75rem;
+  padding: 1rem;
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 0.85rem;
+  background: #0d1220;
+  box-shadow: 0 18px 40px rgb(0 0 0 / 50%);
+}
+
+.account-email {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #cfdaf0;
+  overflow-wrap: anywhere;
+}
+
+.account-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+}
+

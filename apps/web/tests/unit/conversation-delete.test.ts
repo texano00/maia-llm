@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { closeDatabase, openDatabase, type DatabaseConnection } from "../../src/main/storage/db";
+import { seedAccount } from "../helpers/accounts";
 import { HistoryRepository } from "../../src/main/services/history/repository";
 import { ConversationImageStore } from "../../src/main/services/history/images";
 import { IpcRegistry } from "../../src/main/ipc/registry";
@@ -19,8 +20,8 @@ interface Harness {
 
 function harness(db: DatabaseConnection, imagesDir: string): Harness {
   const registry = new IpcRegistry();
-  const history = new HistoryRepository(db);
-  const images = new ConversationImageStore(db, imagesDir);
+  const history = new HistoryRepository(db, "account-test");
+  const images = new ConversationImageStore(db, imagesDir, "account-test");
   const aborted: string[] = [];
   const sessions = {
     listSessions: () => [],
@@ -48,6 +49,7 @@ describe("conversation.delete", () => {
 
   beforeEach(async () => {
     db = openDatabase(":memory:");
+  seedAccount(db);
     imagesDir = await mkdtemp(join(tmpdir(), "maia-chat-images-"));
     rig = harness(db, imagesDir);
   });

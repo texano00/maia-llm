@@ -74,6 +74,16 @@ export const updateStatusSchema = z.object({
 
 export const ipcChannels = [
   "app.info",
+  /**
+   * Passwordless access. `auth.config`/`auth.state`/`auth.requestCode`/
+   * `auth.verifyCode` are callable without a session; the rest require one.
+   */
+  "auth.config",
+  "auth.state",
+  "auth.requestCode",
+  "auth.verifyCode",
+  "auth.signOut",
+  "auth.deleteAccount",
   "settings.get",
   "settings.update",
   "settings.credentials.status",

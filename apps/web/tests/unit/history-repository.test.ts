@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { closeDatabase, openDatabase, type DatabaseConnection } from "../../src/main/storage/db";
+import { seedAccount } from "../helpers/accounts";
 import { HistoryRepository } from "../../src/main/services/history/repository";
 
 describe("HistoryRepository", () => {
@@ -8,7 +9,8 @@ describe("HistoryRepository", () => {
 
   beforeEach(() => {
     db = openDatabase(":memory:");
-    repository = new HistoryRepository(db);
+    seedAccount(db);
+    repository = new HistoryRepository(db, "account-test");
   });
 
   afterEach(() => {

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { closeDatabase, openDatabase, type DatabaseConnection } from "../../src/main/storage/db";
+import { seedAccount } from "../helpers/accounts";
 import { CredentialStore } from "../../src/main/services/credentials/store";
 
 /** Stand-in for the Electron safeStorage-backed vault. */
@@ -34,8 +35,9 @@ describe("CredentialStore", () => {
 
   beforeEach(() => {
     db = openDatabase(":memory:");
+    seedAccount(db);
     vault = new FakeVault();
-    store = new CredentialStore(db, vault as never);
+    store = new CredentialStore(db, vault as never, "account-test");
   });
 
   afterEach(() => {

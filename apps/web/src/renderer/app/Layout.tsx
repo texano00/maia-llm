@@ -2,8 +2,7 @@ import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import logoMark from "../assets/logo-mark.png";
-import { InfoButton } from "../shared/InfoButton";
-import { UpdateToast } from "../shared/updates/UpdateToast";
+import { AccountMenu } from "../shared/auth/AccountMenu";
 import { useWorkspace } from "../shared/session/WorkspaceProvider";
 import { useProviderHealth } from "../shared/health/useProviderHealth";
 import { BalanceBadge } from "../features/notifications/BalanceBadge";
@@ -82,11 +81,10 @@ export function Layout({ children }: { children: ReactNode }) {
           <div className="topbar-actions">
             <BalanceBadge health={health} />
             <NotificationBell />
-            <InfoButton />
+            <AccountMenu />
           </div>
         </header>
         <main className="page">{children}</main>
-        <UpdateToast />
       </div>
     </div>
   );

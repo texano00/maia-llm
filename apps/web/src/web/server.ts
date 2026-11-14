@@ -1,14 +1,22 @@
-import { createServer } from "node:http";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { mkdir, readFile, stat } from "node:fs/promises";
 import { extname, join, normalize, resolve } from "node:path";
-import { ipcChannels, type IpcChannel } from "@maia/contracts";
-import { createWebHost } from "./host";
+import { fail, ipcChannels, type IpcChannel, type Result } from "@maia/contracts";
+import { createWebPlatform, publicChannels, type WebPlatform } from "./host";
+import type { IpcRegistry } from "../main/ipc/registry";
+import { clearedSessionCookie, maxAgeSeconds, parseCookie, sessionCookie } from "./cookies";
 
 const PORT = Number(process.env.MAIA_WEB_PORT ?? 5173);
 const HOST = process.env.MAIA_WEB_HOST ?? "127.0.0.1";
 const RENDERER_DIR = resolve(process.cwd(), "out/renderer");
 const DATA_DIR = resolve(process.env.MAIA_WEB_DATA ?? ".maia-web");
 const providerMode = process.env.MAIA_PROVIDER_MODE === "live" ? "live" : "mock";
+const secureCookies = process.env.MAIA_COOKIE_SECURE !== "false";
+const trustProxy = process.env.MAIA_TRUST_PROXY?.trim().toLowerCase() ?? "";
+const publicOrigin = process.env.MAIA_PUBLIC_ORIGIN?.trim() || null;
+
+/** Four 20 MB images, base64 encoded, inside one `chat.send`. */
+const MAX_BODY_BYTES = 128 * 1024 * 1024;
 
 const contentTypes: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -21,33 +29,39 @@ const contentTypes: Record<string, string> = {
   ".json": "application/json"
 };
 
+interface FeedEvent {
+  id: number;
+  accountId: string;
+  channel: string;
+  payload: unknown;
+}
+
 async function main(): Promise<void> {
   await mkdir(DATA_DIR, { recursive: true });
-  const listeners = new Set<(channel: string, payload: unknown) => void>();
 
-  // Long-lived SSE connections are buffered by some proxies (including the
-  // forwarded ports used for browser testing), so events are also kept in a
-  // bounded log that the client can poll with a cursor.
-  const events: Array<{ id: number; channel: string; payload: unknown }> = [];
+  // Events are kept in a bounded log so the client can poll with a cursor:
+  // long-lived SSE connections are buffered by some proxies.
+  const events: FeedEvent[] = [];
   // Seeded from the clock so cursors stay valid across host restarts.
   let nextEventId = Date.now();
-  const record = (channel: string, payload: unknown): void => {
-    events.push({ id: nextEventId, channel, payload });
+  const listeners = new Map<string, Set<(channel: string, payload: unknown) => void>>();
+
+  const record = (accountId: string, channel: string, payload: unknown): void => {
+    events.push({ id: nextEventId, accountId, channel, payload });
     nextEventId += 1;
-    if (events.length > 500) {
-      events.splice(0, events.length - 500);
+    if (events.length > 2_000) {
+      events.splice(0, events.length - 2_000);
+    }
+
+    for (const listener of listeners.get(accountId) ?? []) {
+      listener(channel, payload);
     }
   };
 
-  const host = await createWebHost({
+  const platform = await createWebPlatform({
     databasePath: join(DATA_DIR, "maia.db"),
     providerMode,
-    onEvent: (channel, payload) => {
-      record(channel, payload);
-      for (const listener of listeners) {
-        listener(channel, payload);
-      }
-    }
+    onEvent: record
   });
 
   const allowed = new Set<string>(ipcChannels);
@@ -56,52 +70,21 @@ async function main(): Promise<void> {
     try {
       const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
 
-      if (url.pathname === "/rpc" && request.method === "POST") {
-        const body = await readJson(request);
-        const channel = String(body.channel ?? "");
-
-        if (!allowed.has(channel)) {
-          sendJson(response, 400, { ok: false, error: { code: "VALIDATION_FAILED", message: `Unknown channel ${channel}` } });
-          return;
-        }
-
-        const result = await host.registry.invoke(channel as IpcChannel, body.payload);
-        sendJson(response, 200, result);
+      // A browser request carries an Origin; a different one is an attempt to
+      // drive this session from another site.
+      if (!originAllowed(request)) {
+        response.writeHead(403, { "content-type": "text/plain", "cache-control": "no-store" });
+        response.end("Cross-origin request refused");
         return;
       }
 
-      if (url.pathname === "/events" && request.method === "GET" && url.searchParams.has("since")) {
-        const since = Number(url.searchParams.get("since") ?? "-1");
-        const pending = since < 0 ? [] : events.filter((event) => event.id > since);
-
-        sendJson(response, 200, {
-          events: pending,
-          lastEventId:
-            pending.length > 0
-              ? pending[pending.length - 1]!.id
-              : Math.max(since, nextEventId - 1)
-        });
+      if (url.pathname === "/rpc" && request.method === "POST") {
+        await handleRpc(platform, request, response, allowed);
         return;
       }
 
       if (url.pathname === "/events") {
-        response.writeHead(200, {
-          "content-type": "text/event-stream",
-          "cache-control": "no-cache",
-          connection: "keep-alive"
-        });
-        response.write(": connected\n\n");
-
-        const listener = (channel: string, payload: unknown): void => {
-          response.write(`event: ${channel}\ndata: ${JSON.stringify(payload)}\n\n`);
-        };
-        listeners.add(listener);
-
-        const keepAlive = setInterval(() => response.write(": ping\n\n"), 15_000);
-        request.on("close", () => {
-          clearInterval(keepAlive);
-          listeners.delete(listener);
-        });
+        await handleEvents(platform, request, response, url, events, nextEventId, listeners);
         return;
       }
 
@@ -114,7 +97,11 @@ async function main(): Promise<void> {
     } catch (error) {
       sendJson(response, 500, {
         ok: false,
-        error: { code: "INTERNAL", message: error instanceof Error ? error.message : String(error) }
+        error: {
+          code: "INTERNAL",
+          message: error instanceof Error ? error.message : String(error),
+          retryable: false
+        }
       });
     }
   });
@@ -125,7 +112,7 @@ async function main(): Promise<void> {
 
   const shutdown = async (): Promise<void> => {
     server.close();
-    await host.dispose();
+    await platform.dispose();
     process.exit(0);
   };
 
@@ -133,7 +120,154 @@ async function main(): Promise<void> {
   process.on("SIGTERM", () => void shutdown());
 }
 
-async function serveStatic(pathname: string, response: import("node:http").ServerResponse): Promise<void> {
+async function handleRpc(
+  platform: WebPlatform,
+  request: IncomingMessage,
+  response: ServerResponse,
+  allowed: Set<string>
+): Promise<void> {
+  const body = await readJson(request);
+  const channel = String(body.channel ?? "");
+
+  if (!allowed.has(channel)) {
+    sendJson(response, 400, fail("VALIDATION_FAILED", `Unknown channel ${channel}`));
+    return;
+  }
+
+  const token = parseCookie(request.headers.cookie);
+  const headers: Record<string, string> = { "cache-control": "no-store" };
+  const typed = channel as IpcChannel;
+
+  let registry: IpcRegistry;
+  let accountId: string | null = null;
+
+  if (publicChannels.has(typed)) {
+    registry = platform.publicRegistry;
+  } else {
+    accountId = platform.access.accountFor(token);
+    if (!accountId) {
+      // 200 with a typed error: the renderer switches to the access page
+      // instead of treating a session expiry as a transport failure.
+      sendJson(response, 200, fail("NOT_AUTHENTICATED", "Sign in to continue."), headers);
+      return;
+    }
+
+    registry = (await platform.accounts.get(accountId)).registry;
+  }
+
+  const result = await registry.invoke(typed, body.payload, {
+    sessionToken: token,
+    sourceAddress: clientAddress(request),
+    userAgent: request.headers["user-agent"] ?? null,
+    setSessionCookie: (value, expiresAt) => {
+      headers["set-cookie"] = sessionCookie(value, maxAgeSeconds(expiresAt), secureCookies);
+    },
+    clearSessionCookie: () => {
+      headers["set-cookie"] = clearedSessionCookie(secureCookies);
+    }
+  });
+
+  if (result.ok && typed === "auth.deleteAccount" && accountId) {
+    platform.accounts.evict(accountId);
+  }
+
+  sendJson(response, 200, result, headers);
+}
+
+async function handleEvents(
+  platform: WebPlatform,
+  request: IncomingMessage,
+  response: ServerResponse,
+  url: URL,
+  events: FeedEvent[],
+  nextEventId: number,
+  listeners: Map<string, Set<(channel: string, payload: unknown) => void>>
+): Promise<void> {
+  const token = parseCookie(request.headers.cookie);
+  const accountId = platform.access.accountFor(token);
+
+  if (url.searchParams.has("since")) {
+    const since = Number(url.searchParams.get("since") ?? "-1");
+    const pending =
+      accountId && since >= 0
+        ? events.filter((event) => event.accountId === accountId && event.id > since)
+        : [];
+
+    sendJson(
+      response,
+      200,
+      {
+        events: pending,
+        lastEventId:
+          pending.length > 0 ? pending[pending.length - 1]!.id : Math.max(since, nextEventId - 1)
+      },
+      { "cache-control": "no-store" }
+    );
+    return;
+  }
+
+  if (!accountId) {
+    response.writeHead(401, { "content-type": "text/plain", "cache-control": "no-store" });
+    response.end("Sign in to receive events");
+    return;
+  }
+
+  response.writeHead(200, {
+    "content-type": "text/event-stream",
+    "cache-control": "no-store",
+    connection: "keep-alive"
+  });
+  response.write(": connected\n\n");
+
+  const listener = (channel: string, payload: unknown): void => {
+    response.write(`event: ${channel}\ndata: ${JSON.stringify(payload)}\n\n`);
+  };
+
+  const bucket = listeners.get(accountId) ?? new Set();
+  bucket.add(listener);
+  listeners.set(accountId, bucket);
+
+  const keepAlive = setInterval(() => response.write(": ping\n\n"), 15_000);
+  request.on("close", () => {
+    clearInterval(keepAlive);
+    bucket.delete(listener);
+    if (bucket.size === 0) {
+      listeners.delete(accountId);
+    }
+  });
+}
+
+function originAllowed(request: IncomingMessage): boolean {
+  const origin = request.headers.origin;
+  if (typeof origin !== "string" || origin.length === 0) {
+    // Not a browser fetch (curl, health check, proxy); the cookie check still
+    // applies, and a cross-site page cannot omit Origin.
+    return true;
+  }
+
+  const host = request.headers.host ?? "";
+  const candidates = new Set([`http://${host}`, `https://${host}`]);
+  if (publicOrigin) {
+    candidates.add(publicOrigin.replace(/\/$/, ""));
+  }
+
+  return candidates.has(origin.replace(/\/$/, ""));
+}
+
+/** `CF-Connecting-IP` only when the proxy is explicitly trusted. */
+function clientAddress(request: IncomingMessage): string {
+  if (trustProxy === "cloudflare") {
+    const header = request.headers["cf-connecting-ip"];
+    const value = Array.isArray(header) ? header[0] : header;
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+
+  return request.socket.remoteAddress ?? "unknown";
+}
+
+async function serveStatic(pathname: string, response: ServerResponse): Promise<void> {
   const relative = normalize(decodeURIComponent(pathname)).replace(/^(\.\.[/\\])+/, "");
   const filePath = join(RENDERER_DIR, relative === "/" ? "index.html" : relative);
 
@@ -143,7 +277,7 @@ async function serveStatic(pathname: string, response: import("node:http").Serve
     const body = await readFile(target);
     response.writeHead(200, {
       "content-type": contentTypes[extname(target)] ?? "application/octet-stream",
-      // A dev host must never serve a stale bundle after a rebuild.
+      // A deployment must never serve a stale bundle after a rebuild.
       "cache-control": "no-store"
     });
     response.end(body);
@@ -157,18 +291,30 @@ async function serveStatic(pathname: string, response: import("node:http").Serve
     }
 
     response.writeHead(404, { "content-type": "text/plain" });
-    response.end("Renderer build missing. Run: npm run -w @maia/desktop build");
+    response.end("Renderer build missing. Run: npm run -w @maia/web build");
   }
 }
 
-function sendJson(response: import("node:http").ServerResponse, status: number, payload: unknown): void {
-  response.writeHead(status, { "content-type": "application/json" });
+function sendJson(
+  response: ServerResponse,
+  status: number,
+  payload: Result<unknown> | Record<string, unknown>,
+  headers: Record<string, string> = {}
+): void {
+  response.writeHead(status, { "content-type": "application/json", ...headers });
   response.end(JSON.stringify(payload));
 }
 
-async function readJson(request: import("node:http").IncomingMessage): Promise<Record<string, unknown>> {
+async function readJson(request: IncomingMessage): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
+  let total = 0;
+
   for await (const chunk of request) {
+    total += (chunk as Buffer).byteLength;
+    if (total > MAX_BODY_BYTES) {
+      throw Object.assign(new Error("Request body is too large"), { statusCode: 413 });
+    }
+
     chunks.push(chunk as Buffer);
   }
 

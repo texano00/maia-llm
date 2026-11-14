@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { closeDatabase, openDatabase, type DatabaseConnection } from "../../src/main/storage/db";
+import { seedAccount } from "../helpers/accounts";
 import { buildEstimate, MINIMUM_BILLABLE_MINUTES } from "../../src/main/services/cost/estimator";
 import { SessionOrchestrator, SessionError, type ComputeOffer, type ComputeProvider } from "../../src/main/services/sessions/orchestrator";
 import { isOfferUnavailableError } from "../../src/main/services/providers/vastai/client";
@@ -59,7 +60,8 @@ describe("SessionOrchestrator", () => {
 
   beforeEach(() => {
     db = openDatabase(":memory:");
-    store = new SessionStore(db);
+    seedAccount(db);
+    store = new SessionStore(db, "account-test");
     clock = Date.parse("2026-11-03T10:00:00.000Z");
   });
 

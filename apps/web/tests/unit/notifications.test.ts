@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { closeDatabase, openDatabase, type DatabaseConnection } from "../../src/main/storage/db";
+import { seedAccount } from "../helpers/accounts";
 import { SettingsStore } from "../../src/main/services/settings/store";
 import { NotificationCenter } from "../../src/main/services/notifications/center";
 
@@ -14,7 +15,8 @@ afterEach(() => {
 
 function center(clock: { value: number }): { center: NotificationCenter; settings: SettingsStore } {
   db = openDatabase(":memory:");
-  const settings = new SettingsStore(db);
+  seedAccount(db);
+  const settings = new SettingsStore(db, "account-test");
   return {
     settings,
     center: new NotificationCenter(settings, () => new Date(clock.value))

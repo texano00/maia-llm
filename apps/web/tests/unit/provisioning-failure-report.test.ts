@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { FailureEvent } from "@maia/contracts";
 import { closeDatabase, openDatabase, type DatabaseConnection } from "../../src/main/storage/db";
+import { seedAccount } from "../helpers/accounts";
 import {
   SessionOrchestrator,
   type ComputeOffer,
@@ -31,7 +32,8 @@ describe("provisioning failures", () => {
 
   beforeEach(() => {
     db = openDatabase(":memory:");
-    store = new SessionStore(db);
+    seedAccount(db);
+    store = new SessionStore(db, "account-test");
     clock = Date.parse("2026-11-07T10:30:00.000Z");
   });
 
