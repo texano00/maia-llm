@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
+import { adminSessionToken } from "./auth.js";
 import type { SqlDatabase } from "./db/database.js";
-import { createOperatorGuard } from "./operator-guard.js";
 import type { SnapshotService } from "./services/catalogue/snapshot-service.js";
 import { UseCaseError, type UseCaseAdminService } from "./services/catalogue/use-case-admin.js";
 import type { AdminAuthService } from "./services/portal-auth.js";
@@ -55,15 +55,21 @@ export interface AdminRouteOptions {
  */
 export function registerAdminRoutes(app: FastifyInstance, options: AdminRouteOptions): void {
   const now = options.now ?? (() => Date.now());
-  const requireOperator = createOperatorGuard({ admins: options.admins, internal: options.internal });
 
-  const requireAdmin = async (request: FastifyRequest): Promise<string | null> =>
-    (await requireOperator(request))?.accountId ?? null;
+  const requireAdmin = async (request: FastifyRequest): Promise<string | null> => {
+    const token = adminSessionToken(request);
+    if (!token) {
+      return null;
+    }
+
+    const session = await options.admins.sessionFor(token);
+    return session?.adminId ?? null;
+  };
 
   const unauthorized = { error: "not_authenticated" } as const;
 
-  // Accounts and capabilities are read from the product on every request, so a
-  // revoked operator loses access on the next click rather than at restart.
+  // Accounts and capabilities are read from the product on every request rather
+  // than cached here: the product remains the only authority on who may see what.
   app.get("/admin-api/accounts", async (request, reply) => {
     if (!(await requireAdmin(request))) {
       return reply.status(401).send(unauthorized);
@@ -305,8 +311,6 @@ function describeInternalFailure(error: unknown): { status: number; error: strin
     if (error.status === 404) {
       return { status: 404, error: "not_found" };
     }
-
-    return { status: 503, error: "unavailable" };
   }
 
   return { status: 503, error: "unavailable" };

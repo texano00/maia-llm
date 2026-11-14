@@ -45,10 +45,9 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
       config: options.config ?? loadConfig(),
       ...(options.now ? { now: options.now } : {}),
     }));
-  // Operators, accounts and capabilities all live in the product; the portal only
-  // holds a session that points at one of them.
-  const internal = options.internal ?? context.internal;
-  const app = Fastify({    logger: process.env.NODE_ENV !== "test",
+
+  const app = Fastify({
+    logger: process.env.NODE_ENV !== "test",
     // Behind nginx (or Caddy) the socket peer is the proxy itself; without this
     // every request in the log comes from 127.0.0.1. Set MAIA_TRUST_PROXY=false
     // only when the port is reachable without a proxy in front of it.
@@ -57,24 +56,16 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
 
   app.get("/health", async () => ({ status: "ok", storage: context.db.dialect }));
 
-  if (context.config.retiredAdminPasswordSet) {
-    // Say it out loud: a deployment that still carries the old secret should hear
-    // that it is ignored, not discover it by wondering why the password fails.
-    app.log.warn(
-      "MAIA_ADMIN_PASSWORD is set but ignored: operators sign in with an emailed code and their `operator` capability."
-    );
-  }
-
   const authorize = context.config.requireClientAuth
     ? async (request: FastifyRequest): Promise<string | null> => {
         const token = bearerToken(request);
         return token ? context.tokens.verifyAccess(token) : null;
-      }    : undefined;
+      }
+    : undefined;
 
   registerPortalAuthRoutes(app, {
     tokens: context.tokens,
     admins: context.admins,
-    internal,
     secureCookies: process.env.NODE_ENV === "production",
     ...(options.now ? { now: options.now } : {}),
   });
@@ -95,7 +86,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
     useCases: context.useCaseAdmin,
     snapshot: context.snapshot,
     db: context.db,
-    internal,
+    internal: options.internal ?? context.internal,
     ...(options.now ? { now: options.now } : {})
   });
   registerAdminUi(app, options.adminUiRoot ? { root: options.adminUiRoot } : {});

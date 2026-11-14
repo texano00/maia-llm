@@ -208,8 +208,8 @@ without touching keys.
   operator granted, so a revocation removes one entry, not a chain.
 - Unknown entries are dropped on read, so a hand-edited row cannot invent
   authority.
-- The last `operator` cannot be revoked (`409 last-operator`), which is why the
-  grant is held in the product rather than in the portal's session.
+- The last `operator` cannot be revoked (`409 last-operator`), so the product
+  always keeps somebody who can see its developer settings.
 
 Two settings belong to development rather than to the person using the product:
 `diagnosticsUrl` and `usageReporting`. Unless the caller has `debug`/`operator`

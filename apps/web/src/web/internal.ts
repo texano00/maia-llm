@@ -3,8 +3,6 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   capabilityChangeSchema,
   internalAccountQuerySchema,
-  internalRequestCodeSchema,
-  internalVerifyCodeSchema,
   type InternalAccountList
 } from "@maia/contracts";
 import { AccountRepository, LastOperatorError } from "../main/services/accounts/repository";
@@ -44,7 +42,6 @@ export function createInternalRoutes(options: InternalRouteOptions): InternalRou
   }
 
   const repository = new AccountRepository(options.platform.database);
-  const access = options.platform.access;
   const expectedToken = token;
 
   async function handle(
@@ -61,46 +58,7 @@ export function createInternalRoutes(options: InternalRouteOptions): InternalRou
       return true;
     }
 
-    const context = {
-      sourceAddress: request.socket.remoteAddress ?? "internal",
-      userAgent: request.headers["user-agent"] ?? null
-    };
-
     try {
-      if (url.pathname === "/internal/auth/request-code" && request.method === "POST") {
-        const body = internalRequestCodeSchema.safeParse(await readJson(request));
-        if (!body.success) {
-          send(response, 400, { error: "invalid_request" });
-          return true;
-        }
-
-        // The product's own throttles, captcha policy and mail transport apply, so
-        // the portal cannot become a way around them.
-        await access.requestCode({ email: body.data.email }, context);
-        send(response, 200, { sent: true });
-        return true;
-      }
-
-      if (url.pathname === "/internal/auth/verify-code" && request.method === "POST") {
-        const body = internalVerifyCodeSchema.safeParse(await readJson(request));
-        if (!body.success) {
-          send(response, 400, { error: "invalid_request" });
-          return true;
-        }
-
-        // No cookie: the portal issues its own session.
-        const verified = await access.verifyCode(
-          { email: body.data.email, code: body.data.code },
-          context
-        );
-        send(response, 200, {
-          accountId: verified.accountId,
-          email: verified.result.email,
-          capabilities: verified.capabilities
-        });
-        return true;
-      }
-
       if (url.pathname === "/internal/accounts" && request.method === "GET") {
         const query = internalAccountQuerySchema.safeParse({
           query: url.searchParams.get("query") ?? undefined,

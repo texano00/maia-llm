@@ -106,14 +106,19 @@ contradicts FR-016/US4).
 
 ## D7 — Internal API
 
-**Decision**: The product exposes `/internal/accounts` (list),
-`/internal/accounts/:id/capabilities` (patch), `POST /internal/auth/request-code`
-and `POST /internal/auth/verify-code`, guarded by `x-maia-internal: <token>` with
-`MAIA_INTERNAL_TOKEN`. The token is compared with `timingSafeEqual`; a missing or
-wrong token is `401`. The routes are mounted before the static handler, are not
-listed in the nginx config, and the container is only reachable on the shared
-Docker network. When `MAIA_INTERNAL_TOKEN` is unset the routes do not exist (404),
-so a single-service deployment has no internal surface.
+**Decision**: The product exposes `/internal/accounts` (list) and
+`/internal/accounts/:id/capabilities` (patch), guarded by
+`x-maia-internal: <token>` with `MAIA_INTERNAL_TOKEN`. The token is compared with
+`timingSafeEqual`; a missing or wrong token is `401`. The routes are mounted
+before the static handler, are not listed in the nginx config, and the container
+is only reachable on the shared Docker network. When `MAIA_INTERNAL_TOKEN` is
+unset the routes do not exist (404), so a single-service deployment has no
+internal surface.
+
+**Amended 2026-11-14**: no sign-in routes live here. The portal keeps its
+deployment-configured administrator (`MAIA_ADMIN_EMAIL` / `MAIA_ADMIN_PASSWORD`)
+and never authenticates anybody by email, so this API serves the accounts view
+only.
 
 **Rationale**: The portal must read product accounts and change one field without
 touching conversation tables. A narrow, token-authenticated projection is the

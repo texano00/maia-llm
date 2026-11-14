@@ -7,7 +7,6 @@ import { createAppContext, type AppContext } from "../../src/context.js";
 import { buildServer } from "../../src/server.js";
 import type { CatalogueClient } from "../../src/services/catalogue/huggingface.js";
 import { SnapshotService } from "../../src/services/catalogue/snapshot-service.js";
-import { createFakeInternal } from "../support/fake-internal.js";
 
 const client: CatalogueClient = {
   async listModels() {
@@ -54,23 +53,19 @@ describe("backoffice use cases", () => {
         databaseFile: join(directory, "maia.sqlite"),
         legacyReputationFile: null,
         portalTokenSecret: "admin-test-secret",
-        requireClientAuth: false
+        requireClientAuth: false,
+        adminEmail: "admin@maia.test",
+        adminPassword: "correct horse"
       })
     });
     context.snapshot = new SnapshotService({ db: context.db, client });
     await context.snapshot.refresh("manual");
 
-    // The backoffice admits product accounts that hold `operator`; there is no
-    // portal password any more.
-    const operator = createFakeInternal({
-      accounts: [{ id: "account-operator", email: "admin@maia.test", capabilities: ["operator"] }]
-    });
-
-    server = await buildServer({ context, internal: operator.api });
+    server = await buildServer({ context });
     const signIn = await server.inject({
       method: "POST",
       url: "/v1/admin/session",
-      payload: { email: "admin@maia.test", code: "123456" }
+      payload: { email: "admin@maia.test", password: "correct horse" }
     });
     cookie = String(signIn.headers["set-cookie"]).split(";")[0] ?? "";
   });
@@ -303,7 +298,7 @@ describe("backoffice use cases", () => {
     const { entries } = audit.json() as { entries: Array<{ action: string }> };
     const actions = entries.map((entry) => entry.action);
 
-    expect(actions).toContain("operator_signed_in");
+    expect(actions).toContain("admin_signed_in");
     expect(actions).toContain("use_case_created");
   });
 });

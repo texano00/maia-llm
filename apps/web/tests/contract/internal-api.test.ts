@@ -171,16 +171,16 @@ describe("internal accounts API", () => {
     expect(unknown.body).toEqual({ error: "not_found" });
   });
 
-  it("verifies a code and answers only identity and capabilities", async () => {
-    const requested = await call(routes, "POST", "/internal/auth/request-code", {
+  it("carries no sign-in routes: the portal has its own administrator", async () => {
+    const requestCode = await call(routes, "POST", "/internal/auth/request-code", {
       body: { email: "operator@example.com" }
     });
-    expect(requested.status).toBe(200);
-
-    const wrong = await call(routes, "POST", "/internal/auth/verify-code", {
+    const verifyCode = await call(routes, "POST", "/internal/auth/verify-code", {
       body: { email: "operator@example.com", code: "000000" }
     });
-    expect(wrong.status).toBe(400);
+
+    expect(requestCode.status).toBe(404);
+    expect(verifyCode.status).toBe(404);
   });
 
   it("never returns settings, conversation text or key material", async () => {
