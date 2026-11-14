@@ -54,7 +54,6 @@ describe("desktop application removal", () => {
       "main/ipc/updates.ts",
       "main/services/portal/client.ts",
       "main/services/portal/credentials.ts",
-      "main/services/catalogue/portal-source.ts",
       "main/services/telemetry/usage.ts",
       "main/services/telemetry/identity.ts",
       "main/services/diagnostics/forwarder.ts",

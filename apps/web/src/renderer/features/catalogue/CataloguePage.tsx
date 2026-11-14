@@ -12,7 +12,7 @@ import { useWorkspace } from "../../shared/session/WorkspaceProvider";
 import { useProviderHealth } from "../../shared/health/useProviderHealth";
 import { openOnboarding } from "../onboarding/open";
 import { requestNotificationPermission } from "../../shared/notify";
-import { hiddenCount, readinessFor } from "./readiness";
+import { hasVerdicts, hiddenCount, readinessFor } from "./readiness";
 import { PowerPicker } from "./PowerPicker";
 import { formatParameters, formatContext, formatBytes, formatUsd } from "../../shared/format";
 export function CataloguePage() {
@@ -73,19 +73,20 @@ export function CataloguePage() {
   // without a vast.ai key, cannot be started, so the filter and the start button
   // ask the same function.
   const credentialStatus = {
-    // `missing` and `invalid` both mean "no usable key"; only an unverified key
-    // (`unknown`) counts as present, and before the first health snapshot nothing
-    // is hidden.
-    huggingface: health
-      ? health.huggingface.state === "ok" || health.huggingface.state === "unknown"
-      : true,
-    vastai: health ? health.vastai.state === "ok" || health.vastai.state === "unknown" : true
+    // A key being *stored* is what matters here. A failed verification is a signal
+    // for the bell, not a reason to empty somebody's catalogue — and a key the
+    // provider really rejects is refused at start, with its own message.
+    huggingface: health ? health.huggingface.state !== "missing" : true,
+    vastai: health ? health.vastai.state !== "missing" : true
   };
-  const hidden = hiddenCount(models, credentialStatus);
+  // A catalogue that carries no verdicts at all (a Hub listing) cannot answer "can
+  // I run this", and hiding everything would be a worse answer than showing it.
+  const readiness = { verdictsAvailable: hasVerdicts(models) };
+  const hidden = hiddenCount(models, credentialStatus, readiness);
   const visibleModels = supportedOnly
-    ? models.filter((model) => readinessFor(model, credentialStatus).ready)
+    ? models.filter((model) => readinessFor(model, credentialStatus, readiness).ready)
     : models;
-  const blocked = selected ? readinessFor(selected.model, credentialStatus) : null;
+  const blocked = selected ? readinessFor(selected.model, credentialStatus, readiness) : null;
   const starting = selected ? startingIds.includes(selected.model.id) : false;
   const existingSession = selected
     ? (sessions.find(
@@ -489,13 +490,19 @@ export function CataloguePage() {
                     {starting
                       ? "Booking a GPU…"
                       : blocked?.ready === false
-                        ? "Missing a key"
+                        ? // Name the obstacle: "Missing a key" was wrong for a model
+                          // with no runnable verdict, or one with no servable weights.
+                          blocked.section === "vastai"
+                          ? "Add a vast.ai key"
+                          : blocked.section === "huggingface"
+                            ? "Add a Hugging Face token"
+                            : "Cannot run this model"
                         : chatReady
                           ? "Confirm and start session"
-                        : selected.runnable === false
-                          ? "Cannot run this model"
-                          : "Not a chat model"}
-                  </button>
+                          : selected.runnable === false
+                            ? "Cannot run this model"
+                            : "Not a chat model"}
+                </button>
                   {blocked?.ready === false && blocked.reason ? (
                     <p className="field-hint">
                       {blocked.reason}.{" "}

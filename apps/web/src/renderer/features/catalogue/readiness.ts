@@ -22,6 +22,11 @@ export interface ReadinessModel {
 }
 
 export interface CredentialStatus {
+  /**
+   * A key is stored. Deliberately not "a key verified": a verification that fails
+   * because the provider was unreachable must not empty somebody's catalogue, and
+   * the start path still refuses a key the provider rejects.
+   */
   huggingface: boolean;
   vastai: boolean;
 }
@@ -39,14 +44,32 @@ export interface Readiness {
  * this person's account. Gated repositories need a token before the download is
  * allowed, and no GPU can be rented without a vast.ai key.
  */
-export function readinessFor(model: ReadinessModel, status: CredentialStatus): Readiness {
-  if (model.supported !== true) {
+export function readinessFor(
+  model: ReadinessModel,
+  status: CredentialStatus,
+  options: {
+    /**
+     * Whether the list carries any verdict at all.
+     *
+     * A Hub listing has none, and hiding everything because the backend was not the
+     * source would be a worse lie than showing what the Hub returned. When the
+     * catalogue does carry verdicts, anything without one is unproven and hidden.
+     */
+    verdictsAvailable?: boolean | undefined;
+  } = {}
+): Readiness {
+  if (model.supported === false) {
     return {
       ready: false,
-      reason:
-        model.supported === false
-          ? "no engine can serve this repository"
-          : "this repository has no runnable verdict yet",
+      reason: "no engine can serve this repository",
+      section: null
+    };
+  }
+
+  if (model.supported !== true && options.verdictsAvailable !== false) {
+    return {
+      ready: false,
+      reason: "the catalogue has no verdict for this repository yet",
       section: null
     };
   }
@@ -73,8 +96,12 @@ export function readinessFor(model: ReadinessModel, status: CredentialStatus): R
 }
 
 /** Convenience for the list, where only the verdict matters. */
-export function readyFor(model: ReadinessModel, status: CredentialStatus): boolean {
-  return readinessFor(model, status).ready;
+export function readyFor(
+  model: ReadinessModel,
+  status: CredentialStatus,
+  options: { verdictsAvailable?: boolean | undefined } = {}
+): boolean {
+  return readinessFor(model, status, options).ready;
 }
 
 /**
@@ -83,7 +110,13 @@ export function readyFor(model: ReadinessModel, status: CredentialStatus): boole
  */
 export function hiddenCount(
   models: ReadonlyArray<ReadinessModel>,
-  status: CredentialStatus
+  status: CredentialStatus,
+  options: { verdictsAvailable?: boolean | undefined } = {}
 ): number {
-  return models.filter((model) => !readyFor(model, status)).length;
+  return models.filter((model) => !readyFor(model, status, options)).length;
+}
+
+/** True when at least one row carries a verdict, i.e. the list came from a snapshot. */
+export function hasVerdicts(models: ReadonlyArray<ReadinessModel>): boolean {
+  return models.some((model) => typeof model.supported === "boolean");
 }
