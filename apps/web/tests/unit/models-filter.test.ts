@@ -6,6 +6,7 @@ import {
   filterRuns
 } from "../../src/renderer/features/models/filter";
 import { mergeRuns } from "../../src/renderer/features/models/merge";
+import { isStoppable } from "../../src/renderer/features/models/status";
 
 function run(id: string, state: SessionState, startedAt: string): Session {
   return {
@@ -87,5 +88,22 @@ describe("mergeRuns", () => {
 
     expect(merged).toHaveLength(1);
     expect(merged[0]?.state).toBe("active");
+  });
+
+
+});
+
+describe("stopping a run", () => {
+  it("lets a machine be stopped from every state that holds one", () => {
+    // Including a boot that never finishes: that is the case the Stop button exists
+    // for, and the one the report could not act on.
+    expect(isStoppable("estimated")).toBe(true);
+    expect(isStoppable("provisioning")).toBe(true);
+    expect(isStoppable("ready")).toBe(true);
+    expect(isStoppable("active")).toBe(true);
+    expect(isStoppable("ending")).toBe(false);
+    expect(isStoppable("ended")).toBe(false);
+    expect(isStoppable("failed")).toBe(false);
+    expect(isStoppable("cancelled")).toBe(false);
   });
 });

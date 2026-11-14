@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { formatUsd } from "../../shared/format";
 import { DEFAULT_STATUS_FILTER, filterRuns, emptyStateFor, STATUS_FILTERS, type StatusFilter } from "./filter";
 import { describeRun } from "./run-details";
-import { isChatEligible, type VisibleStatus } from "./status";
+import { isChatEligible, isStoppable, type VisibleStatus } from "./status";
 import { ExternalAccessPanel } from "./ExternalAccessPanel";
 import { RunLogs } from "./RunLogs";
 import { mergeAcknowledged, failedRunIds } from "./indicator";
@@ -35,8 +35,37 @@ export function ModelsPage() {
   // One panel at a time: two live logs side by side would poll the provider twice
   // for no benefit.
   const [logsOpen, setLogsOpen] = useState<string | null>(null);
+  const [stoppingId, setStoppingId] = useState<string | null>(null);
   const visibleRuns = filterRuns(runs, filter);
   const empty = emptyStateFor(filter);
+
+  /**
+   * Releases the machine. A boot that will not finish is still billing, so this is
+   * offered while the run is initializing too — the one moment the meter is running
+   * and the model is not usable.
+   */
+  const stop = async (run: { id: string; modelId: string }): Promise<void> => {
+    const confirmed = window.confirm(
+      `Stop ${run.modelId}? The GPU is released now and anything still loading is lost.`
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setStoppingId(run.id);
+    const result = window.maia
+      ? await window.maia.invoke("session.end", { sessionId: run.id, reason: "user" })
+      : null;
+    setStoppingId(null);
+
+    if (result && !result.ok) {
+      window.alert(result.error.message);
+      return;
+    }
+
+    void reloadSessions();
+    void reloadHistory();
+  };
 
   // Opening Models acknowledges failures: the navigation indicator goes back to
   // orange and the bell stops repeating them.
@@ -228,11 +257,23 @@ export function ModelsPage() {
     {logsOpen === run.id ? <RunLogs sessionId={run.id} /> : null}
   </div>
 
-                {isChatEligible(run.state) ? (
+                {isChatEligible(run.state) || isStoppable(run.state) ? (
                   <div className="model-run-actions">
-                    <Link className="ghost-button" to="/chat">
-                      Open in Chat
-                    </Link>
+                    {isChatEligible(run.state) ? (
+                      <Link className="ghost-button" to="/chat">
+                        Open in Chat
+                      </Link>
+                    ) : null}
+                    {isStoppable(run.state) ? (
+                      <button
+                        type="button"
+                        className="ghost-button danger"
+                        disabled={stoppingId === run.id}
+                        onClick={() => void stop(run)}
+                      >
+                        {stoppingId === run.id ? "Stopping…" : "Stop"}
+                      </button>
+                    ) : null}
                   </div>
                 ) : null}
               </li>

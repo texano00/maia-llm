@@ -1115,7 +1115,10 @@ export class SessionOrchestrator {
   async end(sessionId: string, reason: NonNullable<Session["endReason"]>): Promise<Session | null> {
     const runtime = this.runtimes.get(sessionId);
     if (!runtime) {
-      return null;
+      // A store-backed fallback: the run may have been adopted after a restart, or
+      // started by a previous process. "Stop" must still release the machine and
+      // close the record instead of doing nothing.
+      return this.endFromStore(sessionId, reason);
     }
 
     this.options.store.transition(sessionId, "ending");
@@ -1148,6 +1151,45 @@ export class SessionOrchestrator {
     }
     this.runtimes.delete(sessionId);
     return ended;  }
+
+  /**
+   * Ends a run this process is not currently driving.
+   *
+   * The instance id is on the row, so the machine can still be released; without
+   * this a Stop on a run from an earlier process would answer "nothing to stop"
+   * while the GPU kept billing.
+   */
+  private async endFromStore(
+    sessionId: string,
+    reason: NonNullable<Session["endReason"]>
+  ): Promise<Session | null> {
+    const stored = this.options.store.get(sessionId);
+    if (!stored || !["estimated", "provisioning", "ready", "active", "ending"].includes(stored.state)) {
+      return null;
+    }
+
+    if (stored.instanceId !== null) {
+      await this.options.compute.destroyInstance(stored.instanceId).catch((error: unknown) => {
+        this.options.logger?.warn("Instance teardown failed; it will be reconciled on next start", {
+          sessionId,
+          message: error instanceof Error ? error.message : String(error)
+        });
+      });
+    }
+
+    this.options.store.appendEvent(
+      sessionId,
+      "info",
+      "Releasing the GPU",
+      new Date(this.now())
+    );
+    this.options.store.transition(sessionId, reason === "failure" ? "failed" : "ended", {
+      endedAt: new Date(this.now()).toISOString(),
+      endReason: reason
+    });
+
+    return this.options.store.get(sessionId);
+  }
 
   /** Releases every running GPU, used when the app exits (FR-012, FR-073). */
   async endAll(reason: NonNullable<Session["endReason"]>): Promise<void> {
