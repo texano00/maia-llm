@@ -1,4 +1,4 @@
-import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
 import type { SqlDatabase } from "../db/database.js";
 
 export interface IssuedCredentials {
@@ -328,6 +328,26 @@ export class TokenService {
   }
 }
 
+/** `scrypt$<salt>$<hash>` — no native dependency, verifiable with timingSafeEqual. */
+export function hashPassword(password: string): string {
+  const salt = randomBytes(16);
+  const hash = scryptSync(password, salt, 64);
+
+  return `scrypt$${salt.toString("hex")}$${hash.toString("hex")}`;
+}
+
+export function verifyPassword(password: string, stored: string): boolean {
+  const [scheme, saltHex, hashHex] = stored.split("$");
+  if (scheme !== "scrypt" || !saltHex || !hashHex) {
+    return false;
+  }
+
+  const expected = Buffer.from(hashHex, "hex");
+  const actual = scryptSync(password, Buffer.from(saltHex, "hex"), expected.length);
+
+  return expected.length === actual.length && timingSafeEqual(expected, actual);
+}
+
 export interface AdminSession {
   sessionToken: string;
   adminId: string;
@@ -335,7 +355,7 @@ export interface AdminSession {
   expiresAt: string;
 }
 
-/** Backoffice operator sign-in, with expiring sessions. */
+/** Backoffice administrator sign-in with hashed, expiring sessions. */
 export class AdminAuthService {
   private readonly now: () => number;
 
@@ -349,30 +369,32 @@ export class AdminAuthService {
     this.now = options.now ?? (() => Date.now());
   }
 
-  /**
-   * Admits somebody the product has already verified.
-   *
-   * There are no portal passwords any more: the identity is the product account
-   * the shared email-code flow authenticated, and its `operator` capability is
-   * re-checked on every request by the route guard. The `admin_users` row exists
-   * so `admin_sessions` keeps a real foreign key; its id is the account id, and
-   * its password digest is unusable by construction.
-   */
-  async signInVerified(accountId: string, email: string): Promise<AdminSession> {
-    const normalized = email.trim().toLowerCase();
+  async seed(email: string, password: string): Promise<void> {
     const existing = (await this.options.db.query(`SELECT id FROM admin_users WHERE email = ?`, [
-      normalized
+      email.toLowerCase()
     ])) as unknown as Array<{ id: string }>;
 
-    // An installation upgraded from the password era may still hold a row for this
-    // address under a different id; reuse it rather than violating uniqueness.
-    const adminId = existing[0]?.id ?? accountId;
-    if (!existing[0]) {
-      await this.options.db.execute(
-        `INSERT INTO admin_users (id, email, password_hash, role, created_at, disabled)
-         VALUES (?, ?, '', 'operator', ?, 0)`,
-        [accountId, normalized, new Date(this.now()).toISOString()]
-      );
+    if (existing[0]) {
+      return;
+    }
+
+    await this.options.db.execute(
+      `INSERT INTO admin_users (id, email, password_hash, role, created_at, disabled)
+       VALUES (?, ?, ?, 'admin', ?, 0)`,
+      [randomUUID(), email.toLowerCase(), hashPassword(password), new Date(this.now()).toISOString()]
+    );
+  }
+
+  async signIn(email: string, password: string): Promise<AdminSession | null> {
+    const rows = (await this.options.db.query(
+      `SELECT id, email, password_hash, disabled FROM admin_users WHERE email = ?`,
+      [email.trim().toLowerCase()]
+    )) as unknown as Array<{ id: string; email: string; password_hash: string; disabled: number }>;
+    const admin = rows[0];
+
+    if (!admin || admin.disabled === 1 || !verifyPassword(password, admin.password_hash)) {
+      await this.audit(null, "admin_sign_in_failed", admin?.id ?? null);
+      return null;
     }
 
     const sessionToken = `maia_as_${base64url(randomBytes(32))}`;
@@ -382,11 +404,11 @@ export class AdminAuthService {
     await this.options.db.execute(
       `INSERT INTO admin_sessions (id, admin_id, created_at, expires_at, last_seen_at, ended_at, end_reason)
        VALUES (?, ?, ?, ?, ?, NULL, NULL)`,
-      [sha256(sessionToken), adminId, new Date(now).toISOString(), expiresAt, new Date(now).toISOString()]
+      [sha256(sessionToken), admin.id, new Date(now).toISOString(), expiresAt, new Date(now).toISOString()]
     );
-    await this.audit(adminId, "operator_signed_in", normalized);
+    await this.audit(admin.id, "admin_signed_in", admin.email);
 
-    return { sessionToken, adminId, email: normalized, expiresAt };
+    return { sessionToken, adminId: admin.id, email: admin.email, expiresAt };
   }
 
   async sessionFor(sessionToken: string): Promise<{ adminId: string; email: string } | null> {

@@ -110,35 +110,37 @@ appear and are editable. Revoke it: they disappear again.
 
 ---
 
-### User Story 4 - Operators can manage the people who use the product (Priority: P2)
+### User Story 4 - The administrator can manage the people who use the product (Priority: P2)
 
-An operator opens the private portal and finds an accounts view: every person who
-signed up to the product, when they first appeared, when they were last seen, what
-they are running, and which capabilities their account carries. The operator
-grants or revokes the debug capability, or the operator role, and the change
-applies to that person on their next request. The portal never shows conversation
-content or provider key material.
+An administrator signs into the private portal with the credentials configured on
+the deployment and finds an accounts view: every person who signed up to the
+product, when they first appeared, when they were last seen, what they are
+running, and which capabilities their account carries. The administrator grants
+or revokes the debug capability, or the operator role, and the change applies to
+that person on their next request. The portal never shows conversation content or
+provider key material, and it never authenticates anybody by email.
 
 **Why this priority**: Without this view, the debug capability in US3 has no way
 to be granted, and the product has no answer to "who is using it and what is
 running".
 
-**Independent Test**: An account is created in the product; within a minute it
-appears in the portal's accounts view. Granting the debug capability there makes
-the two settings appear for that person. Revoking the operator role from the
-operator's own account takes effect on the next request.
+**Independent Test**: Sign in with the deployment's administrator credentials,
+open the accounts view, grant the debug capability to an account, and confirm the
+two settings appear for that person on their next load.
 
 **Acceptance Scenarios**:
 
-1. **Given** an operator in the portal, **When** the accounts view is opened,
-   **Then** every product account is listed with its address, creation time and
-   last activity, and never with conversation text or provider secrets.
-2. **Given** an account in the list, **When** the operator grants the debug
+1. **Given** the portal's configured administrator, **When** they sign in with the
+   configured email and password, **Then** the accounts view lists every product
+   account with its address, creation time and last activity, and never with
+   conversation text or provider secrets.
+2. **Given** an account in the list, **When** the administrator grants the debug
    capability, **Then** the person sees the developer settings on their next load.
-3. **Given** an account in the list, **When** the operator revokes the operator
-   role, **Then** that person loses operator access on their next request.
-4. **Given** a person without an operator role, **When** they request the accounts
-   view, **Then** it is refused.
+3. **Given** an account in the list, **When** the administrator revokes the
+   operator role, **Then** that person no longer counts as an operator on their
+   next request, and the last operator cannot be revoked at all.
+4. **Given** somebody without the administrator password, **When** they request
+   the accounts view, **Then** it is refused.
 5. **Given** the portal is unavailable, **When** a person uses the product,
    **Then** nothing about the product degrades except the portal itself.
 
@@ -204,21 +206,22 @@ operator's own account takes effect on the next request.
   the effective capabilities to the signed-in person's own session.
 - **FR-016**: The private portal MUST list the product's accounts with their
   address, creation time, last activity and capabilities.
-- **FR-017**: The portal MUST allow an operator to grant and revoke the debug and
-  operator capabilities.
+- **FR-017**: The portal MUST allow its administrator to grant and revoke the debug
+  and operator capabilities.
 - **FR-018**: The portal MUST NOT display, expose or return conversation content,
   images or provider key material.
 - **FR-019**: Capability changes MUST take effect for the affected person on their
   next request, without a restart.
-- **FR-020**: The portal's account view MUST be restricted to operators, and the
-  deployment MUST NOT be left without an operator after a revocation.
-- **FR-021**: The portal MUST use the product's accounts as its identity: an operator
-  signs in with the same email + one-time code flow, and access to the accounts view
-  MUST require the `operator` capability on that account. The deployment-seeded
-  administrator password MUST NOT remain a second way in.
-- **FR-022**: The portal MUST be able to grant and revoke the `debug` capability
-  for an account without the person signing in again, and the product MUST reflect
-  it on that person's next request.
+- **FR-020**: The portal's accounts view MUST be restricted to the portal's
+  administrator, and the deployment MUST NOT be left without an operator after a
+  revocation.
+- **FR-021**: The portal MUST authenticate its administrator with the static email
+  and password configured on the deployment, exactly as before this feature. The
+  portal MUST NOT sign anybody in by email, and MUST NOT send access codes or any
+  other notification mail.
+- **FR-022**: The portal MUST reach the product's accounts with a service token
+  configured on the deployment; when that token is absent the accounts view MUST
+  report the product as unreachable while the rest of the portal keeps working.
 
 ### Key Entities *(include if feature involves data)*
 

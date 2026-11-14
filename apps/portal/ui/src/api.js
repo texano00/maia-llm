@@ -25,11 +25,8 @@ export async function api(path, init = {}) {
   return body;
 }
 
-export const requestSignInCode = (email) =>
-  api("/v1/admin/code", { method: "POST", body: JSON.stringify({ email }) });
-
-export const signIn = (email, code) =>
-  api("/v1/admin/session", { method: "POST", body: JSON.stringify({ email, code }) });
+export const signIn = (email, password) =>
+  api("/v1/admin/session", { method: "POST", body: JSON.stringify({ email, password }) });
 
 export const signOut = () => api("/v1/admin/session", { method: "DELETE" });
 

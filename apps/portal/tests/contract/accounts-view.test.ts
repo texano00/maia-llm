@@ -32,15 +32,20 @@ describe("accounts view", () => {
         databaseFile: join(directory, "maia.sqlite"),
         legacyReputationFile: null,
         portalTokenSecret: "accounts-test-secret",
-        requireClientAuth: false
+        requireClientAuth: false,
+        adminEmail: "admin@maia.test",
+        adminPassword: "correct horse"
       })
     });
 
+    // The backoffice keeps its deployment-configured administrator: no emailed
+    // codes, no product identity involved in signing in.
     const signIn = await server.inject({
       method: "POST",
       url: "/v1/admin/session",
-      payload: { email: "operator@maia.test", code: "123456" }
+      payload: { email: "admin@maia.test", password: "correct horse" }
     });
+    expect(signIn.statusCode).toBe(200);
     cookie = String(signIn.headers["set-cookie"]).split(";")[0] ?? "";
   });
 
@@ -94,7 +99,7 @@ describe("accounts view", () => {
     expect(refused.json()).toEqual({ error: "last-operator" });
   });
 
-  it("requires both an operator session and a single action", async () => {
+  it("requires an administrator session and a single action", async () => {
     const anonymous = await server.inject({ method: "GET", url: "/admin-api/accounts" });
     expect(anonymous.statusCode).toBe(401);
 

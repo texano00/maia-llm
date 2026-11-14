@@ -11,7 +11,6 @@ import {
   listInstallations,
   listUseCases,
   reorderUseCases,
-  requestSignInCode,
   revokeInstallation,
   signIn,
   signOut,
@@ -96,100 +95,8 @@ export default function App() {
 }
 
 /**
- * Two steps, no password: the product sends a code to the address and only then
- * does the portal learn whether that account may operate it.
- */
-function SignIn({ onSignedIn }) {
-  const [email, setEmail] = useState("");
-  const [code, setCode] = useState("");
-  const [codeSent, setCodeSent] = useState(false);
-  const [error, setError] = useState(null);
-  const [notice, setNotice] = useState(null);
-  const [busy, setBusy] = useState(false);
-
-  async function sendCode() {
-    setBusy(true);
-    setError(null);
-    try {
-      await requestSignInCode(email);
-      setCodeSent(true);
-      setNotice("If that address belongs to an operator, a code is on its way.");
-    } catch (failure) {
-      setError(
-        failure.code === "throttled"
-          ? "Too many codes requested. Try again in a few minutes."
-          : failure.message
-      );
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <form
-      className="card signin"
-      onSubmit={async (event) => {
-        event.preventDefault();
-        if (!codeSent) {
-          await sendCode();
-          return;
-        }
-
-        setBusy(true);
-        setError(null);
-        try {
-          onSignedIn(await signIn(email, code));
-        } catch {
-          // A non-operator gets the same answer as a wrong code: the login must not
-          // reveal who may operate the service.
-          setError("That code is not valid. Ask for a new one.");
-        } finally {
-          setBusy(false);
-        }
-      }}
-    >
-      <h2>Sign in</h2>
-      {error ? <div className="alert">{error}</div> : null}
-      {notice && !error ? <div className="muted">{notice}</div> : null}
-      <label>
-        Email
-        <input
-          type="email"
-          autoComplete="username"
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-          required
-        />
-      </label>
-      {codeSent ? (
-        <label style={{ marginTop: "0.75rem" }}>
-          Code from your inbox
-          <input
-            inputMode="numeric"
-            autoComplete="one-time-code"
-            value={code}
-            onChange={(event) => setCode(event.target.value)}
-            required
-          />
-        </label>
-      ) : null}
-      <div className="row" style={{ marginTop: "1rem" }}>
-        <button type="submit" disabled={busy}>
-          {busy ? "Working…" : codeSent ? "Sign in" : "Email me a code"}
-        </button>
-        {codeSent ? (
-          <button type="button" className="ghost" disabled={busy} onClick={sendCode}>
-            Send another code
-          </button>
-        ) : null}
-      </div>
-    </form>
-  );
-}
-
-/**
  * Who is using the product, and what they may see. Capabilities are granted here
- * and checked in the product, so a change applies on the next request.
+ * and enforced in the product, so a change applies on its next request.
  */
 function Accounts() {
   const [page, setPage] = useState(null);
@@ -205,7 +112,7 @@ function Accounts() {
     } catch (failure) {
       setError(
         failure.code === "unavailable"
-          ? "The product cannot be reached right now."
+          ? "The product cannot be reached right now. Check MAIA_INTERNAL_TOKEN and MAIA_WEB_INTERNAL_URL."
           : failure.message
       );
     }
@@ -218,7 +125,7 @@ function Accounts() {
   async function toggle(account, capability, has) {
     if (has && capability === "operator") {
       const confirmed = window.confirm(
-        `Revoke operator from ${account.email}? They lose the backoffice on their next click.`
+        `Revoke operator from ${account.email}? Their developer settings disappear on the next request.`
       );
       if (!confirmed) {
         return;
@@ -321,6 +228,60 @@ function Accounts() {
         ) : null}
       </section>
     </>
+  );
+}
+
+function SignIn({ onSignedIn }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  return (
+    <form
+      className="card signin"
+      onSubmit={async (event) => {
+        event.preventDefault();
+        setBusy(true);
+        setError(null);
+        try {
+          const session = await signIn(email, password);
+          onSignedIn(session);
+        } catch (failure) {
+          setError(failure.message);
+        } finally {
+          setBusy(false);
+        }
+      }}
+    >
+      <h2>Sign in</h2>
+      {error ? <div className="alert">{error}</div> : null}
+      <label>
+        Email
+        <input
+          type="email"
+          autoComplete="username"
+          value={email}
+          onChange={(event) => setEmail(event.target.value)}
+          required
+        />
+      </label>
+      <label style={{ marginTop: "0.75rem" }}>
+        Password
+        <input
+          type="password"
+          autoComplete="current-password"
+          value={password}
+          onChange={(event) => setPassword(event.target.value)}
+          required
+        />
+      </label>
+      <div className="row" style={{ marginTop: "1rem" }}>
+        <button type="submit" disabled={busy}>
+          {busy ? "Signing in…" : "Sign in"}
+        </button>
+      </div>
+    </form>
   );
 }
 

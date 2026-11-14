@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { baseConfig } from "../../src/config.js";
 import { buildServer } from "../../src/server.js";
-import { createFakeInternal } from "../support/fake-internal.js";
 
 const report = {
   appVersion: "0.8.0",
@@ -18,19 +17,17 @@ const report = {
 describe("portal authentication", () => {
   let directory: string;
   let server: Awaited<ReturnType<typeof buildServer>>;
-  const operator = createFakeInternal({
-    accounts: [{ id: "account-operator", email: "admin@maia.test", capabilities: ["operator"] }]
-  });
 
   beforeEach(async () => {
     directory = mkdtempSync(join(tmpdir(), "maia-portal-"));
     server = await buildServer({
-      internal: operator.api,
       config: baseConfig({
         databaseFile: join(directory, "maia.sqlite"),
         legacyReputationFile: null,
         portalTokenSecret: "contract-test-secret",
-        requireClientAuth: true
+        requireClientAuth: true,
+        adminEmail: "admin@maia.test",
+        adminPassword: "correct horse"
       })
     });
   });
@@ -119,18 +116,10 @@ describe("portal authentication", () => {
     const denied = await server.inject({ method: "GET", url: "/v1/admin/installations" });
     expect(denied.statusCode).toBe(401);
 
-    const requested = await server.inject({
-      method: "POST",
-      url: "/v1/admin/code",
-      payload: { email: "admin@maia.test" }
-    });
-    expect(requested.statusCode).toBe(202);
-    expect(operator.calls.requested).toEqual(["admin@maia.test"]);
-
     const signIn = await server.inject({
       method: "POST",
       url: "/v1/admin/session",
-      payload: { email: "admin@maia.test", code: "123456" }
+      payload: { email: "admin@maia.test", password: "correct horse" }
     });
     expect(signIn.statusCode).toBe(200);
 

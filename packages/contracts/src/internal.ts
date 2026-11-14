@@ -1,27 +1,15 @@
 import { z } from "zod";
-import { accessCodeSchema, accessEmailSchema } from "./auth";
-import { accountSummarySchema, capabilitiesSchema } from "./capabilities";
+import { accountSummarySchema } from "./capabilities";
 
 /**
- * The server-to-server contract between the portal and the product
- * (`/internal/*`). It is token-authenticated, never reachable from the internet,
- * and returns a narrow projection: no settings, conversations or secrets.
+ * The server-to-server contract between the portal's accounts view and the
+ * product (`/internal/*`). It is token-authenticated, never reachable from the
+ * internet, and returns a narrow projection: no settings, conversations or
+ * secrets.
+ *
+ * Signing into the portal does not travel through here: the backoffice keeps its
+ * own administrator, configured on the deployment (see `docs/portal.md`).
  */
-
-export const internalRequestCodeSchema = z.object({
-  email: accessEmailSchema
-});
-
-export const internalVerifyCodeSchema = z.object({
-  email: accessEmailSchema,
-  code: accessCodeSchema
-});
-
-export const internalVerifyResultSchema = z.object({
-  accountId: z.string().min(1),
-  email: z.string(),
-  capabilities: capabilitiesSchema
-});
 
 export const internalAccountQuerySchema = z.object({
   query: z.string().trim().max(254).optional(),
@@ -35,12 +23,8 @@ export const internalAccountListSchema = z.object({
 });
 
 export const internalErrorSchema = z.object({
-  error: z.string(),
-  retryAfterSeconds: z.number().int().positive().optional()
+  error: z.string()
 });
 
-export type InternalRequestCode = z.infer<typeof internalRequestCodeSchema>;
-export type InternalVerifyCode = z.infer<typeof internalVerifyCodeSchema>;
-export type InternalVerifyResult = z.infer<typeof internalVerifyResultSchema>;
 export type InternalAccountQuery = z.infer<typeof internalAccountQuerySchema>;
 export type InternalAccountList = z.infer<typeof internalAccountListSchema>;

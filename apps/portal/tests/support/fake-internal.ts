@@ -15,8 +15,6 @@ export interface FakeAccount {
 
 export interface FakeInternalOptions {
   accounts?: FakeAccount[];
-  /** The only code the fake accepts; anything else is "wrong". */
-  code?: string;
 }
 
 export interface FakeInternal {
@@ -24,8 +22,6 @@ export interface FakeInternal {
   /** Live rows, so a test can assert what a change actually stored. */
   accounts: AccountSummary[];
   calls: {
-    requested: string[];
-    verified: string[];
     changes: Array<{ accountId: string; grant?: Capability; revoke?: Capability }>;
   };
 }
@@ -35,7 +31,6 @@ export interface FakeInternal {
  * this exactly as it works against the real one: same shapes, same failures.
  */
 export function createFakeInternal(options: FakeInternalOptions = {}): FakeInternal {
-  const code = options.code ?? "123456";
   const accounts: AccountSummary[] = (options.accounts ?? []).map((account) => ({
     id: account.id,
     email: account.email,
@@ -45,27 +40,10 @@ export function createFakeInternal(options: FakeInternalOptions = {}): FakeInter
     activeSessions: account.activeSessions ?? 0
   }));
 
-  const calls: FakeInternal["calls"] = { requested: [], verified: [], changes: [] };
-
-  const byEmail = (email: string): AccountSummary | undefined =>
-    accounts.find((account) => account.email.toLowerCase() === email.trim().toLowerCase());
+  const calls: FakeInternal["calls"] = { changes: [] };
 
   const api: InternalAccountsApi = {
     configured: true,
-
-    async requestCode(email: string): Promise<void> {
-      calls.requested.push(email);
-    },
-
-    async verifyCode(email: string, submitted: string) {
-      calls.verified.push(email);
-      const account = byEmail(email);
-      if (submitted !== code || !account) {
-        throw new InternalApiError(401, "invalid_request");
-      }
-
-      return { accountId: account.id, email: account.email, capabilities: account.capabilities };
-    },
 
     async listAccounts(query) {
       const search = (query.search ?? "").trim().toLowerCase();
@@ -79,7 +57,8 @@ export function createFakeInternal(options: FakeInternalOptions = {}): FakeInter
     },
 
     async findAccount(email: string) {
-      return byEmail(email) ?? null;
+      const wanted = email.trim().toLowerCase();
+      return accounts.find((entry) => entry.email.toLowerCase() === wanted) ?? null;
     },
 
     async changeCapability(accountId, change) {

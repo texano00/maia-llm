@@ -26,16 +26,10 @@ export const accountListSchema = z.object({
   accounts: z.array(accountSummarySchema)
 });
 
-export const verifyResultSchema = z.object({
-  accountId: z.string().min(1),
-  email: z.string(),
-  capabilities: z.array(capabilitySchema)
-});
-
 /**
  * Typed client for the product's `/internal/*` API. It is the portal's only way
- * to learn who exists, who is an operator, and to change a capability; the
- * token it carries never leaves the server half of the portal.
+ * to learn who exists and to change a capability; the token it carries never
+ * leaves the server half of the portal, and signing in does not use it.
  */
 
 export interface InternalClientOptions {
@@ -60,17 +54,9 @@ export class InternalApiError extends Error {
   }
 }
 
-export interface IdentityCheck {
-  accountId: string;
-  email: string;
-  capabilities: Capability[];
-}
-
 /** What the rest of the portal needs from the product; faked in tests. */
 export interface InternalAccountsApi {
   readonly configured: boolean;
-  requestCode(email: string): Promise<void>;
-  verifyCode(email: string, code: string): Promise<IdentityCheck>;
   listAccounts(query: {
     search?: string;
     limit?: number;
@@ -97,20 +83,6 @@ export class InternalClient implements InternalAccountsApi {
   /** False when the deployment did not configure the shared secret. */
   get configured(): boolean {
     return Boolean(this.options.token);
-  }
-
-  requestCode(email: string): Promise<void> {
-    return this.post("/internal/auth/request-code", { email }).then(() => undefined);
-  }
-
-  async verifyCode(email: string, code: string): Promise<IdentityCheck> {
-    const body = await this.post("/internal/auth/verify-code", { email, code });
-    const parsed = verifyResultSchema.safeParse(body);
-    if (!parsed.success) {
-      throw new InternalApiError(502, "invalid_response");
-    }
-
-    return parsed.data;
   }
 
   async listAccounts(query: {

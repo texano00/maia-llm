@@ -13,9 +13,9 @@ once the surface is complete.
 | `MAIA_PORTAL_ACCESS_TTL_MINUTES` | `60` | Access-token lifetime (spec cap) |
 | `MAIA_PORTAL_REFRESH_TTL_DAYS` | `30` | Refresh-token lifetime (spec cap) |
 | `MAIA_ADMIN_SESSION_HOURS` | `12` | Backoffice session lifetime |
-| `MAIA_WEB_INTERNAL_URL` | `http://maia-web:5173` | Product base URL the portal calls for identities and capabilities |
-| `MAIA_INTERNAL_TOKEN` | unset | Shared secret for the product's `/internal/*` API; unset means nobody can sign in |
-| `MAIA_ADMIN_PASSWORD` | ignored | Retired with the password login; a stale value logs a warning |
+| `MAIA_ADMIN_EMAIL` / `MAIA_ADMIN_PASSWORD` | unset | The backoffice administrator, seeded on first boot only. There is no self-service sign-up and no email sign-in here. |
+| `MAIA_WEB_INTERNAL_URL` | `http://maia-web:5173` | Product base URL the Accounts tab reads |
+| `MAIA_INTERNAL_TOKEN` | unset | Shared secret for the product's `/internal/*` API. Unset leaves the Accounts tab reporting the product as unreachable; everything else keeps working. |
 | `MAIA_REQUIRE_CLIENT_AUTH` | `false` | Enforce installation credentials on ingestion and configs routes |
 | `MAIA_PORTAL_HF_TOKEN` (or `HF_TOKEN`) | unset | Service credential used to build the catalogue snapshot |
 | `MAIA_CATALOGUE_REFRESH_HOURS` | `6` | Snapshot refresh interval |
@@ -30,11 +30,10 @@ itself ships: older clients post diagnostics without a token.
 | --- | --- | --- | --- |
 | POST | `/v1/installations` | none (rate limited by deployment) | Enroll an installation, issue an access/refresh pair |
 | POST | `/v1/installations/refresh` | refresh token | Rotate the pair; replay revokes the family |
-| POST | `/v1/admin/code` | none | Ask the product to email a sign-in code |
-| POST | `/v1/admin/session` | email + code | Verify through the product, sets an HttpOnly `maia_admin` cookie |
-| GET/DELETE | `/v1/admin/session` | operator session | Current operator / sign out |
-| GET | `/admin-api/accounts` | operator session | Accounts with capabilities and active runs |
-| POST | `/admin-api/accounts/:id/capabilities` | operator session | Grant or revoke `debug` / `operator` |
+| POST | `/v1/admin/session` | admin credentials | Sign in, sets an HttpOnly `maia_admin` cookie |
+| GET/DELETE | `/v1/admin/session` | admin session | Current admin / sign out |
+| GET | `/admin-api/accounts` | admin session | Accounts with capabilities and active runs |
+| POST | `/admin-api/accounts/:id/capabilities` | admin session | Grant or revoke `debug` / `operator` |
 | GET | `/v1/admin/installations` | admin session | List installations and last contact |
 | DELETE | `/v1/admin/installations/:id` | admin session | Revoke an installation |
 | GET | `/v1/config/catalogue` | installation token | Whole snapshot with ETag/304 |
@@ -84,39 +83,48 @@ Tabs, in order:
    version, so a stale editor gets `409 conflict` instead of overwriting.
 4. **Installations** — every enrollment with app version, platform, last contact
    and a revoke action.
-5. **Audit** — the append-only trail of operator actions.
+5. **Audit** — the append-only trail of administrator actions.
 
-### Operators and capabilities
+### Signing in
 
-The portal has no identities and no passwords. Signing in is the product's own
-email-code flow: `POST /v1/admin/code` asks the product to send a code, and
-`POST /v1/admin/session` returns the account id plus its capabilities. Only an
-account holding `operator` gets a session, and a verified non-operator sees the
-same answer as a wrong code, so the login cannot be used to find out who is an
-operator.
+The backoffice has one administrator, created on first boot from
+`MAIA_ADMIN_EMAIL` / `MAIA_ADMIN_PASSWORD`, and signs in with that email and
+password (`POST /v1/admin/session`). There is no self-service sign-up, and the
+portal sends no email: access is a deployment secret, not an account flow.
+
+Rotating the password means restarting with a new `MAIA_ADMIN_PASSWORD` against a
+fresh database, or updating the seeded row directly until a password-change screen
+exists. Signing out ends the `maia_admin` session immediately.
+
+### Capabilities
+
+The product's own accounts carry two capabilities, managed from the Accounts tab:
 
 - `debug` reveals the two developer settings in the product (diagnostics host and
-  usage reporting) and the values in `settings.get` / `config.get`.
-- `operator` implies `debug` and grants the portal itself.
-- The capability is re-read from the product on **every** portal request; a
-  revoked operator is refused on the next click and their session is ended.
+  usage reporting) and their values in `settings.get` / `config.get`.
+- `operator` implies `debug` — it marks somebody who works on the product. It
+  does **not** grant the portal: the backoffice is guarded by the administrator
+  above.
 
-Bootstrap on a fresh deployment: list the first operator in the product's
-`MAIA_OPERATOR_EMAILS`. That address receives `operator` on first sign-in (and at
-boot for an account that already exists); everybody else is granted from the
-Accounts tab.
+Changes are stored in the product immediately and are visible on that account's
+next request. Revoking the last `operator` is refused, so the product always has
+somebody who can see its developer settings.
+
+To grant the very first one without the Accounts tab, list the address in the
+product's `MAIA_OPERATOR_EMAILS`: that account receives `operator` on first
+sign-in, and at boot for an account that already exists. `MAIA_INTERNAL_TOKEN`
+must be set for the Accounts tab to work at all.
 
 ### Internal API (`/internal/*`)
 
 The product exposes a token-authenticated, server-to-server surface for the
-portal. It is not part of the RPC transport, never appears in nginx, and returns
-only identity, capabilities and a session count: no settings, conversations,
-images or key material.
+Accounts tab. It is not part of the RPC transport, never appears in nginx, and
+returns only identity, capabilities and a session count: no settings,
+conversations, images or key material. Nothing about signing in travels through
+it.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| POST | `/internal/auth/request-code` | Send a code with the product's own throttles and mail transport |
-| POST | `/internal/auth/verify-code` | Verify a code; answers `accountId`, `email`, `capabilities` |
 | GET | `/internal/accounts` | Paged list (`query`, `limit` 1..200, `offset`) |
 | POST | `/internal/accounts/:id/capabilities` | One action per call: `{grant}` or `{revoke}` plus `confirm: true` |
 

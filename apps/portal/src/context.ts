@@ -31,7 +31,7 @@ export interface AppContext {
   failures: FailureService;
   tokens: TokenService;
   admins: AdminAuthService;
-  /** The product's `/internal/*` API: the portal's only source of identities. */
+  /** The product's internal API, read by the accounts view. */
   internal: InternalClient;
   snapshot: SnapshotService;
   useCases: () => Promise<UseCaseSummary[]>;
@@ -110,8 +110,14 @@ export async function createAppContext(options: CreateAppContextOptions = {}): P
     ...(options.now ? { now: options.now } : {}),
   });
 
-  // Operators are product accounts with the `operator` capability; there is no
-  // portal-side account or password to seed.
+  // Bootstrap the single administrator from deployment configuration; the
+  // backoffice has no self-service sign-up.
+  if (config.adminEmail && config.adminPassword) {
+    await admins.seed(config.adminEmail, config.adminPassword);
+  }
+
+  // Accounts and capabilities live in the product; the backoffice reads them with
+  // a service token rather than with a person's identity.
   const internal = new InternalClient({
     baseUrl: config.webInternalUrl,
     token: config.internalToken,
