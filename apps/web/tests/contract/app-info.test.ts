@@ -42,6 +42,7 @@ describe("app.info", () => {
     expect(info.channel).toBe("stable");
   });
 
+  // `electron` and `chrome` were removed with the desktop app; keep them gone.
   it("has no desktop-only fields left", async () => {
     const result = await registry("0.11.0").invoke("app.info", {});
     if (!result.ok) {

@@ -4,8 +4,8 @@ import { App } from "./App";
 import { installWebBridge } from "../shared/web-bridge";
 import "../shared/theme.css";
 
-// Electron injects `window.maia` through the preload; in a plain browser the
-// same channels come from the web host over HTTP + SSE.
+// The web host answers `window.maia` over HTTP + SSE; the bridge installed here
+// is the only way the renderer reaches it.
 installWebBridge();
 
 const rootElement = document.getElementById("root");

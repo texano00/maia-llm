@@ -54,8 +54,8 @@ export class IpcRegistry {
   }
 
   /**
-   * Runs one channel with the same validation and error mapping used by IPC, so
-   * the web host can reuse every handler without Electron.
+   * Runs one channel with the same validation and error mapping used by the RPC
+   * transport, so a handler has exactly one way to be called.
    */
   async invoke(
     channel: IpcChannel,

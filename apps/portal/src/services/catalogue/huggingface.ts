@@ -42,7 +42,7 @@ export function modelPath(id: string): string {
 /**
  * Reads the open-weight catalogue server-side.
  *
- * Everything the desktop used to derive from the Hub is derived here instead, so
+ * Everything a client used to derive from the Hub is derived here instead, so
  * a client can browse with the Hub down and the same verdicts are shared by every
  * installation.
  */

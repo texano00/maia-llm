@@ -37,13 +37,13 @@ const isoTimestamp = (raw: unknown): string | undefined => {
 /**
  * Diagnostic sink and telemetry store used while developing and testing packaged
  * builds: batches are persisted (SQLite by default, see `db/`), echoed to stdout
- * so a desktop app running elsewhere can be watched live, and pruned once they
+ * so an installation running elsewhere can be watched live, and pruned once they
  * fall outside the retention window. No conversation content is expected here.
  */
 export interface DiagnosticsRouteOptions {
   /**
    * Resolves the calling installation. Present only when client authentication
-   * is enforced; an older desktop build would otherwise lose its diagnostics.
+   * is enforced; a client that never enrolled would otherwise lose its diagnostics.
    */
   authorize?: (request: FastifyRequest) => Promise<string | null>;
 }

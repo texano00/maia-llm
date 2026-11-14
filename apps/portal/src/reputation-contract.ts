@@ -2,7 +2,7 @@ import { z } from "zod";
 
 /**
  * The telemetry API is a standalone service: like `diagnostics.ts` it keeps its
- * own copies of the wire schemas instead of importing the desktop contracts
+ * own copies of the wire schemas instead of importing the product's contracts
  * package (different module resolution and deployment lifecycle).
  * Keep in sync with `packages/contracts/src/reputation.ts`.
  */

@@ -13,7 +13,7 @@ export interface UseCaseSummary {
  * The curated basic-mode list.
  *
  * A use case always ships its full ordered model list, even when some entries are
- * currently unsupported: the desktop decides which entry it can run and explains
+ * currently unsupported: the client decides which entry it can run and explains
  * the choice, instead of the server hiding a curated intent.
  */
 export function createUseCaseReader(db: SqlDatabase) {

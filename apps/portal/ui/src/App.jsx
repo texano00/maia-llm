@@ -1014,7 +1014,7 @@ function UseCases() {
             />
           </label>
           <p className="muted">
-            The desktop picks the first entry that the snapshot marks supported; unsupported
+            The catalogue picks the first entry that the snapshot marks supported; unsupported
             entries stay here and are skipped, never silently dropped.
           </p>
 

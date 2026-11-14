@@ -210,56 +210,38 @@ instead of giving up:
 
 ## Releasing
 
-### 1. Normal quit (window closed, Ctrl+Q, menu quit)
+### 1. The person stops a run
 
-The app interrupts the quit, warns first, then releases:
+`session.stop` ends the session, and the machine is destroyed before the answer
+returns: the product has no path that leaves a rental running behind a UI that
+says it stopped. The same call is used for the idle timeout, the cost cap and a
+failed boot, and the reason is recorded (`user`, `idle`, `cap`, `failure`,
+`reconciled`).
 
-1. `before-quit` and the window's `close` event are both routed through
-   `QuitCoordinator` (`src/main/bootstrap/quit.ts`).
-2. If any session still holds an instance, a modal asks
-   _"Closing Maia LLM will shut down the GPU it is renting"_, listing each GPU,
-   instance id and model. **Keep the app open** is the default button.
-3. On confirm, `sessions.endAll("app_exit")` is **awaited** (20 s deadline) before
-   the process is allowed to exit. The previous version fired that call and
-   exited immediately, so the HTTP request often never left the machine.
+### 2. The account goes away
 
-Closing the window on Windows/Linux is the same path: the `close` handler cancels
-the close, so the warning appears while the window is still on screen.
+Deleting an account ends its sessions first (`sessions.endAll("app_exit")`), so a
+GPU never outlives the account that rented it.
 
-### 2. Crash or force kill
+### 3. The product restarts
 
-No code in the app can run, so a separate process owns the cleanup:
+Nothing in the browser can release a machine, and the product may be replaced at
+any moment (a new image, a Watchtower pull, a crash), so release cannot depend on
+a clean shutdown:
 
-- On start with a vast.ai key present, the main process spawns
-  `out/main/guardian.js` **detached** with `ELECTRON_RUN_AS_NODE=1`. The API key
-  travels in the child's environment; it is never written to disk.
-- The app rewrites a lease (`<userData>/guardian/lease.json`, mode 0600) every
-  3 seconds with the instances it is renting. It names instance ids only.
-- The guardian polls the lease every 5 seconds and checks whether the owning pid
-  is alive (`process.kill(pid, 0)`).
-- When the app is gone, it `DELETE`s every instance in the lease, writes
-  `<userData>/guardian/teardown.json`, and exits.
-- The next start reads that report and logs
-  _"The GPU guardian released instances after the previous run ended unexpectedly"_
-  with the instance ids, so the event is visible instead of silent.
-- A clean quit removes the lease and sends `SIGTERM`, so the guardian stands down
-  instead of racing the app's own teardown.
+- Every session row carries the account, the instance id and a `maia:` label.
+- On boot, `reconcile()` lists every instance carrying a `maia:` label that no
+  stored session owns and destroys it, so billing stops as soon as the product is
+  back.
+- A session whose instance is still recorded is adopted rather than re-rented.
 
-### 3. Machine power loss
+### 4. Nobody comes back
 
-If the computer itself dies, the guardian dies with it and nothing can release the
-GPU until a machine that owns the API key acts. What remains:
-
-- **Next start**: `reconcile()` lists every instance carrying a `maia:` label that
-  no stored session owns and destroys it, so billing stops as soon as the app is
-  opened again.
-- **Manual**: `vastai show instances` / the vast.ai console list the orphaned
-  instance; `DELETE /api/v0/instances/{id}/` with the same API key destroys it.
-
-A truly immediate guarantee for that case needs a third party holding the key, for
-example a lease reaper in the shared telemetry service that destroys instances
-whose heartbeat stopped. That is a deployment decision (the service would need a
-vast.ai credential), so it is not part of the desktop app.
+If the machine holding the key never runs again, the orphaned instance stays
+until a human destroys it: `vastai show instances`, or the vast.ai console, then
+`DELETE /api/v0/instances/{id}/` with the same key. A hard guarantee for that case
+needs a third party holding the key — for example a reaper in the shared
+telemetry service — which is a deployment decision rather than product behaviour.
 
 ## Observability
 
@@ -270,6 +252,7 @@ vast.ai credential), so it is not part of the desktop app.
   (`Container log: …`) and the full tail travels with the telemetry event as
   `remoteLogs`. `"the port never opened"` is not a diagnosis; the container's own
   traceback is.
-- The guardian writes its report file; the app surfaces it on the next boot.
+- A released orphan found at boot is logged with its instance id, so the event is
+  visible instead of silent.
 - `GET /v1/gpus/:machineId/reports` on the shared service keeps the attempt
   history per machine.

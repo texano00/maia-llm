@@ -4,8 +4,10 @@
 
 - Node.js 22 or newer
 - npm 10 or newer
-- Docker Desktop (or Docker Engine + Compose) for local PostgreSQL and MinIO
-- Windows 10/11 x64 for the shipping desktop target
+- Docker Engine + Compose, for running the portal locally
+
+The product is a web application. There is no desktop build, no installer and no
+signed binary to produce.
 
 ## Install
 
@@ -19,172 +21,72 @@ That Compose file builds the portal from source for local use. The production
 deployment (GHCR images, TLS, unattended updates) is documented in
 [docs/portal-deploy.md](portal-deploy.md).
 
-`.env` is for the telemetry backend only. Provider credentials belong in the
-desktop app's OS-protected credential vault and must never be committed.
+`.env` is for the portal. Provider keys are per account and entered in the
+product's own settings screen: they are encrypted with `MAIA_CREDENTIAL_KEY` and
+never committed.
 
 ## Run
 
 ```bash
-# Desktop (mock providers first)
-npm run -w @maia/desktop dev
-MAIA_PROVIDER_MODE=mock npm run -w @maia/desktop dev
+# The product: server + renderer, http://127.0.0.1:5173
+npm run dev
 
-# Telemetry API + GPU reputation API (one service, port 8787)
+# Simulated providers instead of real rentals (fixed $25 wallet, no vast.ai calls)
+MAIA_PROVIDER_MODE=mock npm run dev
+
+# The portal: backoffice at /admin, API on :8787
 npm run -w @maia/portal dev
 ```
 
-The service also stores which GPU machines start reliably; the desktop app reads
-and writes it to skip broken hosts. See
-[docs/gpu-reputation-api.md](gpu-reputation-api.md) for the endpoints.
+`npm run dev` builds the renderer into `out/renderer` and bundles the server into
+`out/server.js`; reload the browser after a renderer edit, because an old chunk
+hash 404s. The product server must run with `apps/web` as its working directory or
+it cannot find `out/renderer`.
 
-Both telemetry and GPU verdicts live in one SQLite database
+The portal also stores which GPU machines start reliably; the product reads and
+writes that verdict. See [docs/gpu-reputation-api.md](gpu-reputation-api.md) for
+the endpoints.
+
+Telemetry and GPU verdicts live in one SQLite database
 (`MAIA_DATABASE_FILE`, default `./var/maia.sqlite`). The storage layer is split
 into a driver-free port, dialect-free repositories and a single SQLite adapter, so
 moving to PostgreSQL or MySQL later means writing one adapter — see
 [docs/data-storage.md](data-storage.md).
 
-`npm run -w @maia/desktop dev` rebuilds `better-sqlite3` for the Electron ABI
-before starting. Node-based unit tests expect the Node ABI; after running the
-desktop app, restore it with `npm rebuild better-sqlite3` before running
-`npm test` again.
+## The transport
 
-## Run it in a browser
+The renderer talks to the product server through `window.maia`, installed by
+`apps/web/src/renderer/shared/web-bridge.ts`:
 
-The renderer does not depend on Electron: the same screens are served by a small
-Node host that reuses every main-process service.
+- `POST /rpc` carries `{ channel, payload }` and reuses the same channel registry
+  the service layer exposes, so every handler is validated and error-mapped once.
+- `GET /events` streams `chat.*` payloads. Events are polled rather than taken
+  over SSE: proxied and forwarded ports buffer streams, which silently drops
+  token-by-token updates.
 
-```bash
-# build the renderer, then serve it with the same channels over HTTP
-npm run -w @maia/desktop web:dev
-# → http://127.0.0.1:5173  (mock providers, data in .maia-web/)
-```
-
-| Variable                    | Default     | Purpose                                      |
-| --------------------------- | ----------- | -------------------------------------------- |
-| `MAIA_PROVIDER_MODE`        | `mock`      | `live` rents real GPUs (needs a vast.ai key) |
-| `MAIA_WEB_PORT`             | `5173`      | HTTP port                                    |
-| `MAIA_WEB_HOST`             | `127.0.0.1` | Bind address (loopback only)                 |
-| `MAIA_WEB_DATA`             | `.maia-web` | SQLite database directory                    |
-| `VAST_API_KEY` / `HF_TOKEN` | –           | Imported into the credential store at start  |
-
-How the transport differs, and why:
-
-- `POST /rpc` carries `{ channel, payload }` and reuses the Electron IPC registry,
-  including the Zod schemas and error mapping — one handler set, two transports.
-- Chat and update events are **polled** from `/events?since=<cursor>`, not streamed
-  over SSE. Proxied and forwarded ports buffer event streams, which silently drops
-  token-by-token updates; polling every 350 ms works everywhere.
-- Credentials live in memory only (`EnvSecretVault`): the browser build never
-  touches the OS keyring, and nothing is persisted outside `.maia-web/maia.db`
-  and `.maia-web/images/`.
-- Attached images are written next to the database — `.maia-web/images/<chat>/`
-  here, `userData/images/<chat>/` in the packaged app — and only their metadata
-  (id, format, width, height) goes into SQLite. Deleting a chat removes the
-  folder. Nothing is uploaded anywhere: images reach the rented model over its
-  own endpoint and stay on disk afterwards so the transcript survives.
-- In-app updates are disabled; the "Check for updates" button reports that updates
-  belong to the installed desktop build.
-
-Only the Ollama/llama-compatible local endpoint is desktop-only: it binds a
-loopback port on the user's machine, which has no meaning in a browser tab.
-
-## Verify
+## Checks
 
 ```bash
 npm run lint
 npm run typecheck
-npm test
-npm run test:contract
-npm run test:integration
+npx vitest run apps/web/tests apps/portal/tests
+npm run build                          # product: renderer + server
+npm run -w @maia/portal build:admin    # backoffice SPA → apps/portal/public/admin
 ```
 
-Live GPU calls are prohibited in CI and should only be used in explicit manual
-smoke tests with a low session cap.
+There is no interactive GUI in CI: the renderer is tested through pure helpers
+(`apps/web/tests/unit`), the server through contract tests that drive the real
+channel registry, and layout numbers through
+`apps/web/tests/unit/responsive-layout.test.ts`.
 
-## Verifying a layout change at phone widths
+## Deploying
 
-The product and the backoffice are one responsive surface each, so a layout change
-can break a phone without touching the desktop. Two things catch it:
+An update is a deployment, not a download:
 
-- `apps/web/tests/contract/responsive-layout.test.ts` — asserts the shared numbers
-  (`apps/web/src/renderer/shared/layout.ts`: phone tier at 640 px, 44 px tap
-  targets, 16 px body text), that no stylesheet declares a page-level `min-width`
-  above the phone floor, that no action is revealed only on hover, that both HTML
-  shells use `viewport-fit=cover`, and that every backoffice table cell carries a
-  `data-label` for its stacked phone view.
-- `specs/008-mobile-ready-surfaces/quickstart.md` — how to run both surfaces at
-  320/360/390/414/768 px and what to look at on each one.
-
-When adding a control, remember the two rules the stylesheets cannot enforce for
-you: it needs a 44 px tap area, and anything currently shown on hover needs a tap
-route as well.
-
-## Installer and in-app updates
-
-The app is served, so an update is a deployment: there is no installer, feed
-or auto-updater in the product.
-
-To exercise the banner without publishing, run the desktop in development mode
-with `MAIA_UPDATE_SIMULATE_VERSION=9.9.9`.
-
-### Watching a packaged build from another machine
-
-The telemetry API doubles as a diagnostic sink during testing. Start it so it
-accepts connections from the Windows host:
-
-```bash
-# terminal 1: keep it running while you test
-TELEMETRY_HOST=0.0.0.0 npm run -w @maia/portal dev
-```
-
-Then open **Settings → Telemetry and diagnostics host** in the app and confirm the
-host (default `https://api.maiallm.com`, the hosted backend; use
-`http://localhost:8787` when running `npm run -w @maia/portal dev`). Every app
-log line is mirrored there, so any Windows install can be observed live without
-editing environment variables. `MAIA_DIAGNOSTIC_LOG_URL` still overrides the
-stored value at startup.
-
-The endpoint echoes events as `[diag] <time> <level> <message>`, keeps the last
-1000 lines in memory, and returns them from
-`GET /v1/diagnostics/logs?limit=200`. Nothing is persisted. `MAIA_UPDATE_FEED_URL`
-likewise overrides the update feed when testing a mirror.
-
-### Pointing the desktop at a local portal
-
-The catalogue ships from the portal (see `docs/portal.md`), and the app defaults
-to the hosted one at `https://api.maiallm.com`; `MAIA_PORTAL_URL=` (empty) falls
-back to listing the Hub. To develop against a local one:
-
-```bash
-# terminal 1: the portal (seeds an admin and refreshes on boot)
-MAIA_ADMIN_EMAIL=admin@maia.test MAIA_ADMIN_PASSWORD='correct-horse-1' \
-  TELEMETRY_PORT=8791 npm run -w @maia/portal dev
-
-# terminal 2: the desktop against it
-MAIA_PORTAL_URL=http://127.0.0.1:8791 npm run -w @maia/desktop dev
-```
-
-The first catalogue read enrolls the installation silently and writes
-`<userData>/portal.json` (mode 0600). Delete that file to simulate a fresh
-install; `MAIA_PORTAL_URL=` (empty) disables the portal and falls back to listing
-the Hub directly, which needs a Hugging Face token for anything gated.
-
-## Brand assets
-
-`assets/logo.png` is the source artwork — the emblem on a transparent background.
-Everything else is generated from it:
-
-```bash
-npm run assets:logo
-```
-
-| File                                             | Size                     | Used by                                    |
-| ------------------------------------------------ | ------------------------ | ------------------------------------------ |
-| `infra/landing/logo.png`                | 512×512, padded square   | Landing page logo |
-| `apps/web/src/renderer/assets/logo-mark.png` | 128×128, padded square   | Sidebar brand in the app                   |
-| `docs/logo.png`                                  | 560 px wide, aspect kept | README header                              |
-
-`scripts/generate-logo-assets.mjs` trims the transparent margin first, then pads
-the square targets with transparency so the emblem is never stretched, and
-quantises the palette to keep the files small (`docs/logo.png` is ~110 kB instead
-of ~430 kB for the same image at full colour).
+- `.github/workflows/images.yml` builds both images on every main merge and pushes
+  `latest`, `<version>` and `sha-<12>`. Watchtower polls `latest`.
+- Bump `version` in `package.json` and `apps/web/package.json` (and
+  `apps/portal/package.json` when the backoffice changed) before a release wave.
+  The workflow refuses to overwrite an existing version tag, which is what catches
+  a forgotten bump.
+- See [docs/release-process.md](release-process.md).

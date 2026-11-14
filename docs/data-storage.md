@@ -1,8 +1,8 @@
 # Data storage
 
-The telemetry API (`apps/portal`) stores three things: diagnostic batches sent
-by the desktop app, the shared GPU reputation, and the start-up failures reported
-by clients. All live in one SQLite database on the server.
+The telemetry API (`apps/portal`) stores three things: diagnostic batches sent by
+installations, the shared GPU reputation, and the start-up failures reported by
+clients. All live in one SQLite database on the server.
 
 ```bash
 npm run -w @maia/portal dev      # migrates and serves on :8787
@@ -17,8 +17,9 @@ npm run -w @maia/portal dev      # migrates and serves on :8787
 | `MAIA_REPUTATION_FILE`          | unset               | Legacy JSON file, imported once and archived to `*.imported`          |
 
 The driver is Node's built-in `node:sqlite` (Node 22.13+ / 23.4+), not a native
-addon: the service installs with no compiler step, and the desktop app rebuilding
-`better-sqlite3` for Electron's ABI cannot break it.
+addon: the service installs with no compiler step. The product uses `better-sqlite3`
+instead, deliberately — two services, two drivers, and each one has the API its own
+code needs.
 
 ## Schema
 

@@ -33,7 +33,7 @@ export interface PortalAuthRouteOptions {
 /**
  * Enrollment, token refresh and the administrator session.
  *
- * Enrollment is deliberately open (rate limited by the deployment): a desktop
+ * Enrollment is deliberately open (rate limited by the deployment): an
  * installation must be able to obtain a credential without an account. What it
  * cannot do is keep one after an administrator revokes it.
  */

@@ -32,8 +32,8 @@ export interface ServerConfig {
    */
   internalToken: string | null;
   /**
-   * Enforce installation credentials on ingestion routes. Off until desktop
-   * enrollment ships, so an older client does not lose its diagnostics.
+   * Enforce installation credentials on ingestion routes. Off by default so a
+   * client that never enrolled still reaches its diagnostics.
    */
   requireClientAuth: boolean;
   /** Bootstrap administrator, seeded on first boot when both are set. */
