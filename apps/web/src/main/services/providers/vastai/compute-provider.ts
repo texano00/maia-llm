@@ -492,6 +492,22 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
       }
     },
 
+    /**
+     * Whether vast.ai still lists this machine.
+     *
+     * `getInstance` throws when the instance is not visible any more, which is the
+     * same question asked from the other side.
+     */
+    async instanceExists(instanceId) {
+      const api = await client();
+      try {
+        await api.getInstance(instanceId);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+
     async destroyInstance(instanceId) {
       endpoints.delete(instanceId);
       const api = await client();

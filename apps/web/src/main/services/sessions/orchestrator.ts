@@ -58,6 +58,14 @@ export interface ComputeProvider {
    */
   getInstanceLogs?(instanceId: number): Promise<string | null>;
   /**
+   * Whether the provider still lists this machine.
+   *
+   * Used for one question only: may this run be closed? A run that says "ended"
+   * while the provider still bills for it is the failure this product must never
+   * ship, so the answer is checked before the record is closed.
+   */
+  instanceExists?(instanceId: number): Promise<boolean>;
+  /**
    * True when the failure means "that machine is gone" rather than "this request is
    * wrong", so the session can be retried on another offer instead of failing.
    */
@@ -219,6 +227,9 @@ export class SessionOrchestrator {
   private readonly runtimes = new Map<string, SessionRuntime>();
   /** In-flight boot sequences, so a session can be awaited or released safely. */
   private readonly provisioning = new Map<string, Promise<void>>();
+  /** Runs whose machine could not be confirmed released, retried until it is. */
+  private readonly pendingReleases = new Map<string, number>();
+  private releaseTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(private readonly options: SessionOrchestratorOptions) {
     this.now = options.now ?? (() => Date.now());
@@ -1131,12 +1142,19 @@ export class SessionOrchestrator {
     );
 
     if (runtime.session.instanceId !== null) {
-      await this.options.compute.destroyInstance(runtime.session.instanceId).catch((error: unknown) => {
-        this.options.logger?.warn("Instance teardown failed; it will be reconciled on next start", {
-          sessionId,
-          message: error instanceof Error ? error.message : String(error)
-        });
-      });
+      const release = await this.release(runtime.session.instanceId);
+      if (release === "unconfirmed") {
+        // The machine may still be billing. A run that says "terminated" while the
+        // provider still charges for it is the one thing this product must never
+        // show, so the record stays open and stoppable until the release lands.
+        this.options.store.transition(sessionId, "ending");
+        this.pendingReleases.set(sessionId, runtime.session.instanceId);
+        this.startReleaseRetry();
+        throw new SessionError(
+          "PROVIDER_UNAVAILABLE",
+          "The GPU could not be confirmed released; it is still marked as running so you can retry stopping it."
+        );
+      }
     }
 
     this.options.store.transition(sessionId, reason === "failure" ? "failed" : "ended", {
@@ -1149,8 +1167,76 @@ export class SessionOrchestrator {
       this.recordMetrics(runtime, ended, metricOutcome(reason));
       this.options.onRunFinished?.(ended);
     }
+    this.pendingReleases.delete(sessionId);
     this.runtimes.delete(sessionId);
-    return ended;  }
+    return ended;
+  }
+
+  /**
+   * Releases one instance and says whether that is certain.
+   *
+   * `released` covers "destroyed" and "already gone"; `unconfirmed` means the
+   * provider refused or was unreachable *and* still lists the machine, which is the
+   * only case where money may be flowing without a run to show for it.
+   */
+  private async release(instanceId: number): Promise<"released" | "unconfirmed"> {
+    try {
+      await this.options.compute.destroyInstance(instanceId);
+      return "released";
+    } catch (error) {
+      this.options.logger?.warn("Instance teardown failed; keeping the run open", {
+        instanceId,
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
+
+    const exists = await this.options.compute.instanceExists?.(instanceId).catch(() => true);
+
+    // No way to ask the provider: assume the worst and keep the run open. A phantom
+    // "terminated" costs somebody money; a phantom "running" costs a Stop click.
+    return exists === false ? "released" : "unconfirmed";
+  }
+
+  /**
+   * Retries the releases that could not be confirmed, until they are.
+   *
+   * Runs once a minute while anything is pending, and stops when the list empties,
+   * so a provider outage delays a teardown instead of losing it.
+   */
+  private startReleaseRetry(): void {
+    if (this.releaseTimer !== null) {
+      return;
+    }
+
+    this.releaseTimer = setInterval(() => {
+      void this.retryPendingReleases();
+    }, 60_000);
+    this.releaseTimer.unref?.();
+  }
+
+  private async retryPendingReleases(): Promise<void> {
+    for (const [sessionId, instanceId] of [...this.pendingReleases]) {
+      if ((await this.release(instanceId)) === "unconfirmed") {
+        continue;
+      }
+
+      this.pendingReleases.delete(sessionId);
+      const stored = this.options.store.get(sessionId);
+      if (stored && ["ending", "active", "ready", "estimated", "provisioning"].includes(stored.state)) {
+        this.options.store.transition(sessionId, "ended", {
+          endedAt: new Date(this.now()).toISOString(),
+          endReason: "reconciled"
+        });
+      }
+      this.runtimes.delete(sessionId);
+      this.options.logger?.warn("Released a GPU after a retry", { sessionId, instanceId });
+    }
+
+    if (this.pendingReleases.size === 0 && this.releaseTimer !== null) {
+      clearInterval(this.releaseTimer);
+      this.releaseTimer = null;
+    }
+  }
 
   /**
    * Ends a run this process is not currently driving.
@@ -1169,12 +1255,15 @@ export class SessionOrchestrator {
     }
 
     if (stored.instanceId !== null) {
-      await this.options.compute.destroyInstance(stored.instanceId).catch((error: unknown) => {
-        this.options.logger?.warn("Instance teardown failed; it will be reconciled on next start", {
-          sessionId,
-          message: error instanceof Error ? error.message : String(error)
-        });
-      });
+      const release = await this.release(stored.instanceId);
+      if (release === "unconfirmed") {
+        this.pendingReleases.set(sessionId, stored.instanceId);
+        this.startReleaseRetry();
+        throw new SessionError(
+          "PROVIDER_UNAVAILABLE",
+          "The GPU could not be confirmed released; it is still marked as running so you can retry stopping it."
+        );
+      }
     }
 
     this.options.store.appendEvent(
@@ -1217,7 +1306,17 @@ export class SessionOrchestrator {
 
     for (const orphan of orphans) {
       if (orphan.instanceId !== null) {
-        await this.options.compute.destroyInstance(orphan.instanceId).catch(() => undefined);
+        const release = await this.release(orphan.instanceId);
+        if (release === "unconfirmed") {
+          // Money may still be flowing. Keep the row open — and therefore visible and
+          // stoppable — and retry the release instead of declaring it ended.
+          this.pendingReleases.set(orphan.id, orphan.instanceId);
+          this.options.logger?.warn("Could not release an orphaned instance; keeping it visible", {
+            sessionId: orphan.id,
+            instanceId: orphan.instanceId
+          });
+          continue;
+        }
       }
 
       this.options.store.transition(orphan.id, "ended", {
@@ -1226,6 +1325,10 @@ export class SessionOrchestrator {
       });
       this.runtimes.delete(orphan.id);
       reconciled += 1;
+    }
+
+    if (this.pendingReleases.size > 0) {
+      this.startReleaseRetry();
     }
 
     if (reconciled > 0) {

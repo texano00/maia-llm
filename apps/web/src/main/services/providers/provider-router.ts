@@ -167,6 +167,16 @@ export function createProviderRouter(options: ProviderRouterOptions): ProviderRo
       );
     },
 
+    async instanceExists(instanceId) {
+      const known = owner(instanceId);
+      const backend = (known ?? (await resolve().catch(() => null))?.backend ?? null)?.compute ?? null;
+      if (!backend?.instanceExists) {
+        return true;
+      }
+
+      return backend.instanceExists(instanceId);
+    },
+
     destroyInstance(instanceId) {
       return byInstance(instanceId, (backend) => (id) => backend.compute.destroyInstance(id));
     },

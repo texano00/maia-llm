@@ -1,6 +1,6 @@
 {
   "name": "maia-llm",
-  "version": "0.11.6",
+  "version": "0.11.7",
   "private": true,
   "license": "Apache-2.0",
   "type": "module",
@@ -22,7 +22,8 @@
     "test:integration": "vitest run --passWithNoTests apps/web/tests/integration apps/portal/tests/integration",
     "test:telemetry-allowlist": "vitest run apps/portal/tests/contract/telemetry-allowlist.test.ts",
     "format": "prettier --write .",
-    "assets:logo": "node scripts/generate-logo-assets.mjs"
+    "assets:logo": "node scripts/generate-logo-assets.mjs",
+    "test:e2e": "node scripts/e2e/models-flow.mjs"
   },
   "devDependencies": {
     "@eslint/js": "9.39.5",
