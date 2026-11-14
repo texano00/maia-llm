@@ -29,3 +29,17 @@ export function toVisibleStatus(state: SessionState): VisibleStatus {
 export function isChatEligible(state: SessionState): boolean {
   return state === "active";
 }
+
+/**
+ * A run that can still be stopped: anything holding a machine, including one that is
+ * still initializing. A boot that never finishes is exactly when somebody wants the
+ * Stop button.
+ */
+export function isStoppable(state: SessionState): boolean {
+  return (
+    state === "estimated" ||
+    state === "provisioning" ||
+    state === "ready" ||
+    state === "active"
+  );
+}
