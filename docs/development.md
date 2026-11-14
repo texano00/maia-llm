@@ -101,6 +101,24 @@ npm run test:integration
 Live GPU calls are prohibited in CI and should only be used in explicit manual
 smoke tests with a low session cap.
 
+## Verifying a layout change at phone widths
+
+The product and the backoffice are one responsive surface each, so a layout change
+can break a phone without touching the desktop. Two things catch it:
+
+- `apps/web/tests/contract/responsive-layout.test.ts` — asserts the shared numbers
+  (`apps/web/src/renderer/shared/layout.ts`: phone tier at 640 px, 44 px tap
+  targets, 16 px body text), that no stylesheet declares a page-level `min-width`
+  above the phone floor, that no action is revealed only on hover, that both HTML
+  shells use `viewport-fit=cover`, and that every backoffice table cell carries a
+  `data-label` for its stacked phone view.
+- `specs/008-mobile-ready-surfaces/quickstart.md` — how to run both surfaces at
+  320/360/390/414/768 px and what to look at on each one.
+
+When adding a control, remember the two rules the stylesheets cannot enforce for
+you: it needs a 44 px tap area, and anything currently shown on hover needs a tap
+route as well.
+
 ## Installer and in-app updates
 
 The app is served, so an update is a deployment: there is no installer, feed

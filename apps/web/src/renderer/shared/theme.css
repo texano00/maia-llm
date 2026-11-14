@@ -2559,3 +2559,462 @@ button.danger:hover:not(:disabled) {
   cursor: pointer;
 }
 
+
+/* ---------------------------------------------------------------------------
+   Mobile layout (specs/008-mobile-ready-surfaces)
+
+   Three tiers, keyed on width and nothing else: phone (up to 640 px), tablet
+   (641-1023 px, which the earlier @media blocks already handle) and desktop.
+   The numbers here are mirrored in shared/layout.ts and asserted by
+   apps/web/tests/contract/responsive-layout.test.ts, so a breakpoint cannot
+   drift away from the component that depends on it.
+
+   Two rules shape everything below:
+
+   - a phone gets one column, and no box may refuse to shrink (min-width: 0);
+   - a finger needs 44 px, and hover does not exist, so nothing important may be
+     hidden until a pointer arrives.
+--------------------------------------------------------------------------- */
+:root {
+  --tap-target: 44px;
+  --tap-gap: 8px;
+  --keyboard-inset: 0px;
+}
+
+html {
+  /* The root size the whole rem scale hangs from. 16 px is the floor the contract
+     sets: below it, mobile browsers zoom text fields on focus. */
+  font-size: 16px;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  /* dvh follows the browser chrome shrinking and growing; vh stays for engines
+     that do not know it. */
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+.app-shell {
+  height: 100vh;
+  height: 100dvh;
+}
+
+/* Touch tiers: a control is at least a fingertip, and neighbours keep their
+   distance so a thumb cannot hit two actions at once. Desktop is left alone. */
+@media (max-width: 1023px) {
+  .icon-button,
+  .icon-mini,
+  .info-trigger,
+  .theme-toggle,
+  .account-trigger {
+    min-width: var(--tap-target);
+    min-height: var(--tap-target);
+  }
+
+  .icon-button,
+  .icon-mini {
+    width: var(--tap-target);
+    height: var(--tap-target);
+  }
+
+  /* Every control, not only the ones with a shared class: the product has plain
+     buttons inside cards, and a 35 px one is the same miss as a 32 px icon. */
+  button,
+  select,
+  textarea,
+  input:not([type="checkbox"]):not([type="radio"]):not([type="file"]) {
+    min-height: var(--tap-target);
+  }
+
+  input[type="checkbox"],
+  input[type="radio"] {
+    /* The label around it is the real target; the box itself still has to be
+       big enough to aim at. */
+    width: 1.35rem;
+    height: 1.35rem;
+  }
+
+  /* A checkbox row is the tap target, not the box inside it. */
+  .inline-field {
+    min-height: var(--tap-target);
+  }
+
+  .inline-field > input[type="checkbox"],
+  .inline-field > input[type="radio"] {
+    flex: 0 0 auto;
+  }
+
+  .nav-link,
+  .ghost-button,
+  .link-button {
+    min-height: var(--tap-target);
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .notifications-actions .ghost-button,
+  .history-head-actions .ghost-button {
+    min-height: var(--tap-target);
+  }
+
+  input,
+  select,
+  textarea {
+    /* 16 px stops iOS from zooming the page when a field takes focus. */
+    font-size: max(16px, 1rem);
+  }
+}
+
+@media (max-width: 640px) {
+  /* One column: the sidebar becomes a bar above the content (the 880 px rule),
+     and here it loses the padding a phone cannot spare. */
+  .app-shell {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .sidebar {
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    padding-top: max(0.5rem, env(safe-area-inset-top));
+    border-right: 0;
+    border-bottom: 1px solid var(--layer-3);
+  }
+
+  .brand {
+    gap: 0.5rem;
+  }
+
+  .sidebar nav {
+    /* Four destinations fit at 320 px; if a fifth ever appears the strip scrolls
+       on its own instead of widening the page. */
+    gap: 0.15rem;
+    max-width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .sidebar nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .nav-link {
+    gap: 0.3rem;
+    padding: 0.6rem 0.55rem;
+    font-size: 0.92rem;
+    white-space: nowrap;
+  }
+
+  .topbar {
+    padding: 0.5rem 0.75rem 0;
+  }
+
+  .topbar-actions {
+    width: 100%;
+    gap: var(--tap-gap);
+    justify-content: flex-end;
+  }
+
+  /* The address is one tap away in the menu; keeping it in the header would push
+     the four controls off a 320 px screen. */
+  .account-trigger-email {
+    display: none;
+  }
+
+  .account-trigger {
+    max-width: none;
+    padding: 0.35rem 0.5rem;
+  }
+
+  .balance-badge {
+    min-width: 0;
+    padding: 0 0.4rem;
+  }
+
+  .page {
+    padding: 1rem 0.85rem 1.5rem;
+    /* Headings and deep-linked sections must clear the sticky furniture. */
+    scroll-padding-top: calc(var(--tap-target) + 0.75rem);
+  }
+
+  .page h1 {
+    font-size: 1.65rem;
+  }
+
+  .page .lede {
+    font-size: 0.95rem;
+  }
+
+  /* Panels that drop from the header become sheets that fit the screen and scroll
+     inside themselves, never widening the page. */
+  .info-panel,
+  .account-panel,
+  .balance-panel,
+  .notifications-popover {
+    position: fixed;
+    top: auto;
+    right: 0.5rem;
+    left: 0.5rem;
+    bottom: calc(0.5rem + env(safe-area-inset-bottom));
+    width: auto;
+    max-height: min(70vh, 70dvh);
+    overflow-y: auto;
+    z-index: 61;
+  }
+
+  .notifications-popover {
+    top: calc(var(--tap-target) + 1rem);
+    bottom: auto;
+    max-height: min(60vh, 60dvh);
+  }
+
+  .notifications-actions {
+    gap: var(--tap-gap);
+  }
+
+  /* Chat: the rail is a drawer, so the transcript gets the whole width. */
+  .chat-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.75rem;
+  }
+
+  .chat-history.rail {
+    display: none;
+  }
+
+  .chat-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 59;
+    padding: 0;
+    border: 0;
+    background: var(--backdrop);
+  }
+
+  .chat-history {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 60;
+    width: min(19rem, 86vw);
+    max-height: none;
+    padding: 0.85rem;
+    padding-top: max(0.85rem, env(safe-area-inset-top));
+    padding-bottom: max(0.85rem, env(safe-area-inset-bottom));
+    border-radius: 0 0.9rem 0.9rem 0;
+    box-shadow: 0 24px 60px var(--shadow);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .history-item,
+  .history-rename {
+    min-height: var(--tap-target);
+  }
+
+  .history-row {
+    gap: 0.25rem;
+  }
+
+  .history-actions {
+    gap: var(--tap-gap);
+  }
+
+  .session-bar {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  /* The model picker is the one control in the bar that must stay wide enough to
+     read a model id: label above, picker below, full width. */
+  .session-bar .inline-field:first-of-type {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.2rem;
+    width: 100%;
+  }
+
+  .session-bar select {
+    flex: 1 1 auto;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .transcript {
+    padding-right: 0;
+  }
+
+  .bubble {
+    padding: 0.8rem 0.9rem;
+    font-size: 0.95rem;
+  }
+
+  /* The composer follows the keyboard: --keyboard-inset is written by
+     useKeyboardInset, and the safe area keeps it above the home indicator. */
+  .composer {
+    position: sticky;
+    bottom: 0;
+    z-index: 10;
+    padding-bottom: calc(0.35rem + env(safe-area-inset-bottom) + var(--keyboard-inset));
+    background: linear-gradient(to bottom, transparent, var(--surface-0) 35%);
+  }
+
+  .composer textarea {
+    min-height: 3rem;
+  }
+
+  .composer-attachments {
+    flex-wrap: wrap;
+  }
+
+  .composer-attachment .icon-mini {
+    width: var(--tap-target);
+    height: var(--tap-target);
+  }
+
+  .update-actions {
+    flex-wrap: wrap;
+    gap: var(--tap-gap);
+  }
+
+  .update-actions button,
+  .config-actions button,
+  .config-import {
+    flex: 1 1 auto;
+  }
+
+  /* Settings: one column, full-width fields, and the action under them. */
+  .settings-card,
+  .settings-card-stacked,
+  .settings-section {
+    padding: 0.9rem;
+  }
+
+  .settings-card-stacked {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .field input,
+  .field select,
+  .field textarea,
+  .inline-field select {
+    width: 100%;
+  }
+
+  .settings-section summary {
+    gap: 0.35rem;
+    min-height: var(--tap-target);
+  }
+
+  .settings-section-title,
+  .settings-section-summary {
+    overflow-wrap: anywhere;
+  }
+
+  /* Runs and catalogue: one card per row, actions full width. */
+  .models-head,
+  .toolbar {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .model-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.5rem;
+  }
+
+  .model-row .update-actions,
+  .model-row button {
+    width: 100%;
+  }
+
+  .catalogue-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .catalogue-card,
+  .panel,
+  .estimate-card {
+    padding: 0.9rem;
+  }
+
+  .estimate-card .update-actions button {
+    flex: 1 1 100%;
+  }
+
+  /* Access page: the first screen most people ever see. */
+  .access-shell {
+    padding: 1rem 0.85rem;
+    padding-top: max(1rem, env(safe-area-inset-top));
+    padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  }
+
+  .access-card {
+    width: 100%;
+    padding: 1.1rem;
+  }
+
+  .access-card h1 {
+    font-size: 1.6rem;
+  }
+
+  .access-form button {
+    width: 100%;
+    min-height: var(--tap-target);
+  }
+
+  .access-actions {
+    flex-wrap: wrap;
+    gap: var(--tap-gap);
+  }
+
+  .access-fineprint {
+    font-size: 0.82rem;
+  }
+
+  /* Wide content scrolls inside itself: the code block and the markdown table are
+     the two places where a long line is legitimately wider than a phone. */
+  .code-block,
+  .md-table-wrap {
+    max-width: 100%;
+  }
+
+  .code-body {
+    overflow-x: auto;
+  }
+
+  .fatal {
+    padding: 1.25rem 0.85rem;
+  }
+
+  .onboarding-overlay {
+    /* A tall card on a short screen scrolls, and the buttons stay reachable. */
+    align-items: start;
+    padding: 0.85rem;
+    padding-top: max(0.85rem, env(safe-area-inset-top));
+    overflow-y: auto;
+  }
+
+  .onboarding-card {
+    margin: 0;
+    padding: 1rem;
+  }
+}
+
+/* The drawer, the popovers and the run indicator are affordances, not decoration:
+   anybody who asked the system for less motion gets none of it. */
+@media (prefers-reduced-motion: reduce) {
+  .chat-history,
+  .info-panel,
+  .account-panel,
+  .balance-panel,
+  .notifications-popover,
+  .models-nav-indicator {
+    transition: none;
+    animation: none;
+  }
+}

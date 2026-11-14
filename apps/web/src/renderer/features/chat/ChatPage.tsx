@@ -1,5 +1,5 @@
-import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import type {
   ChatImage,
   ConversationDetail,
@@ -9,6 +9,8 @@ import type {
 import { useWorkspace } from "../../shared/session/WorkspaceProvider";
 import { useUiPreferences } from "../../shared/preferences/useUiPreferences";
 import { updatePreferences } from "../../shared/preferences/store";
+import { usePhoneLayout } from "../../shared/useMediaQuery";
+import { useKeyboardInset } from "../../shared/useKeyboardInset";
 import { MessageContent } from "./MessageContent";
 import { ReasoningPanel } from "./ReasoningPanel";
 import { defaultSession, readySessions, sessionForModel } from "./ready";
@@ -61,7 +63,42 @@ export function ChatPage() {
   const studentMode = preferences.studentMode;
   const historyOpen = preferences.historyOpen;
   const [atBottom, setAtBottom] = useState(true);
-  const transcriptRef = useRef<HTMLDivElement>(null);
+
+  // On a phone the history rail would take two thirds of the width, so it becomes a
+  // drawer over the conversation. The stored preference keeps controlling the
+  // desktop rail; the drawer is per-visit state.
+  const phone = usePhoneLayout();
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const drawerToggle = useRef<HTMLButtonElement>(null);
+  useKeyboardInset();
+
+  const historyVisible = phone ? drawerOpen : historyOpen;
+
+  useEffect(() => {
+    if (!phone) {
+      setDrawerOpen(false);
+    }
+  }, [phone]);
+
+  const closeDrawer = useCallback((): void => {
+    setDrawerOpen(false);
+    drawerToggle.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    if (!drawerOpen) {
+      return;
+    }
+
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") {
+        closeDrawer();
+      }
+    };
+
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [closeDrawer, drawerOpen]);  const transcriptRef = useRef<HTMLDivElement>(null);
   // Streaming must not yank the transcript back to the bottom: scrolling up to
   // re-read an earlier step has to stay possible until the user returns.
   const stickToBottomRef = useRef(true);
@@ -491,14 +528,32 @@ export function ChatPage() {
   const showError = error ?? workspaceError;
 
   return (
-    <section className={historyOpen ? "chat-layout" : "chat-layout history-collapsed"}>
-      <aside className={historyOpen ? "chat-history" : "chat-history rail"} aria-label="Chat history">
-        {historyOpen ? (
-          <>
+    <section
+      className={`chat-layout${historyVisible ? "" : " history-collapsed"}${phone && drawerOpen ? " drawer-open" : ""}`}
+    >
+      {phone && drawerOpen ? (
+        <button
+          type="button"
+          className="chat-scrim"
+          aria-label="Close chat history"
+          onClick={closeDrawer}
+        />
+      ) : null}
+      <aside className={historyVisible ? "chat-history" : "chat-history rail"} aria-label="Chat history">
+        {historyVisible ? (          <>
             <div className="chat-history-head">
               <strong>Chats</strong>
               <div className="history-head-actions">
-                <button type="button" className="ghost-button" onClick={startNewChat}>
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={() => {
+                    startNewChat();
+                    if (phone) {
+                      closeDrawer();
+                    }
+                  }}
+                >
                   New
                 </button>
                 <button
@@ -507,7 +562,7 @@ export function ChatPage() {
                   title="Collapse chats"
                   aria-label="Collapse chats"
                   aria-expanded={true}
-                  onClick={toggleHistory}
+                  onClick={() => (phone ? closeDrawer() : toggleHistory())}
                 >
                   «
                 </button>
@@ -545,6 +600,9 @@ export function ChatPage() {
                     }
                     onClick={() => {
                       setCreating(false);
+                      if (phone) {
+                        closeDrawer();
+                      }
                       void openConversation(conversation.id);
                     }}
                     onDoubleClick={() => {
@@ -626,6 +684,17 @@ export function ChatPage() {
 
       <div className="chat-main">
         <div className="session-bar">
+          {phone ? (
+            <button
+              type="button"
+              className="ghost-button history-toggle"
+              ref={drawerToggle}
+              aria-expanded={drawerOpen}
+              onClick={() => setDrawerOpen(true)}
+            >
+              Chats
+            </button>
+          ) : null}
           <label className="inline-field">
             <span>Model</span>
             <select

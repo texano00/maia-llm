@@ -197,12 +197,12 @@ function Accounts() {
                 const hasOperator = account.capabilities.includes("operator");
                 return (
                   <tr key={account.id}>
-                    <td>{account.email}</td>
-                    <td className="muted">
+                    <td data-label="Account">{account.email}</td>
+                    <td className="muted" data-label="Last seen">
                       {account.lastSeenAt ? new Date(account.lastSeenAt).toLocaleString() : "never"}
                     </td>
-                    <td>{account.activeSessions}</td>
-                    <td>
+                    <td data-label="Active runs">{account.activeSessions}</td>
+                    <td data-label="Debug">
                       <button
                         className="ghost"
                         disabled={busyId === account.id}
@@ -211,7 +211,7 @@ function Accounts() {
                         {hasDebug ? "Revoke" : "Grant"}
                       </button>
                     </td>
-                    <td>
+                    <td data-label="Operator">
                       <button
                         className="ghost"
                         disabled={busyId === account.id}
@@ -361,21 +361,21 @@ function Operations() {
           <tbody>
             {(status?.runs ?? []).map((run) => (
               <tr key={run.id}>
-                <td>{new Date(run.startedAt).toLocaleString()}</td>
-                <td>{run.trigger}</td>
-                <td>
+                <td data-label="Started">{new Date(run.startedAt).toLocaleString()}</td>
+                <td data-label="Trigger">{run.trigger}</td>
+                <td data-label="Outcome">
                   <span className={run.outcome === "success" ? "pill ok" : "pill danger"}>
                     {run.outcome}
                   </span>
                 </td>
-                <td>{run.models}</td>
-                <td>{run.failed}</td>
-                <td className="muted">{run.error ?? ""}</td>
+                <td data-label="Models">{run.models}</td>
+                <td data-label="Failed">{run.failed}</td>
+                <td className="muted" data-label="Error">{run.error ?? ""}</td>
               </tr>
             ))}
             {status && status.runs.length === 0 ? (
               <tr>
-                <td colSpan={6} className="muted">
+                <td colSpan={6} className="muted" data-label="Runs">
                   No runs yet.
                 </td>
               </tr>
@@ -534,7 +534,7 @@ function UseCases() {
             <tbody>
               {useCases.map((useCase, index) => (
                 <tr key={useCase.id}>
-                  <td>
+                  <td data-label="Order">
                     <button className="ghost" onClick={() => move(index, -1)} aria-label="Move up">
                       ↑
                     </button>
@@ -542,7 +542,7 @@ function UseCases() {
                       ↓
                     </button>
                   </td>
-                  <td>
+                  <td data-label="Use case">
                     <strong>{useCase.title}</strong>
                     <div>
                       <span className={useCase.enabled ? "pill ok" : "pill warn"}>
@@ -551,7 +551,7 @@ function UseCases() {
                       <span className="pill">v{useCase.version}</span>
                     </div>
                   </td>
-                  <td>
+                  <td data-label="Models">
                     <ul className="models">
                       {useCase.models.map((model) => (
                         <li key={model.id}>
@@ -567,7 +567,7 @@ function UseCases() {
                       ))}
                     </ul>
                   </td>
-                  <td className="row">
+                  <td className="row" data-label="Actions">
                     <button className="ghost" onClick={() => edit(useCase)}>
                       Edit
                     </button>
@@ -579,7 +579,7 @@ function UseCases() {
               ))}
               {useCases.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="muted">
+                  <td colSpan={4} className="muted" data-label="Use cases">
                     No use cases yet. Create the first one on the right.
                   </td>
                 </tr>
@@ -696,17 +696,17 @@ function Installations() {
         <tbody>
           {installations.map((installation) => (
             <tr key={installation.id}>
-              <td className="models">{installation.installId}</td>
-              <td>
+              <td className="models" data-label="Installation">{installation.installId}</td>
+              <td data-label="State">
                 <span className={installation.state === "active" ? "pill ok" : "pill danger"}>
                   {installation.state}
                 </span>
               </td>
-              <td className="muted">
+              <td className="muted" data-label="App">
                 {installation.appVersion ?? "?"} · {installation.platform ?? "?"}
               </td>
-              <td>{new Date(installation.lastSeenAt).toLocaleString()}</td>
-              <td>
+              <td data-label="Last contact">{new Date(installation.lastSeenAt).toLocaleString()}</td>
+              <td data-label="Action">
                 {installation.state === "active" ? (
                   <button
                     className="danger"
@@ -723,7 +723,7 @@ function Installations() {
           ))}
           {installations.length === 0 ? (
             <tr>
-              <td colSpan={5} className="muted">
+              <td colSpan={5} className="muted" data-label="Installations">
                 No installation has enrolled yet.
               </td>
             </tr>
@@ -760,13 +760,15 @@ function Audit() {
         <tbody>
           {entries.map((entry, index) => (
             <tr key={`${entry.occurredAt}-${index}`}>
-              <td>{new Date(entry.occurredAt).toLocaleString()}</td>
-              <td className="muted">
+              <td data-label="When">{new Date(entry.occurredAt).toLocaleString()}</td>
+              <td className="muted" data-label="Actor">
                 {entry.actorKind}
                 {entry.actorId ? `:${entry.actorId.slice(0, 8)}` : ""}
               </td>
-              <td>{entry.action}</td>
-              <td className="models">{entry.target ?? ""}</td>
+              <td data-label="Action">{entry.action}</td>
+              <td className="models" data-label="Target">
+                {entry.target ?? ""}
+              </td>
             </tr>
           ))}
         </tbody>
