@@ -11,6 +11,7 @@ import { useUiPreferences } from "../../shared/preferences/useUiPreferences";
 import { updatePreferences } from "../../shared/preferences/store";
 import { useModelRuns } from "./useModelRuns";
 import { useProviderHealth } from "../../shared/health/useProviderHealth";
+import { useWorkspace } from "../../shared/session/WorkspaceProvider";
 import { openOnboarding } from "../onboarding/open";
 
 const STATUS_LABELS: Record<VisibleStatus, string> = {
@@ -27,6 +28,7 @@ const STATUS_LABELS: Record<VisibleStatus, string> = {
 export function ModelsPage() {
   const { health } = useProviderHealth();
   const { runs, historyError, reloadHistory } = useModelRuns();
+  const { reloadSessions } = useWorkspace();
   const { acknowledgedFailureIds } = useUiPreferences();
   const [filter, setFilter] = useState<StatusFilter>(DEFAULT_STATUS_FILTER);
   const [now, setNow] = useState(() => Date.now());
@@ -61,6 +63,20 @@ export function ModelsPage() {
             Every model run requested from this app. Chat is where you use a running model.
           </p>
         </div>
+        <button
+          type="button"
+          className="ghost-button"
+          title="Reload the run list"
+          aria-label="Refresh runs"
+          onClick={() => {
+            // One click refreshes both halves: the active runs come from the shared
+            // poller, the finished ones from local history.
+            void reloadSessions();
+            void reloadHistory();
+          }}
+        >
+          ⟳ Refresh
+        </button>
         {/* Filter lives in component state: a fresh visit always starts on Running. */}
         <label className="inline-field models-filter">
           <span>Status</span>

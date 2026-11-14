@@ -982,7 +982,16 @@ export class SessionOrchestrator {
    */
   describeEndpoint(sessionId: string): SessionEndpoint | null {
     const runtime = this.runtimes.get(sessionId);
-    if (!runtime || !runtime.apiKey || runtime.session.state !== "active") {
+    if (!runtime || !runtime.apiKey) {
+      return null;
+    }
+
+    // The address is published as soon as the host maps the port, which is minutes
+    // before the model serves. Waiting for "active" hid the one piece of evidence a
+    // person needs while a boot is stuck or slow — and the key belongs to the run,
+    // not to its state.
+    const live = ["provisioning", "ready", "active"].includes(runtime.session.state);
+    if (!live) {
       return null;
     }
 

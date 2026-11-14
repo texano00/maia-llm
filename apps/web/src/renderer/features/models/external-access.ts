@@ -52,3 +52,13 @@ export function buildEditorConfig(endpoint: ExternalEndpoint): string {
     2
   );
 }
+
+/**
+ * The address a person can open in a browser.
+ *
+ * `endpoint.baseUrl` ends in `/v1` because that is what an OpenAI-compatible client
+ * needs; the server's own root is what a browser should visit.
+ */
+export function publicUrl(baseUrl: string): string {
+  return baseUrl.replace(/\/v1\/?$/, "");
+}
