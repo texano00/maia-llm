@@ -1,11 +1,14 @@
 import { timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import {
+  accountDetailQuerySchema,
   capabilityChangeSchema,
   internalAccountQuerySchema,
   type InternalAccountList
 } from "@maia/contracts";
 import { AccountRepository, LastOperatorError } from "../main/services/accounts/repository";
+import { SettingsStore } from "../main/services/settings/store";
+import { createAccountDetail } from "../main/services/accounts/detail";
 import type { WebPlatform } from "./host";
 
 /** Header the portal presents; compared without leaking length through timing. */
@@ -43,6 +46,15 @@ export function createInternalRoutes(options: InternalRouteOptions): InternalRou
 
   const repository = new AccountRepository(options.platform.database);
   const expectedToken = token;
+  const project = createAccountDetail({
+    repository,
+    settings: (accountId) => new SettingsStore(options.platform.database, accountId).get()
+  });
+
+  const detailFor = (
+    accountId: string,
+    query: { windowDays: number; limit: number; offset: number }
+  ) => project({ accountId, ...query });
 
   async function handle(
     request: IncomingMessage,
@@ -76,6 +88,28 @@ export function createInternalRoutes(options: InternalRouteOptions): InternalRou
           offset: query.data.offset
         });
         send(response, 200, page);
+        return true;
+      }
+
+      const detailMatch = /^\/internal\/accounts\/([^/]+)$/.exec(url.pathname);
+      if (detailMatch && request.method === "GET") {
+        const parsed = accountDetailQuerySchema.safeParse({
+          windowDays: url.searchParams.get("windowDays") ?? undefined,
+          limit: url.searchParams.get("limit") ?? undefined,
+          offset: url.searchParams.get("offset") ?? undefined
+        });
+        if (!parsed.success) {
+          send(response, 400, { error: "invalid_request" });
+          return true;
+        }
+
+        const detail = detailFor(decodeURIComponent(detailMatch[1] ?? ""), parsed.data);
+        if (!detail) {
+          send(response, 404, { error: "not_found" });
+          return true;
+        }
+
+        send(response, 200, detail);
         return true;
       }
 

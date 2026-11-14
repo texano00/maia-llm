@@ -348,6 +348,9 @@ The image is `nickfedor/watchtower`, the maintained fork. The original
 | `MAIA_ADMIN_EMAIL` / `MAIA_ADMIN_PASSWORD` | —                           | First-boot administrator account                                                  |
 | `MAIA_PORTAL_HF_TOKEN` (or `HF_TOKEN`)     | —                           | Service token for building the catalogue snapshot                                 |
 | `MAIA_CATALOGUE_REFRESH_HOURS`             | `6`                         | Snapshot refresh interval                                                         |
+| `MAIA_CATALOGUE_REQUIRED`
+ | *(empty)*                   | Comma-separated `owner/name` repositories always included in a snapshot pass, whatever their download rank
+                                                                           |
 | `MAIA_CATALOGUE_LIMIT`                     | `300`                       | Models per snapshot pass                                                          |
 | `MAIA_PORTAL_ACCESS_TTL_MINUTES`           | `60`                        | Installation access-token lifetime                                                |
 | `MAIA_PORTAL_REFRESH_TTL_DAYS`             | `30`                        | Installation refresh-token lifetime                                               |

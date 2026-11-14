@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  accountDetail,
   catalogueStatus,
   changeCapability,
   createUseCase,
@@ -8,10 +9,8 @@ import {
   forceRefresh,
   listAccounts,
   listAudit,
-  listInstallations,
   listUseCases,
   reorderUseCases,
-  revokeInstallation,
   signIn,
   signOut,
   updateUseCase,
@@ -22,14 +21,24 @@ const TABS = [
   { id: "operations", label: "Operations" },
   { id: "accounts", label: "Accounts" },
   { id: "use-cases", label: "Use cases" },
-  { id: "installations", label: "Installations" },
   { id: "audit", label: "Audit" }
 ];
 
 export default function App() {
   const [session, setSession] = useState(undefined);
   const [tab, setTab] = useState("operations");
+  const [hash, setHash] = useState(() => window.location.hash);
   const [error, setError] = useState(null);
+
+  // `#/accounts/<id>` is the deep dive; every other tab keeps the plain state
+  // router it had. A reload of a deep link reopens the same person.
+  useEffect(() => {
+    const onHashChange = () => setHash(window.location.hash);
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
+
+  const detailRoute = /^#\/accounts\/([^/]+)$/.exec(hash);
 
   useEffect(() => {
     currentSession()
@@ -85,11 +94,13 @@ export default function App() {
         ))}
       </nav>
 
-      {tab === "operations" ? <Operations /> : null}
-      {tab === "accounts" ? <Accounts /> : null}
-      {tab === "use-cases" ? <UseCases /> : null}
-      {tab === "installations" ? <Installations /> : null}
-      {tab === "audit" ? <Audit /> : null}
+      {detailRoute ? (
+        <AccountDetail accountId={decodeURIComponent(detailRoute[1])} />
+      ) : null}
+      {!detailRoute && tab === "operations" ? <Operations /> : null}
+      {!detailRoute && tab === "accounts" ? <Accounts /> : null}
+      {!detailRoute && tab === "use-cases" ? <UseCases /> : null}
+      {!detailRoute && tab === "audit" ? <Audit /> : null}
     </div>
   );
 }
@@ -197,7 +208,9 @@ function Accounts() {
                 const hasOperator = account.capabilities.includes("operator");
                 return (
                   <tr key={account.id}>
-                    <td data-label="Account">{account.email}</td>
+                    <td data-label="Account">
+                      <a href={`#/accounts/${encodeURIComponent(account.id)}`}>{account.email}</a>
+                    </td>
                     <td className="muted" data-label="Last seen">
                       {account.lastSeenAt ? new Date(account.lastSeenAt).toLocaleString() : "never"}
                     </td>
@@ -226,6 +239,346 @@ function Accounts() {
             </tbody>
           </table>
         ) : null}
+      </section>
+    </>
+  );
+}
+
+
+/** Money is stored in millionths of a dollar end to end. */
+function usd(micro) {
+  if (micro === null || micro === undefined) {
+    return "—";
+  }
+  return `$${(micro / 1_000_000).toFixed(2)}`;
+}
+
+function when(value) {
+  return value ? new Date(value).toLocaleString() : "—";
+}
+
+function duration(seconds) {
+  if (seconds === null || seconds === undefined) {
+    return "—";
+  }
+  const minutes = Math.floor(seconds / 60);
+  return minutes >= 1 ? `${minutes}m ${seconds % 60}s` : `${seconds}s`;
+}
+
+/**
+ * One person, in one page.
+ *
+ * The server decides what may be shown: this view renders what it receives and
+ * never asks for a secret. Sections are independent so a slow or missing one
+ * explains itself instead of blanking the page.
+ */
+function AccountDetail({ accountId }) {
+  const [detail, setDetail] = useState(null);
+  const [error, setError] = useState(null);
+  const [gone, setGone] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState(null);
+  const [offset, setOffset] = useState(0);
+
+  const limit = 20;
+
+  const load = useCallback(
+    async (nextOffset = 0) => {
+      setError(null);
+      try {
+        setDetail(await accountDetail(accountId, { limit, offset: nextOffset }));
+        setOffset(nextOffset);
+      } catch (failure) {
+        if (failure.status === 404) {
+          setGone(true);
+          setDetail(null);
+          return;
+        }
+        setError(
+          failure.code === "unavailable" || failure.status === 503
+            ? "The product cannot be reached right now. Check MAIA_INTERNAL_TOKEN and MAIA_WEB_INTERNAL_URL."
+            : failure.message
+        );
+      }
+    },
+    [accountId]
+  );
+
+  useEffect(() => {
+    void load(0);
+  }, [load]);
+
+  async function toggle(capability, has) {
+    if (has && capability === "operator") {
+      const confirmed = window.confirm(
+        `Revoke operator from ${detail.account.email}? Their developer settings disappear on the next request.`
+      );
+      if (!confirmed) {
+        return;
+      }
+    }
+
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await changeCapability(accountId, has ? { revoke: capability } : { grant: capability });
+      setNotice(`${capability} ${has ? "revoked from" : "granted to"} ${detail.account.email}.`);
+      await load(offset);
+    } catch (failure) {
+      setError(
+        failure.code === "last-operator"
+          ? "That is the last operator. Grant somebody else first."
+          : failure.message
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (gone) {
+    return (
+      <section className="card">
+        <a className="back-link" href="#/accounts">← Accounts</a>
+        <h2>Account no longer exists</h2>
+        <p className="muted">
+          The product has no account with that id. It may have been deleted since the list was
+          loaded.
+        </p>
+      </section>
+    );
+  }
+
+  if (!detail) {
+    return (
+      <section className="card">
+        <a className="back-link" href="#/accounts">← Accounts</a>
+        {error ? <div className="alert">{error}</div> : <p className="muted">Loading…</p>}
+      </section>
+    );
+  }
+
+  const account = detail.account;
+  const hasDebug = account.capabilities.includes("debug");
+  const hasOperator = account.capabilities.includes("operator");
+  const usage = detail.usage;
+  const page = Math.floor(offset / limit) + 1;
+  const pages = Math.max(1, Math.ceil(detail.history.total / limit));
+
+  return (
+    <>
+      <a className="back-link" href="#/accounts">← Accounts</a>
+      {error ? <div className="alert">{error}</div> : null}
+      {notice ? <div className="muted">{notice}</div> : null}
+
+      <section className="card">
+        <div className="row space-between">
+          <div>
+            <h2>{account.email}</h2>
+            <p className="muted">
+              Joined {when(account.createdAt)} · last seen {when(account.lastSeenAt)}
+            </p>
+          </div>
+          <button className="ghost" disabled={busy} onClick={() => void load(offset)}>
+            Reload
+          </button>
+        </div>
+        <dl className="detail-grid">
+          <div><dt>Account id</dt><dd className="wrap">{account.id}</dd></div>
+          <div><dt>Active runs</dt><dd>{account.activeSessions}</dd></div>
+          <div><dt>Debug</dt><dd>{hasDebug ? "granted" : "—"}</dd></div>
+          <div><dt>Operator</dt><dd>{hasOperator ? "granted" : "—"}</dd></div>
+        </dl>
+        <div className="row">
+          <button className="ghost" disabled={busy} onClick={() => void toggle("debug", hasDebug)}>
+            {hasDebug ? "Revoke debug" : "Grant debug"}
+          </button>
+          <button
+            className="ghost"
+            disabled={busy}
+            onClick={() => void toggle("operator", hasOperator)}
+          >
+            {hasOperator ? "Revoke operator" : "Grant operator"}
+          </button>
+        </div>
+      </section>
+
+      <section className="card">
+        <h2>Running now</h2>
+        {detail.now.length === 0 ? (
+          <p className="muted">No machine is rented for this account.</p>
+        ) : (
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Model</th>
+                <th>State</th>
+                <th>Elapsed</th>
+                <th>Accrued</th>
+                <th>Machine</th>
+              </tr>
+            </thead>
+            <tbody>
+              {detail.now.map((run) => (
+                <tr key={run.id}>
+                  <td data-label="Model" className="models wrap">{run.modelId}</td>
+                  <td data-label="State">{run.state}</td>
+                  <td data-label="Elapsed">{duration(run.elapsedSeconds)}</td>
+                  <td data-label="Accrued">{usd(run.accruedMicroUsd)}</td>
+                  <td data-label="Machine">
+                    {run.simulated ? "simulated" : (run.host ?? "unknown")}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+
+      <section className="card">
+        <h2>Usage, last {usage.windowDays} days</h2>
+        {usage.available ? (
+          <dl className="detail-grid">
+            <div><dt>Runs measured</dt><dd>{usage.runs ?? 0}</dd></div>
+            <div><dt>Output tokens</dt><dd>{(usage.outputTokens ?? 0).toLocaleString()}</dd></div>
+            <div>
+              <dt>Average speed</dt>
+              <dd>
+                {usage.avgTokensPerSecond
+                  ? `${usage.avgTokensPerSecond.toFixed(1)} tok/s`
+                  : "no measurements"}
+              </dd>
+            </div>
+            <div><dt>Spent</dt><dd>{usd(usage.spendMicroUsd ?? 0)}</dd></div>
+            <div>
+              <dt>Outcomes</dt>
+              <dd>
+                {Object.entries(usage.outcomes ?? {})
+                  .map(([outcome, count]) => `${count} ${outcome}`)
+                  .join(" · ") || "—"}
+              </dd>
+            </div>
+          </dl>
+        ) : (
+          <p className="muted">
+            This account switched usage reporting off, so no token or speed figures are stored.
+          </p>
+        )}
+      </section>
+
+      <section className="card">
+        <h2>History</h2>
+        <p className="muted">{detail.history.total} runs recorded.</p>
+        {detail.history.runs.length === 0 ? (
+          <p className="muted">No run has been started yet.</p>
+        ) : (
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Model</th>
+                <th>Started</th>
+                <th>Duration</th>
+                <th>Rate</th>
+                <th>Ended</th>
+              </tr>
+            </thead>
+            <tbody>
+              {detail.history.runs.map((run) => (
+                <tr key={run.id}>
+                  <td data-label="Model" className="models wrap">{run.modelId}</td>
+                  <td data-label="Started">{when(run.startedAt)}</td>
+                  <td data-label="Duration">{duration(run.durationSeconds)}</td>
+                  <td data-label="Rate">{usd(run.rateMicroUsd ?? run.hourlyRateMicroUsd)}/h</td>
+                  <td data-label="Ended">
+                    {run.state === "ended" || run.state === "cancelled" || run.state === "failed"
+                      ? `${run.state}${run.endReason ? ` (${run.endReason})` : ""}`
+                      : run.state}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {detail.history.total > limit ? (
+          <div className="row">
+            <button
+              className="ghost"
+              disabled={offset === 0}
+              onClick={() => void load(Math.max(0, offset - limit))}
+            >
+              Newer
+            </button>
+            <span className="muted">
+              page {page} of {pages}
+            </span>
+            <button
+              className="ghost"
+              disabled={offset + limit >= detail.history.total}
+              onClick={() => void load(offset + limit)}
+            >
+              Older
+            </button>
+          </div>
+        ) : null}
+      </section>
+
+      <section className="card">
+        <h2>Stored data</h2>
+        <dl className="detail-grid">
+          <div><dt>Conversations</dt><dd>{detail.storage.conversations}</dd></div>
+          <div><dt>Messages</dt><dd>{detail.storage.messages}</dd></div>
+          <div><dt>Images</dt><dd>{detail.storage.images}</dd></div>
+          <div><dt>Oldest</dt><dd>{when(detail.storage.oldestAt)}</dd></div>
+          <div><dt>Newest</dt><dd>{when(detail.storage.newestAt)}</dd></div>
+        </dl>
+        <p className="muted">
+          Counts only. Conversation titles, message text and image files never leave the product.
+        </p>
+      </section>
+
+      <section className="card">
+        <h2>Settings</h2>
+        <dl className="detail-grid">
+          {Object.entries(detail.settings).map(([key, value]) => (
+            <div key={key}>
+              <dt>{key}</dt>
+              <dd className="wrap">
+                {value === null || value === undefined
+                  ? "—"
+                  : typeof value === "object"
+                    ? JSON.stringify(value)
+                    : String(value)}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      </section>
+
+      <section className="card">
+        <h2>Provider keys</h2>
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Provider</th>
+              <th>Saved</th>
+              <th>Status</th>
+              <th>Last verified</th>
+            </tr>
+          </thead>
+          <tbody>
+            {detail.credentials.map((entry) => (
+              <tr key={entry.provider}>
+                <td data-label="Provider">{entry.provider}</td>
+                <td data-label="Saved">{entry.present ? "yes" : "no"}</td>
+                <td data-label="Status">{entry.status}</td>
+                <td data-label="Last verified">{when(entry.lastVerifiedAt)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p className="muted">
+          Presence and verification only. The key itself is never readable here, by design.
+        </p>
       </section>
     </>
   );
@@ -660,77 +1013,6 @@ function UseCases() {
         </form>
       </div>
     </>
-  );
-}
-
-function Installations() {
-  const [installations, setInstallations] = useState([]);
-  const [error, setError] = useState(null);
-
-  const load = useCallback(async () => {
-    try {
-      setInstallations(await listInstallations());
-    } catch (failure) {
-      setError(failure.message);
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  return (
-    <section className="card">
-      {error ? <div className="alert">{error}</div> : null}
-      <h2>Installations</h2>
-      <table>
-        <thead>
-          <tr>
-            <th>Installation</th>
-            <th>State</th>
-            <th>App</th>
-            <th>Last contact</th>
-            <th />
-          </tr>
-        </thead>
-        <tbody>
-          {installations.map((installation) => (
-            <tr key={installation.id}>
-              <td className="models" data-label="Installation">{installation.installId}</td>
-              <td data-label="State">
-                <span className={installation.state === "active" ? "pill ok" : "pill danger"}>
-                  {installation.state}
-                </span>
-              </td>
-              <td className="muted" data-label="App">
-                {installation.appVersion ?? "?"} · {installation.platform ?? "?"}
-              </td>
-              <td data-label="Last contact">{new Date(installation.lastSeenAt).toLocaleString()}</td>
-              <td data-label="Action">
-                {installation.state === "active" ? (
-                  <button
-                    className="danger"
-                    onClick={async () => {
-                      await revokeInstallation(installation.id);
-                      await load();
-                    }}
-                  >
-                    Revoke
-                  </button>
-                ) : null}
-              </td>
-            </tr>
-          ))}
-          {installations.length === 0 ? (
-            <tr>
-              <td colSpan={5} className="muted" data-label="Installations">
-                No installation has enrolled yet.
-              </td>
-            </tr>
-          ) : null}
-        </tbody>
-      </table>
-    </section>
   );
 }
 

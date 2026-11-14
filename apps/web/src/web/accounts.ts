@@ -19,6 +19,7 @@ import { SessionOrchestrator } from "../main/services/sessions/orchestrator";
 import { SessionStore } from "../main/services/sessions/store";
 import { createMockComputeProvider, createMockInference } from "../main/services/providers/mock-runtime";
 import { createVastComputeProvider } from "../main/services/providers/vastai/compute-provider";
+import { createProviderRouter } from "../main/services/providers/provider-router";
 import { VastAiClient } from "../main/services/providers/vastai/client";
 import { createVllmRuntime } from "../main/services/inference/vllm";
 import { createModelPlanResolver } from "../main/services/inference/model-plan-resolver";
@@ -99,8 +100,42 @@ export async function createAccountRuntime(
     accountId
   );
 
-  const hasVastKey = Boolean(await credentials.get("vastai"));
-  const useLiveGpu = options.providerMode === "live" && hasVastKey;
+  // The live/mock decision is made per call by the router: a key saved after this
+  // runtime was built has to start renting machines immediately, and a live
+  // deployment without a key has to refuse instead of quietly simulating.
+  const providers = createProviderRouter({
+    mode: options.providerMode,
+    hasCredential: async () => Boolean(await credentials.get("vastai")),
+    createLive: () => ({
+      compute: createVastComputeProvider({
+        getApiKey: () => credentials.get("vastai"),
+        getHfToken: () => credentials.get("huggingface"),
+        getParameterCount: async (modelId) =>
+          options.catalogueRepository.get(modelId)?.parameterCount ?? null,
+        getFilters: () => settings.get().gpuFilters,
+        getReputations: () => options.reputation.snapshot(),
+        reportOutcome: (input) => options.reputation.report(input),
+        getModelPlan: createModelPlanResolver({
+          artifacts: (modelId) => options.catalogueRepository.getArtifacts(modelId),
+          loadDetail: (modelId) => options.catalogue.detail(modelId),
+          get: (modelId) => options.catalogueRepository.get(modelId),
+          engine: (modelId) => options.catalogue.supportFor(modelId)?.engine ?? null
+        }),
+        readyTimeoutMs: (options.readinessTimeoutMinutes ?? 20) * 60_000,
+        logger
+      }),
+      inference: createVllmRuntime({
+        // Resolved at stream time, after the router exists.
+        resolveEndpoint: (instanceId) => compute.resolveEndpoint?.(instanceId) ?? null
+      })
+    }),
+    createMock: () => ({
+      compute: createMockComputeProvider({ provisionDelayMs: 400 }),
+      inference: createMockInference({ chunkDelayMs: 12 })
+    })
+  });
+  const compute = providers.compute;
+  const inference = providers.inference;
 
   // Header surface: one snapshot feeds the bell, the balance badge and the
   // missing-key prompts. Provider checks never throw; `unknown` is a valid state.
@@ -145,32 +180,6 @@ export async function createAccountRuntime(
     health.invalidate();
     syncHealth(await health.refresh());
   };
-  const compute = useLiveGpu
-    ? createVastComputeProvider({
-        getApiKey: () => credentials.get("vastai"),
-        getHfToken: () => credentials.get("huggingface"),
-        getParameterCount: async (modelId) =>
-          options.catalogueRepository.get(modelId)?.parameterCount ?? null,
-        getFilters: () => settings.get().gpuFilters,
-        getReputations: () => options.reputation.snapshot(),
-        reportOutcome: (input) => options.reputation.report(input),
-        getModelPlan: createModelPlanResolver({
-          artifacts: (modelId) => options.catalogueRepository.getArtifacts(modelId),
-          loadDetail: (modelId) => options.catalogue.detail(modelId),
-          get: (modelId) => options.catalogueRepository.get(modelId),
-          engine: (modelId) => options.catalogue.supportFor(modelId)?.engine ?? null
-        }),
-        readyTimeoutMs: (options.readinessTimeoutMinutes ?? 20) * 60_000,
-        logger
-      })
-    : createMockComputeProvider({ provisionDelayMs: 400 });
-
-  const inference = useLiveGpu
-    ? createVllmRuntime({
-        resolveEndpoint: (instanceId) =>
-          "resolveEndpoint" in compute ? compute.resolveEndpoint(instanceId) : null
-      })
-    : createMockInference({ chunkDelayMs: 12 });
 
   const reportFailure = createFailureReporter({
     url: process.env.MAIA_FAILURE_REPORT_URL ?? settings.get().diagnosticsUrl,

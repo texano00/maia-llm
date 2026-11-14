@@ -105,16 +105,17 @@ describe("portal authentication", () => {
     }
   });
 
-  it("signs an administrator in, lists installations and revokes one", async () => {
-    const enrolled = await server.inject({
+  it("signs an administrator in and no longer offers installation management", async () => {
+    await server.inject({
       method: "POST",
       url: "/v1/installations",
-      payload: { installId: "install-revoke-me" }
+      payload: { installId: "install-no-longer-listed" }
     });
-    const installation = enrolled.json() as { installationId: string; accessToken: string };
 
-    const denied = await server.inject({ method: "GET", url: "/v1/admin/installations" });
-    expect(denied.statusCode).toBe(401);
+    // Enrollment stays: it is how an installation obtains the diagnostics
+    // credential. Managing installations from the backoffice is gone.
+    const anonymous = await server.inject({ method: "GET", url: "/v1/admin/installations" });
+    expect(anonymous.statusCode).toBe(404);
 
     const signIn = await server.inject({
       method: "POST",
@@ -133,23 +134,22 @@ describe("portal authentication", () => {
       url: "/v1/admin/installations",
       headers: { cookie }
     });
-    expect(listed.statusCode).toBe(200);
-    expect((listed.json() as { installations: unknown[] }).installations).toHaveLength(1);
+    expect(listed.statusCode).toBe(404);
 
     const revoked = await server.inject({
       method: "DELETE",
-      url: `/v1/admin/installations/${installation.installationId}`,
+      url: "/v1/admin/installations/anything",
       headers: { cookie }
     });
-    expect(revoked.statusCode).toBe(204);
+    expect(revoked.statusCode).toBe(404);
 
-    const afterRevoke = await server.inject({
-      method: "POST",
-      url: "/v1/failures",
-      payload: report,
-      headers: { authorization: `Bearer ${installation.accessToken}` }
+    const stillSignedIn = await server.inject({
+      method: "GET",
+      url: "/v1/admin/session",
+      headers: { cookie }
     });
-    expect(afterRevoke.statusCode).toBe(401);
+    expect(stillSignedIn.statusCode).toBe(200);
+    expect((stillSignedIn.json() as { email: string }).email).toBe("admin@maia.test");
 
     const signOut = await server.inject({
       method: "DELETE",

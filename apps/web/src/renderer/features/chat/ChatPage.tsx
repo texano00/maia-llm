@@ -526,6 +526,14 @@ export function ChatPage() {
   }
 
   const showError = error ?? workspaceError;
+  // Only the two refusals this feature introduced get a shortcut.
+  const refusalSection = showError
+    ? /vast\.ai/i.test(showError)
+      ? "vastai"
+      : /hugging face/i.test(showError)
+        ? "huggingface"
+        : null
+    : null;
 
   return (
     <section
@@ -745,6 +753,12 @@ export function ChatPage() {
         {showError ? (
           <div className="alert" role="alert">
             <span>{showError}</span>
+            {/* A refusal names the fix, so the alert is where the fix links to. */}
+            {refusalSection ? (
+              <Link className="ghost-button" to={`/settings?section=${refusalSection}`}>
+                {refusalSection === "vastai" ? "Add the vast.ai key" : "Add the Hugging Face token"}
+              </Link>
+            ) : null}
             <button
               type="button"
               className="ghost-button"

@@ -11,6 +11,7 @@ import {
 import { useWorkspace } from "../../shared/session/WorkspaceProvider";
 import { useProviderHealth } from "../../shared/health/useProviderHealth";
 import { openOnboarding } from "../onboarding/open";
+import { hiddenCount, readinessFor } from "./readiness";
 import { PowerPicker } from "./PowerPicker";
 import { formatParameters, formatContext, formatBytes, formatUsd } from "../../shared/format";
 export function CataloguePage() {
@@ -67,6 +68,21 @@ export function CataloguePage() {
       isChatCapableModel(selected.model)
     : false;
   const access = selected ? describeGatedAccess(selected.model.gated) : null;
+  // Readiness is per account: the global "supported" flag only says an engine
+  // exists. A gated repository without a Hugging Face token, or anything at all
+  // without a vast.ai key, cannot be started, so the filter and the start button
+  // ask the same function.
+  const credentialStatus = {
+    // An unverified key is not a missing one; only an explicit "missing" hides
+    // models, and before the first health snapshot nothing is hidden.
+    huggingface: health ? health.huggingface.state !== "missing" : true,
+    vastai: health ? health.vastai.state !== "missing" : true
+  };
+  const hidden = hiddenCount(models, credentialStatus);
+  const visibleModels = supportedOnly
+    ? models.filter((model) => readinessFor(model, credentialStatus).ready)
+    : models;
+  const blocked = selected ? readinessFor(selected.model, credentialStatus) : null;
   const starting = selected ? startingIds.includes(selected.model.id) : false;
   const existingSession = selected
     ? (sessions.find(
@@ -167,7 +183,7 @@ export function CataloguePage() {
             checked={supportedOnly}
             onChange={(event) => setSupportedOnly(event.target.checked)}
           />
-          <span>Only models I can run</span>
+          <span>{hidden > 0 && supportedOnly ? `Only models I can run (${hidden} hidden)` : "Only models I can run"}</span>
         </label>
         <label className="inline-field">
           <span>Feature</span>
@@ -220,10 +236,35 @@ export function CataloguePage() {
 
       <div className="catalogue-grid" hidden={mode !== "advanced"}>
         <ul className="model-list">
-          {models.length === 0 && !loadingCatalogue ? (
-            <li className="muted">No models match this search.</li>
+          {visibleModels.length === 0 && !loadingCatalogue ? (
+            <li className="muted">
+              {models.length > 0 && supportedOnly ? (
+                <>
+                  Every model here needs something this account does not have yet.
+                  {blocked?.section ? (
+                    <>
+                      {" "}
+                      <Link to={`/settings?section=${blocked.section}`}>
+                        Set up the key
+                      </Link>
+                    </>
+                  ) : null}
+                </>
+              ) : blocked?.section ? (
+                <>
+                  This model needs{" "}
+                  {blocked.section === "huggingface"
+                    ? "a Hugging Face token"
+                    : "a vast.ai key"}
+                  .{" "}
+                  <Link to={`/settings?section=${blocked.section}`}>Set up the key</Link>
+                </>
+              ) : (
+                "No models match this search."
+              )}
+            </li>
           ) : null}
-          {models.map((model) => (
+          {visibleModels.map((model) => (
             <ModelRow
               key={model.id}
               model={model}
@@ -417,6 +458,9 @@ export function CataloguePage() {
                     disabled={
                       starting ||
                       !chatReady ||
+                      // The same verdict the list uses: if the filter hides it,
+                      // the button cannot start it either.
+                      blocked?.ready === false ||
                       (access !== null && gatedConsentModelId !== selected.model.id)
                     }
                     onClick={() => {
@@ -429,12 +473,22 @@ export function CataloguePage() {
                   >
                     {starting
                       ? "Booking a GPU…"
-                      : chatReady
-                        ? "Confirm and start session"
+                      : blocked?.ready === false
+                        ? "Missing a key"
+                        : chatReady
+                          ? "Confirm and start session"
                         : selected.runnable === false
                           ? "Cannot run this model"
                           : "Not a chat model"}
                   </button>
+                  {blocked?.ready === false && blocked.reason ? (
+                    <p className="field-hint">
+                      {blocked.reason}.{" "}
+                      {blocked.section ? (
+                        <Link to={`/settings?section=${blocked.section}`}>Set up the key</Link>
+                      ) : null}
+                    </p>
+                  ) : null}
                   <p className="field-hint">
                     Start-up takes a few minutes. You can leave Maia in the background and we will
                     notify you when the model is ready, or follow the progress in Models.

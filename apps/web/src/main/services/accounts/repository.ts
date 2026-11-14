@@ -389,6 +389,230 @@ export class AccountRepository {
       }))
     };
   }
+
+  /**
+   * Runs that are using a machine right now.
+   *
+   * The account predicate is in the SQL, not applied afterwards: a projection
+   * that filtered in JavaScript would be one forgotten `filter` away from
+   * showing somebody else's session.
+   */
+  activeRuns(accountId: string): DetailRun[] {
+    const rows = this.db
+      .prepare(
+        `SELECT id, model_id, state, started_at, hourly_rate_microusd, gpu_name,
+                instance_id, label
+           FROM sessions
+          WHERE account_id = ?
+            AND state IN (${ACTIVE_SESSION_STATES.map(() => "?").join(", ")})
+          ORDER BY started_at DESC`
+      )
+      .all(accountId, ...ACTIVE_SESSION_STATES) as SessionRow[];
+
+    return rows.map((row) => toDetailRun(row));
+  }
+
+  /** Finished runs, newest first, with the total for the pager. */
+  historyPage(
+    accountId: string,
+    query: { limit: number; offset: number }
+  ): { total: number; runs: DetailRun[] } {
+    const totalRow = this.db
+      .prepare("SELECT COUNT(*) AS total FROM sessions WHERE account_id = ?")
+      .get(accountId) as { total: number } | undefined;
+
+    const rows = this.db
+      .prepare(
+        `SELECT id, model_id, state, started_at, ended_at, end_reason, runtime,
+                hourly_rate_microusd, estimated_total_microusd, gpu_name,
+                instance_id, label
+           FROM sessions
+          WHERE account_id = ?
+          ORDER BY started_at DESC
+          LIMIT ? OFFSET ?`
+      )
+      .all(accountId, query.limit, query.offset) as SessionRow[];
+
+    return { total: totalRow?.total ?? 0, runs: rows.map((row) => toDetailRun(row)) };
+  }
+
+  /**
+   * Token and outcome totals for one window, from the measurements the product
+   * already records per run.
+   */
+  sessionMetricsSummary(
+    accountId: string,
+    windowDays: number,
+    nowMs: number
+  ): {
+    runs: number;
+    outputTokens: number;
+    tokensPerSecond: number | null;
+    outcomes: Record<string, number>;
+  } {
+    const since = new Date(nowMs - windowDays * 86_400_000).toISOString();
+    const rows = this.db
+      .prepare(
+        `SELECT m.outcome AS outcome,
+                COUNT(*) AS runs,
+                COALESCE(SUM(m.output_tokens), 0) AS output_tokens,
+                COALESCE(SUM(m.generation_ms), 0) AS generation_ms
+           FROM session_metrics m
+           JOIN sessions s ON s.id = m.session_id
+          WHERE s.account_id = ? AND m.recorded_at >= ?
+          GROUP BY m.outcome`
+      )
+      .all(accountId, since) as Array<{
+      outcome: string;
+      runs: number;
+      output_tokens: number;
+      generation_ms: number;
+    }>;
+
+    let runs = 0;
+    let outputTokens = 0;
+    let generationMs = 0;
+    const outcomes: Record<string, number> = {};
+    for (const row of rows) {
+      runs += Number(row.runs);
+      outputTokens += Number(row.output_tokens);
+      generationMs += Number(row.generation_ms);
+      outcomes[row.outcome] = Number(row.runs);
+    }
+
+    return {
+      runs,
+      outputTokens,
+      tokensPerSecond: generationMs > 0 ? (outputTokens / generationMs) * 1000 : null,
+      outcomes
+    };
+  }
+
+  /** Money actually charged by the provider inside the window. */
+  spendMicroUsd(accountId: string, windowDays: number, nowMs: number): number {
+    const since = new Date(nowMs - windowDays * 86_400_000).toISOString();
+    const row = this.db
+      .prepare(
+        `SELECT COALESCE(SUM(c.amount_microusd), 0) AS total
+           FROM cost_records c
+           JOIN sessions s ON s.id = c.session_id
+          WHERE s.account_id = ? AND c.kind = 'final' AND c.recorded_at >= ?`
+      )
+      .get(accountId, since) as { total: number } | undefined;
+
+    return Number(row?.total ?? 0);
+  }
+
+  /** What this account has stored, as counts and a date range — never content. */
+  storageCounts(accountId: string): {
+    conversations: number;
+    messages: number;
+    images: number;
+    oldestAt: string | null;
+    newestAt: string | null;
+  } {
+    const conversations = this.db
+      .prepare(
+        `SELECT COUNT(*) AS total, MIN(created_at) AS oldest, MAX(updated_at) AS newest
+           FROM conversations WHERE account_id = ?`
+      )
+      .get(accountId) as { total: number; oldest: string | null; newest: string | null } | undefined;
+
+    const messages = this.db
+      .prepare(
+        `SELECT COUNT(*) AS total
+           FROM messages m
+           JOIN conversations c ON c.id = m.conversation_id
+          WHERE c.account_id = ?`
+      )
+      .get(accountId) as { total: number } | undefined;
+
+    const images = this.db
+      .prepare("SELECT COUNT(*) AS total FROM conversation_images WHERE account_id = ?")
+      .get(accountId) as { total: number } | undefined;
+
+    return {
+      conversations: Number(conversations?.total ?? 0),
+      messages: Number(messages?.total ?? 0),
+      images: Number(images?.total ?? 0),
+      oldestAt: conversations?.oldest ?? null,
+      newestAt: conversations?.newest ?? null
+    };
+  }
+
+  /** Provider names with a stored credential. Never reads the ciphertext. */
+  credentialHandles(accountId: string): Array<{
+    provider: string;
+    lastVerifiedAt: string | null;
+    status: "valid" | "invalid" | "unknown";
+  }> {
+    const rows = this.db
+      .prepare(
+        `SELECT provider, last_verified_at, status
+           FROM credential_handles
+          WHERE account_id = ?
+          ORDER BY provider`
+      )
+      .all(accountId) as Array<{
+      provider: string;
+      last_verified_at: string | null;
+      status: "valid" | "invalid" | "unknown";
+    }>;
+
+    return rows.map((row) => ({
+      provider: row.provider,
+      lastVerifiedAt: row.last_verified_at,
+      status: row.status
+    }));
+  }
+}
+
+interface SessionRow {
+  id: string;
+  model_id: string;
+  state: string;
+  started_at: string;
+  ended_at?: string | null;
+  end_reason?: string | null;
+  hourly_rate_microusd: number;
+  estimated_total_microusd?: number;
+  gpu_name?: string | null;
+  instance_id?: number | null;
+  /** Carries the `maia:mock:` prefix for simulated runs. */
+  label: string;
+}
+
+export interface DetailRun {
+  id: string;
+  modelId: string;
+  state: string;
+  endReason: string | null;
+  startedAt: string;
+  endedAt: string | null;
+  hourlyRateMicroUsd: number;
+  gpu: string | null;
+  /** Provider machine, when the run has one; the id the console shows. */
+  host: string | null;
+  simulated: boolean;
+}
+
+/** The label is how the product already remembers "nothing was rented". */
+function toDetailRun(row: SessionRow): DetailRun {
+  const host =
+    row.instance_id === null || row.instance_id === undefined ? null : String(row.instance_id);
+
+  return {
+    id: row.id,
+    modelId: row.model_id,
+    state: row.state,
+    endReason: row.end_reason ?? null,
+    startedAt: row.started_at,
+    endedAt: row.ended_at ?? null,
+    hourlyRateMicroUsd: row.hourly_rate_microusd,
+    gpu: row.gpu_name ?? null,
+    host,
+    simulated: row.label.startsWith("maia:mock:")
+  };
 }
 
 /** A row written before migration 0013, or by hand, must not break a sign-in. */

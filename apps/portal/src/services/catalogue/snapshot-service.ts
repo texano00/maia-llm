@@ -25,6 +25,8 @@ export interface SnapshotServiceOptions {
   client: CatalogueClient;
   /** How many models one pass covers (top-downloaded first). */
   limit?: number;
+  /** Repositories always included, whatever their download rank. */
+  required?: readonly string[];
   /** How many snapshots to keep. */
   retention?: number;
   concurrency?: number;
@@ -119,7 +121,28 @@ export class SnapshotService {
     );
 
     try {
-      const payloads = await this.options.client.listModels(limit);
+      // Copied: the extra repository below must not mutate the client's array.
+      const payloads = [...(await this.options.client.listModels(limit))];
+      const listed = new Set(
+        payloads.map((payload) => payload.id).filter((id): id is string => Boolean(id))
+      );
+      // A required repository can be missing from the ranked listing entirely:
+      // it is newer than the top 300, or its pipeline tag differs. Reading it by
+      // id is what makes a catalogue that people search for complete.
+      const required = (this.options.required ?? []).filter((id) => !listed.has(id));
+      const extra = await mapLimit(required, this.options.concurrency ?? 6, async (id) => {
+        try {
+          return await this.options.client.readModel(id);
+        } catch {
+          return null;
+        }
+      });
+      for (const payload of extra) {
+        if (payload?.id) {
+          payloads.push(payload);
+        }
+      }
+
       const refreshedAt = new Date(this.now()).toISOString();
 
       let failed = 0;

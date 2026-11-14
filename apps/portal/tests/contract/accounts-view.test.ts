@@ -112,4 +112,73 @@ describe("accounts view", () => {
     expect(both.statusCode).toBe(400);
     expect(internal.calls.changes).toHaveLength(0);
   });
+
+  describe("account detail", () => {
+    it("renders one account for the administrator", async () => {
+      const answered = await server.inject({
+        method: "GET",
+        url: "/admin-api/accounts/account-ordinary?windowDays=7&limit=5",
+        headers: { cookie }
+      });
+
+      expect(answered.statusCode).toBe(200);
+      const body = answered.json() as {
+        account: { id: string; email: string };
+        usage: { windowDays: number };
+        history: { limit: number };
+      };
+      expect(body.account.email).toBe("person@maia.test");
+      expect(body.usage.windowDays).toBe(7);
+      expect(body.history.limit).toBe(5);
+      expect(internal.calls.details).toEqual(["account-ordinary"]);
+    });
+
+    it("clamps nonsense window and pager values instead of failing", async () => {
+      const answered = await server.inject({
+        method: "GET",
+        url: "/admin-api/accounts/account-ordinary?windowDays=9999&limit=0",
+        headers: { cookie }
+      });
+
+      expect(answered.statusCode).toBe(200);
+      const body = answered.json() as { usage: { windowDays: number }; history: { limit: number } };
+      expect(body.usage.windowDays).toBe(365);
+      expect(body.history.limit).toBe(1);
+    });
+
+    it("requires a session and reports an unknown account", async () => {
+      const anonymous = await server.inject({
+        method: "GET",
+        url: "/admin-api/accounts/account-ordinary"
+      });
+      const unknown = await server.inject({
+        method: "GET",
+        url: "/admin-api/accounts/no-such-account",
+        headers: { cookie }
+      });
+
+      expect(anonymous.statusCode).toBe(401);
+      expect(unknown.statusCode).toBe(404);
+      expect(unknown.json()).toMatchObject({ error: "not_found" });
+    });
+
+    it("changes a capability from the detail route", async () => {
+      const granted = await server.inject({
+        method: "POST",
+        url: "/admin-api/accounts/account-ordinary/capabilities",
+        headers: { cookie },
+        payload: { grant: "debug", confirm: true }
+      });
+
+      expect(granted.statusCode).toBe(200);
+
+      const detail = await server.inject({
+        method: "GET",
+        url: "/admin-api/accounts/account-ordinary",
+        headers: { cookie }
+      });
+      const body = detail.json() as { account: { capabilities: string[] } };
+      expect(body.account.capabilities).toContain("debug");
+    });
+  });
 });

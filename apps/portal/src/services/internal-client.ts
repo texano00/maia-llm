@@ -26,6 +26,68 @@ export const accountListSchema = z.object({
   accounts: z.array(accountSummarySchema)
 });
 
+
+/**
+ * The detail projection. Every section is optional-tolerant so a product one
+ * release behind still renders: the page shows what it received and says what is
+ * missing, instead of failing whole.
+ */
+export const accountDetailRunSchema = z.object({
+  id: z.string(),
+  modelId: z.string(),
+  state: z.string(),
+  endReason: z.string().nullable().optional(),
+  startedAt: z.string(),
+  endedAt: z.string().nullable().optional(),
+  durationSeconds: z.number().nullable().optional(),
+  rateMicroUsd: z.number().optional(),
+  hourlyRateMicroUsd: z.number().optional(),
+  simulated: z.boolean().optional(),
+  host: z.string().nullable().optional(),
+  gpu: z.string().nullable().optional(),
+  elapsedSeconds: z.number().optional(),
+  accruedMicroUsd: z.number().optional()
+});
+
+export const accountDetailSchema = z.object({
+  account: accountSummarySchema,
+  now: z.array(accountDetailRunSchema).default([]),
+  history: z.object({
+    total: z.number().int().nonnegative(),
+    limit: z.number().int().positive(),
+    offset: z.number().int().nonnegative(),
+    runs: z.array(accountDetailRunSchema)
+  }),
+  usage: z.object({
+    available: z.boolean(),
+    windowDays: z.number().int().positive(),
+    runs: z.number().optional(),
+    outputTokens: z.number().optional(),
+    avgTokensPerSecond: z.number().nullable().optional(),
+    spendMicroUsd: z.number().optional(),
+    outcomes: z.record(z.string(), z.number()).optional()
+  }),
+  storage: z.object({
+    conversations: z.number(),
+    messages: z.number(),
+    images: z.number(),
+    oldestAt: z.string().nullable(),
+    newestAt: z.string().nullable()
+  }),
+  settings: z.record(z.string(), z.unknown()),
+  credentials: z.array(
+    z.object({
+      provider: z.string(),
+      present: z.boolean(),
+      status: z.string(),
+      lastVerifiedAt: z.string().nullable()
+    })
+  )
+});
+
+export type AccountDetail = z.infer<typeof accountDetailSchema>;
+export type AccountDetailRun = z.infer<typeof accountDetailRunSchema>;
+
 /**
  * Typed client for the product's `/internal/*` API. It is the portal's only way
  * to learn who exists and to change a capability; the token it carries never
@@ -67,6 +129,11 @@ export interface InternalAccountsApi {
     accountId: string,
     change: { grant?: Capability; revoke?: Capability }
   ): Promise<AccountSummary>;
+  /** Everything the detail page shows, in one request. */
+  accountDetail(
+    accountId: string,
+    query?: { windowDays?: number; limit?: number; offset?: number }
+  ): Promise<AccountDetail>;
 }
 
 export class InternalClient implements InternalAccountsApi {
@@ -126,6 +193,27 @@ export class InternalClient implements InternalAccountsApi {
       confirm: true
     });
     const parsed = accountSummarySchema.safeParse(body);
+    if (!parsed.success) {
+      throw new InternalApiError(502, "invalid_response");
+    }
+
+    return parsed.data;
+  }
+
+  async accountDetail(
+    accountId: string,
+    query: { windowDays?: number; limit?: number; offset?: number } = {}
+  ): Promise<AccountDetail> {
+    const params = new URLSearchParams();
+    params.set("windowDays", String(query.windowDays ?? 30));
+    params.set("limit", String(query.limit ?? 20));
+    params.set("offset", String(query.offset ?? 0));
+
+    const body = await this.request(
+      `/internal/accounts/${encodeURIComponent(accountId)}?${params.toString()}`,
+      { method: "GET" }
+    );
+    const parsed = accountDetailSchema.safeParse(body);
     if (!parsed.success) {
       throw new InternalApiError(502, "invalid_response");
     }

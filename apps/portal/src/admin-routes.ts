@@ -68,6 +68,32 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRouteOpt
 
   const unauthorized = { error: "not_authenticated" } as const;
 
+  // One account in full. The projection is built by the product, which owns the
+  // rows: the portal asks for it and renders it, so no rule about what may leave
+  // the product lives here.
+  app.get("/admin-api/accounts/:id", async (request, reply) => {
+    if (!(await requireAdmin(request))) {
+      return reply.status(401).send(unauthorized);
+    }
+
+    const query = (request.query ?? {}) as Record<string, unknown>;
+    const accountId = (request.params as { id?: string }).id ?? "";
+
+    try {
+      const detail = await options.internal.accountDetail(accountId, {
+        windowDays: clampNumber(query.windowDays, 30, 1, 365),
+        limit: clampNumber(query.limit, 20, 1, 100),
+        offset: clampNumber(query.offset, 0, 0, 100_000)
+      });
+      return { ...detail, configured: true, serverTime: new Date(now()).toISOString() };
+    } catch (error) {
+      const failure = describeInternalFailure(error);
+      return reply
+        .status(failure.status)
+        .send({ error: failure.error, configured: options.internal.configured });
+    }
+  });
+
   // Accounts and capabilities are read from the product on every request rather
   // than cached here: the product remains the only authority on who may see what.
   app.get("/admin-api/accounts", async (request, reply) => {

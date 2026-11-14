@@ -6,6 +6,8 @@ import type { AccessService } from "../main/services/accounts/service";
 export interface PublicRegistryOptions {
   /** Release version shown in the build-info panel. */
   version: string;
+  /** Whether this deployment rents real machines or simulates them. */
+  providerMode: "live" | "mock";
 }
 
 /**
@@ -26,7 +28,8 @@ export function createPublicRegistry(
     platform: process.platform,
     arch: process.arch,
     channel: "stable" as const,
-    packaged: false
+    packaged: false,
+    providerMode: options.providerMode
   }));
 
   registry.register("auth.config", z.unknown(), () => access.config());

@@ -1,5 +1,6 @@
 import {
   InternalApiError,
+  type AccountDetail,
   type AccountSummary,
   type Capability,
   type InternalAccountsApi
@@ -15,6 +16,8 @@ export interface FakeAccount {
 
 export interface FakeInternalOptions {
   accounts?: FakeAccount[];
+  /** Set when the fake should behave like an unreachable product. */
+  unavailable?: boolean;
 }
 
 export interface FakeInternal {
@@ -23,6 +26,7 @@ export interface FakeInternal {
   accounts: AccountSummary[];
   calls: {
     changes: Array<{ accountId: string; grant?: Capability; revoke?: Capability }>;
+    details: string[];
   };
 }
 
@@ -40,7 +44,7 @@ export function createFakeInternal(options: FakeInternalOptions = {}): FakeInter
     activeSessions: account.activeSessions ?? 0
   }));
 
-  const calls: FakeInternal["calls"] = { changes: [] };
+  const calls: FakeInternal["calls"] = { changes: [], details: [] };
 
   const api: InternalAccountsApi = {
     configured: true,
@@ -85,6 +89,35 @@ export function createFakeInternal(options: FakeInternalOptions = {}): FakeInter
       }
 
       return account;
+    },
+
+    async accountDetail(accountId: string, query = {}): Promise<AccountDetail> {
+      calls.details.push(accountId);
+      if (options.unavailable) {
+        throw new InternalApiError(503, "unavailable");
+      }
+
+      const account = accounts.find((entry) => entry.id === accountId);
+      if (!account) {
+        throw new InternalApiError(404, "not_found");
+      }
+
+      const limit = query.limit ?? 20;
+      return {
+        account,
+        now: [],
+        history: { total: 0, limit, offset: query.offset ?? 0, runs: [] },
+        usage: { available: true, windowDays: query.windowDays ?? 30, runs: 0, outputTokens: 0 },
+        storage: {
+          conversations: 0,
+          messages: 0,
+          images: 0,
+          oldestAt: null,
+          newestAt: null
+        },
+        settings: { catalogueSupportedOnly: false },
+        credentials: [{ provider: "vastai", present: false, status: "unknown", lastVerifiedAt: null }]
+      };
     }
   };
 

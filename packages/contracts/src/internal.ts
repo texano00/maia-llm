@@ -22,6 +22,18 @@ export const internalAccountListSchema = z.object({
   accounts: z.array(accountSummarySchema)
 });
 
+/**
+ * Paging and window for one account's detail page.
+ *
+ * `windowDays` bounds the usage aggregation; the history pager is independent, so
+ * scrolling back through runs never changes the totals at the top of the page.
+ */
+export const accountDetailQuerySchema = z.object({
+  windowDays: z.coerce.number().int().min(1).max(365).default(30),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  offset: z.coerce.number().int().min(0).default(0)
+});
+
 export const internalErrorSchema = z.object({
   error: z.string()
 });

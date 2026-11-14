@@ -79,6 +79,41 @@ foreign keys cascade to conversations, messages, images metadata, sessions,
 metrics, settings, credential handles and credential secrets. `auth_events` and
 `access_codes` are removed by digest/address at the same time.
 
+## Which models you can run
+
+The catalogue filter labelled **Only models I can run** answers a question about
+the signed-in account, not about the world. `apps/web/src/renderer/features/catalogue/readiness.ts`
+is the only place that decides, and both the list and the start button call it, so
+the two cannot disagree:
+
+1. the backend says an engine exists (`supported`), and
+2. the repository is not gated, or a Hugging Face token is saved, and
+3. a vast.ai key is saved — nothing can be rented without one.
+
+The full list is fetched and filtered in the renderer, which is what lets the
+checkbox say how many models it is hiding. The preference is stored
+(`catalogueSupportedOnly`, default `off`), so a reload keeps it, and an unknown
+`supported` verdict never hides anything.
+
+## Live GPUs and the provider mode
+
+`MAIA_PROVIDER_MODE` says what a deployment intends. Whether a rental is possible
+also depends on the key saved **right now**, so the decision is made per call by
+the provider router (`apps/web/src/main/services/providers/provider-router.ts`)
+instead of once at start-up:
+
+| Situation | Result |
+| --- | --- |
+| `mock` | the simulated provider answers; nothing is rented |
+| `live`, key saved | real offers, real machines, real billing |
+| `live`, no key | the request is refused with `CREDENTIAL_MISSING`; nothing is simulated |
+| `live`, key rejected by vast.ai | refused with `CREDENTIAL_INVALID` |
+
+Saving a key takes effect on the next request — no restart and no new session.
+Instances are routed to the provider that created them, so a session booked
+before a key was removed is still destroyed through the live provider. The mode in
+force is shown in the build-information panel (`app.info.providerMode`).
+
 ## Appearance and configuration
 
 Light is the default. The top-bar control switches the whole product (access page,
@@ -91,7 +126,7 @@ catalogue, chat, models, settings), and the choice is stored on the account.
   deliberately **not** HttpOnly (the script must read it), holds only `light` or
   `dark`, and is never used for authentication.
 - Every UI preference is account data: `appearance`, `catalogueMode`,
-  `studentMode`, `historyOpen`, `lastConversationId` and
+  `catalogueSupportedOnly`, `studentMode`, `historyOpen`, `lastConversationId` and
   `acknowledgedFailureIds` live in `account_settings` next to the provider
   settings, so clearing browser storage loses nothing.
 - Values left in `localStorage` by an earlier version are copied once on the next

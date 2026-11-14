@@ -212,7 +212,10 @@ export async function createWebPlatform(options: WebPlatformOptions): Promise<We
     }
   }
 
-  const publicRegistry = createPublicRegistry(access, { version: resolveVersion(env) });
+  const publicRegistry = createPublicRegistry(access, {
+    version: resolveVersion(env),
+    providerMode: options.providerMode
+  });
 
   const sweepTimer = setInterval(() => accounts.sweep(30 * 60_000), 60_000);
   sweepTimer.unref?.();
