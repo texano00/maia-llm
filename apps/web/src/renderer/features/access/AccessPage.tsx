@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import type { AuthRequestCodeResult, AuthVerifyCodeResult } from "@maia/contracts";
 import { useAuth } from "../../shared/auth/AuthProvider";
+import { ThemeToggle } from "../../shared/theme/ThemeToggle";
 import { TurnstileWidget } from "./TurnstileWidget";
 
 type Step = "email" | "code";
@@ -132,7 +133,10 @@ export function AccessPage() {
   return (
     <div className="access-shell">
       <div className="access-card">
-        <p className="eyebrow">Maia LLM</p>
+        <div className="access-header">
+          <p className="eyebrow">Maia LLM</p>
+          <ThemeToggle compact />
+        </div>
         <h1>{step === "email" ? "Enter your email" : "Enter your code"}</h1>
         <p className="lede">
           {step === "email"

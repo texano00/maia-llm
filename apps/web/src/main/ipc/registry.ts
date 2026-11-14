@@ -21,6 +21,8 @@ export interface IpcInvokeContext {
   userAgent?: string | null;
   setSessionCookie?: (token: string, expiresAt: string) => void;
   clearSessionCookie?: () => void;
+  /** Mirrors a stored appearance into the pre-paint preference cookie. */
+  setAppearance?: (value: "light" | "dark") => void;
 }
 
 interface Registration {

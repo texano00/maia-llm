@@ -18,6 +18,8 @@ import type {
   Session,
   UseCaseCard
 } from "@maia/contracts";
+import { useUiPreferences } from "../preferences/useUiPreferences";
+import { updatePreferences } from "../preferences/store";
 
 export type CatalogueMode = "basic" | "advanced";
 
@@ -77,10 +79,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [snapshot, setSnapshot] = useState<CatalogueSnapshotInfo | null>(null);
   // Basic mode is the product default once the backend publishes use cases; a
   // deployment without them starts on the full list instead of an empty screen.
-  const [mode, setMode] = useState<CatalogueMode>(() => {
-    const stored = typeof localStorage === "undefined" ? null : localStorage.getItem("maia:catalogue-mode");
-    return stored === "advanced" ? "advanced" : "basic";
-  });
+  const { catalogueMode: mode } = useUiPreferences();
+  const setMode = useCallback((value: CatalogueMode): void => {
+    updatePreferences({ catalogueMode: value });
+  }, []);
   const [useCases, setUseCases] = useState<UseCaseCard[]>([]);
   const [selected, setSelected] = useState<ModelDetail | null>(null);
   const [estimates, setEstimates] = useState<Record<string, Estimate>>({});
@@ -166,12 +168,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     };
   }, [reloadSessions]);
 
-  useEffect(() => {
-    if (typeof localStorage !== "undefined") {
-      localStorage.setItem("maia:catalogue-mode", mode);
-    }
-  }, [mode]);
-
   const reloadUseCases = useCallback(async () => {
     const bridge = window.maia;
     if (!bridge) {
@@ -182,11 +178,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     if (result.ok) {
       setUseCases(result.data);
       // No curated cards means this deployment is advanced-only.
-      if (result.data.length === 0) {
-        setMode((current) => (current === "basic" ? "advanced" : current));
+      if (result.data.length === 0 && mode === "basic") {
+        setMode("advanced");
       }
     }
-  }, []);
+  }, [mode, setMode]);
 
   useEffect(() => {
     void reloadUseCases();

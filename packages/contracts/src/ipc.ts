@@ -32,8 +32,12 @@ export const apiErrorSchema = z.object({
 
 export const appInfoSchema = z.object({
   app: z.string(),
-  electron: z.string(),
-  chrome: z.string(),
+  /**
+   * The two facts the "i" panel shows. `electron` and `chrome` were removed:
+   * the web product has no such versions, and rendering "n/a" for them only
+   * undermined the two values that are real.
+   */
+  version: z.string().min(1),
   node: z.string(),
   platform: z.string(),
   arch: z.string(),
@@ -84,6 +88,11 @@ export const ipcChannels = [
   "auth.verifyCode",
   "auth.signOut",
   "auth.deleteAccount",
+  /** Read, export, import and reset the account's configuration document. */
+  "config.get",
+  "config.export",
+  "config.import",
+  "config.reset",
   "settings.get",
   "settings.update",
   "settings.credentials.status",
@@ -180,10 +189,38 @@ export const appSettingsSchema = z.object({
   /** Notification condition keys the user has acknowledged. */
   dismissedNotificationKeys: z.array(z.string().min(1)).max(100).default([]),
   /** Pseudonymous identifier used only for opt-in usage samples. */
-  installationId: z.string().uuid().nullable().default(null)
+  installationId: z.string().uuid().nullable().default(null),
+  /**
+   * Light is the default appearance; dark is a stored choice, mirrored to the
+   * `maia_appearance` cookie so it can be applied before the first paint.
+   */
+  appearance: z.enum(["light", "dark"]).default("light"),
+  /** Basic = curated cards, advanced = the full catalogue list. */
+  catalogueMode: z.enum(["basic", "advanced"]).default("basic"),
+  /** Open the reasoning panel and reveal it at a reading pace. */
+  studentMode: z.boolean().default(false),
+  /** The transcript's history rail is open by default. */
+  historyOpen: z.boolean().default(true),
+  /** Conversation to reopen after a reload; cleared when it no longer exists. */
+  lastConversationId: z.string().uuid().nullable().default(null),
+  /** Failed runs the person has already seen in the Models view. */
+  acknowledgedFailureIds: z.array(z.string().min(1).max(200)).max(200).default([])
 });
 
-export const settingsUpdateSchema = appSettingsSchema.partial();
+/**
+ * `partial()` keeps each field's `.default()`, which made a one-field save
+ * rewrite every defaulted field — clearing consent and dismissed notices. An
+ * update schema must validate values without inventing absent ones.
+ */
+export const settingsUpdateSchema = z.object(
+  Object.fromEntries(
+    Object.entries(appSettingsSchema.shape).map(([key, schema]) => {
+      const inner =
+        (schema as { def?: { innerType?: z.ZodTypeAny } }).def?.innerType ?? schema;
+      return [key, inner.optional()];
+    })
+  )
+);
 
 const credentialSecretSchema = z.string().min(1).max(4_000);
 

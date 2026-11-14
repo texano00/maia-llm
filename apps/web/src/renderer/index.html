@@ -3,8 +3,38 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
     <link rel="icon" type="image/png" href="./assets/logo-mark.png" />
     <title>Maia LLM</title>
+    <!--
+      Applies the stored appearance before the bundle and the stylesheet paint.
+      The cookie is the server's mirror of the account setting, so a person who
+      chose dark does not see a light frame on a new browser; localStorage covers
+      the signed-out access page on this browser.
+    -->
+    <script>
+      (function () {
+        var value = null;
+        try {
+          var match = document.cookie.match(/(?:^|;\s*)maia_appearance=(light|dark)/);
+          if (match) {
+            value = match[1];
+          }
+        } catch (error) {
+          value = null;
+        }
+
+        if (!value) {
+          try {
+            value = window.localStorage.getItem("maia:appearance");
+          } catch (error) {
+            value = null;
+          }
+        }
+
+        document.documentElement.dataset.theme = value === "dark" ? "dark" : "light";
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

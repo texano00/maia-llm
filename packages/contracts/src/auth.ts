@@ -63,7 +63,9 @@ export const authStateSchema = z.discriminatedUnion("signedIn", [
     signedIn: z.literal(true),
     email: z.string(),
     createdAt: z.string(),
-    expiresAt: z.string()
+    expiresAt: z.string(),
+    /** The account's appearance, mirrored into the pre-paint cookie. */
+    appearance: z.enum(["light", "dark"])
   })
 ]);
 

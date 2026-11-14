@@ -28,7 +28,7 @@ function harness(options: { captcha?: CaptchaVerifier } = {}) {
     sessionSecret: "test-secret",
     now: () => clock
   });
-  const registry = createPublicRegistry(access);
+  const registry = createPublicRegistry(access, { version: "test" });
 
   return {
     db,

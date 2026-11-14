@@ -1,17 +1,16 @@
 import type { ReactNode } from "react";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import logoMark from "../assets/logo-mark.png";
 import { AccountMenu } from "../shared/auth/AccountMenu";
+import { InfoButton } from "../shared/InfoButton";
+import { ThemeToggle } from "../shared/theme/ThemeToggle";
 import { useWorkspace } from "../shared/session/WorkspaceProvider";
+import { useUiPreferences } from "../shared/preferences/useUiPreferences";
 import { useProviderHealth } from "../shared/health/useProviderHealth";
 import { BalanceBadge } from "../features/notifications/BalanceBadge";
 import { NotificationBell } from "../features/notifications/NotificationBell";
-import {
-  FAILURES_ACKNOWLEDGED_EVENT,
-  modelsIndicator,
-  readAcknowledgedFailures
-} from "../features/models/indicator";
+import { modelsIndicator } from "../features/models/indicator";
 
 const navigation = [
   { to: "/catalogue", label: "Catalogue" },
@@ -24,7 +23,7 @@ export function Layout({ children }: { children: ReactNode }) {
   const { sessions } = useWorkspace();
   const { health } = useProviderHealth();
   const navigate = useNavigate();
-  const [acknowledged, setAcknowledged] = useState<string[]>(() => readAcknowledgedFailures());
+  const { acknowledgedFailureIds } = useUiPreferences();
 
   // Activating a readiness notification brings the app forward on the run list.
   useEffect(() => {
@@ -32,13 +31,7 @@ export function Layout({ children }: { children: ReactNode }) {
     return () => unsubscribe?.();
   }, [navigate]);
 
-  useEffect(() => {
-    const onAcknowledged = (): void => setAcknowledged(readAcknowledgedFailures());
-    window.addEventListener(FAILURES_ACKNOWLEDGED_EVENT, onAcknowledged);
-    return () => window.removeEventListener(FAILURES_ACKNOWLEDGED_EVENT, onAcknowledged);
-  }, []);
-
-  const indicator = modelsIndicator(sessions, acknowledged);
+  const indicator = modelsIndicator(sessions, acknowledgedFailureIds);
 
   return (
     <div className="app-shell">
@@ -81,6 +74,8 @@ export function Layout({ children }: { children: ReactNode }) {
           <div className="topbar-actions">
             <BalanceBadge health={health} />
             <NotificationBell />
+            <ThemeToggle />
+            <InfoButton />
             <AccountMenu />
           </div>
         </header>

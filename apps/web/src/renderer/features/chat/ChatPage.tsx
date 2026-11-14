@@ -7,6 +7,8 @@ import type {
   Session
 } from "@maia/contracts";
 import { useWorkspace } from "../../shared/session/WorkspaceProvider";
+import { useUiPreferences } from "../../shared/preferences/useUiPreferences";
+import { updatePreferences } from "../../shared/preferences/store";
 import { MessageContent } from "./MessageContent";
 import { ReasoningPanel } from "./ReasoningPanel";
 import { defaultSession, readySessions, sessionForModel } from "./ready";
@@ -54,8 +56,10 @@ export function ChatPage() {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [creating, setCreating] = useState(false);
-  const [studentMode, setStudentMode] = useState(readStudentMode);
-  const [historyOpen, setHistoryOpen] = useState(readHistoryOpen);
+  // Reading preferences are account settings, read synchronously here.
+  const preferences = useUiPreferences();
+  const studentMode = preferences.studentMode;
+  const historyOpen = preferences.historyOpen;
   const [atBottom, setAtBottom] = useState(true);
   const transcriptRef = useRef<HTMLDivElement>(null);
   // Streaming must not yank the transcript back to the bottom: scrolling up to
@@ -94,7 +98,7 @@ export function ChatPage() {
       }
 
       setActiveConversationId(id);
-      rememberConversation(id);
+      updatePreferences({ lastConversationId: id });
       setStreaming(null);
       const result = await bridge.invoke<ConversationDetail>("conversation.get", { id });
 
@@ -105,7 +109,7 @@ export function ChatPage() {
       } else if (result.error.code === "NOT_FOUND") {
         // The remembered chat was deleted, or belonged to a different install:
         // forget it quietly instead of alerting on every visit to the page.
-        rememberConversation(null);
+        updatePreferences({ lastConversationId: null });
         setActiveConversationId(null);
         setDetail(null);
         void loadConversations();
@@ -121,13 +125,21 @@ export function ChatPage() {
   }, [loadConversations]);
 
   // Routes are lazily loaded, so coming back to the chat remounts this component.
-  // Runs once on mount: afterwards the user's own navigation wins.
+  // The resume point arrives with the settings, so this waits for it once.
+  const restoredRef = useRef(false);
   useEffect(() => {
-    const last = recallConversation();
-    if (last) {
-      void openConversation(last);
+    if (restoredRef.current) {
+      return;
     }
-  }, []);
+
+    const last = preferences.lastConversationId;
+    if (!last) {
+      return;
+    }
+
+    restoredRef.current = true;
+    void openConversation(last);
+  }, [openConversation, preferences.lastConversationId]);
 
   // Starting a model from the catalogue lands here: select that session so the
   // composer is usable straight away instead of asking for a new chat.
@@ -302,7 +314,7 @@ export function ChatPage() {
   function startNewChat(): void {
     setCreating(true);
     setActiveConversationId(null);
-    rememberConversation(null);
+    updatePreferences({ lastConversationId: null });
     setDetail(null);
     setStreaming(null);
     setPendingUser(null);
@@ -311,9 +323,7 @@ export function ChatPage() {
   }
 
   function toggleHistory(): void {
-    const next = !historyOpen;
-    setHistoryOpen(next);
-    writeHistoryOpen(next);
+    updatePreferences({ historyOpen: !historyOpen });
   }
 
   function handleTranscriptScroll(): void {
@@ -400,7 +410,7 @@ export function ChatPage() {
 
     if (!activeConversationId) {
       setActiveConversationId(result.data.conversationId);
-      rememberConversation(result.data.conversationId);
+      updatePreferences({ lastConversationId: result.data.conversationId });
       setCreating(false);
       await loadConversations();
     }
@@ -646,9 +656,7 @@ export function ChatPage() {
               type="checkbox"
               checked={studentMode}
               onChange={(event) => {
-                const next = event.target.checked;
-                setStudentMode(next);
-                writeStudentMode(next);
+                updatePreferences({ studentMode: event.target.checked });
               }}
             />
             <span>Student mode</span>
@@ -979,72 +987,3 @@ function MessageImages({ images }: { images: ChatImage[] }) {
   );
 }
 
-const LAST_CONVERSATION_KEY = "maia:last-conversation";
-const STUDENT_MODE_KEY = "maia:student-mode";
-const LEGACY_REASONING_KEY = "maia:show-reasoning";
-const HISTORY_OPEN_KEY = "maia:history-open";
-
-/**
- * Student mode: open the reasoning panel and reveal it at a human reading pace.
- * Off by default — the thinking of a reasoning model is long, and most answers do
- * not need it.
- */
-function readStudentMode(): boolean {
-  try {
-    const stored = window.localStorage.getItem(STUDENT_MODE_KEY);
-    if (stored !== null) {
-      return stored === "true";
-    }
-
-    // Carries over the previous "Show reasoning" preference.
-    return window.localStorage.getItem(LEGACY_REASONING_KEY) === "true";
-  } catch {
-    return false;
-  }
-}
-
-function writeStudentMode(value: boolean): void {
-  try {
-    window.localStorage.setItem(STUDENT_MODE_KEY, value ? "true" : "false");
-  } catch {
-    // Storage can be unavailable; the toggle still works for this session.
-  }
-}
-
-/** The chat list is open by default; on a narrow window it can be collapsed. */
-function readHistoryOpen(): boolean {
-  try {
-    return window.localStorage.getItem(HISTORY_OPEN_KEY) !== "false";
-  } catch {
-    return true;
-  }
-}
-
-function writeHistoryOpen(value: boolean): void {
-  try {
-    window.localStorage.setItem(HISTORY_OPEN_KEY, value ? "true" : "false");
-  } catch {
-    // Storage can be unavailable; collapsing still works for this session.
-  }
-}
-
-function rememberConversation(id: string | null): void {
-  try {
-    if (id === null) {
-      window.localStorage.removeItem(LAST_CONVERSATION_KEY);
-      return;
-    }
-
-    window.localStorage.setItem(LAST_CONVERSATION_KEY, id);
-  } catch {
-    // Storage can be unavailable; reopening the chat is a convenience only.
-  }
-}
-
-function recallConversation(): string | null {
-  try {
-    return window.localStorage.getItem(LAST_CONVERSATION_KEY);
-  } catch {
-    return null;
-  }
-}

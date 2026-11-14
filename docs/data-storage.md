@@ -187,3 +187,13 @@ Provider keys are ciphertext in `credential_secrets` (AES-256-GCM, account id as
 additional authenticated data). Without `MAIA_CREDENTIAL_KEY` a restored backup
 cannot decrypt them. See [`web-access.md`](./web-access.md) for the full
 operational checklist.
+
+`account_settings.value_json` holds the whole user configuration: provider
+settings and GPU filters, plus the UI preferences that used to live in the
+browser — `appearance`, `catalogueMode`, `studentMode`, `historyOpen`,
+`lastConversationId`, `acknowledgedFailureIds`. The document is validated on read
+and write, so a row from an older version simply gains the new defaults; there is
+no column to add when a preference appears. `config.reset` restores a named scope
+(`appearance`, `catalogue`, `chat`, `gpu`, `telemetry`, `onboarding`),
+`credentials` deletes the handles and their ciphertext, and `all` resets settings
+without touching keys.
