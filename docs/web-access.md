@@ -79,6 +79,17 @@ foreign keys cascade to conversations, messages, images metadata, sessions,
 metrics, settings, credential handles and credential secrets. `auth_events` and
 `access_codes` are removed by digest/address at the same time.
 
+## Basic mode
+
+Basic mode shows the scenarios an operator curates in the backoffice. The portal
+owns the list (`GET /v1/config/use-cases`) and publishes the ordered model ids it
+picked; the product resolves them against its own catalogue and shows the first
+entry that can actually run (`main/services/catalogue/portal-use-cases.ts`).
+`MAIA_PORTAL_URL` must point at the portal (`http://maia-portal:8787` in the
+compose file); without it the deployment publishes no cards. A card whose models
+are all unusable stays visible and says why, and a deployment with no cards shows
+an explanation plus "Browse all models" instead of an empty grid.
+
 ## Which models you can run
 
 The catalogue filter labelled **Only models I can run** answers a question about
@@ -97,14 +108,17 @@ checkbox say how many models it is hiding. The preference is stored
 
 ## Live GPUs and the provider mode
 
-`MAIA_PROVIDER_MODE` says what a deployment intends. Whether a rental is possible
+`MAIA_PROVIDER_MODE` says what a deployment intends, and it defaults to **live**:
+simulation is opt-in (`MAIA_PROVIDER_MODE=mock`). The old default of `mock` meant a
+deployment that simply forgot the variable showed a fixed $25 wallet and simulated
+every rental while telling people they were renting GPUs. Whether a rental is possible
 also depends on the key saved **right now**, so the decision is made per call by
 the provider router (`apps/web/src/main/services/providers/provider-router.ts`)
 instead of once at start-up:
 
 | Situation | Result |
 | --- | --- |
-| `mock` | the simulated provider answers; nothing is rented |
+| `mock` (explicit) | the simulated provider answers, and the wallet shows a fixed $25 |
 | `live`, key saved | real offers, real machines, real billing |
 | `live`, no key | the request is refused with `CREDENTIAL_MISSING`; nothing is simulated |
 | `live`, key rejected by vast.ai | refused with `CREDENTIAL_INVALID` |

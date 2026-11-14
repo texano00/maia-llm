@@ -60,6 +60,8 @@ export const listAccounts = (params = {}) => {
   return api(`/admin-api/accounts?${query.toString()}`);
 };
 
+export const versionInfo = () => api("/admin-api/version");
+
 export const accountDetail = (accountId, params = {}) => {
   const query = new URLSearchParams();
   query.set("windowDays", String(params.windowDays ?? 30));

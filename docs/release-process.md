@@ -171,7 +171,13 @@ terminal, and is what the release note suggests for scripted installs.
 
 ## Version and release checklist
 
-1. Bump `version` in `package.json` and `apps/desktop/package.json` (must match).
+1. Bump `version` in `package.json` and `apps/web/package.json` (must match), and
+   `apps/portal/package.json` when the backoffice changed. The image workflow reads
+   the **root** version, so it becomes the tag: `ghcr.io/texano00/maia-llm-web:<version>`
+   and `…:sha-<12>`. The version tag is meant to be immutable; the workflow now
+   refuses to overwrite an existing one and warns in the step summary, which is
+   what catches a forgotten bump. `MAIA_APP_VERSION` overrides what a running
+   container reports, so an image can be told its tag explicitly.
 2. `npm run lint && npm run typecheck && npm test && npm run build && npm run verify:preload`
 3. Trigger `windows-dev-build.yml` with `publish_release=true` (and `channel=beta`
    for prereleases).
@@ -188,3 +194,13 @@ terminal, and is what the release note suggests for scripted installs.
 > If a platform build is missing from the release, the landing page shows that
 > combination as "coming soon" rather than linking to a 404 — a partially
 > published release degrades instead of breaking.
+
+## Which version is running
+
+| Surface | Where it comes from |
+| --- | --- |
+| Product | `app.info.version` (build-information panel), `GET /health` → `version` |
+| Backoffice | `GET /admin-api/version` → `portal` (this build) and `product` (read from the product's `/health`, `null` when unreachable), shown in the header |
+
+Both read their own `package.json`, with `MAIA_APP_VERSION` winning when a
+deployment wants to pin the reported value.

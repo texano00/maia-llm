@@ -91,6 +91,14 @@ export function createFakeInternal(options: FakeInternalOptions = {}): FakeInter
       return account;
     },
 
+    async productInfo() {
+      if (options.unavailable) {
+        throw new InternalApiError(503, "unavailable");
+      }
+
+      return { version: "0.11.0", mode: "mock" };
+    },
+
     async accountDetail(accountId: string, query = {}): Promise<AccountDetail> {
       calls.details.push(accountId);
       if (options.unavailable) {

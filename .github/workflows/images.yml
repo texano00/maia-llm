@@ -46,11 +46,26 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       # `latest` only from main: a tag build must never move it backwards.
+      #
+      # The version tag is meant to be immutable, and it is the tag the release
+      # notes link to. It silently stopped being immutable once: the version in
+      # package.json was not bumped for a whole feature wave, so every merge
+      # overwrote `<version>` with a different build. Pushing over an existing
+      # version tag is now refused and reported, and the `sha-` tag carries the
+      # identity of this build.
       - name: Tags
         id: tags
         run: |
           image="ghcr.io/${{ steps.meta.outputs.owner }}/${{ matrix.image }}"
-          refs="$image:${{ steps.meta.outputs.version }},$image:sha-${{ steps.meta.outputs.short }}"
+          version_tag="$image:${{ steps.meta.outputs.version }}"
+          refs="$image:sha-${{ steps.meta.outputs.short }}"
+          if docker manifest inspect "$version_tag" >/dev/null 2>&1; then
+            echo "::warning::$version_tag already exists; bump the version in package.json. Publishing sha-${{ steps.meta.outputs.short }} only."
+            echo "stale_version=true" >> "$GITHUB_OUTPUT"
+          else
+            refs="$version_tag,$refs"
+            echo "stale_version=false" >> "$GITHUB_OUTPUT"
+          fi
           if [ "${GITHUB_REF}" = "refs/heads/main" ]; then
             refs="$refs,$image:latest"
           fi
@@ -74,3 +89,7 @@ jobs:
         run: |
           echo "### ${{ matrix.name }}" >> "$GITHUB_STEP_SUMMARY"
           echo "Pushed: ${{ steps.tags.outputs.images }}" >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ steps.tags.outputs.stale_version }}" = "true" ]; then
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "**Version tag not published:** \`${{ steps.meta.outputs.version }}\` already exists. Bump \`version\` in \`package.json\` and \`apps/web/package.json\`." >> "$GITHUB_STEP_SUMMARY"
+          fi

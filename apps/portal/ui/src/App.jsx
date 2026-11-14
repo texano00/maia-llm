@@ -13,6 +13,7 @@ import {
   reorderUseCases,
   signIn,
   signOut,
+  versionInfo,
   updateUseCase,
   uploadImage
 } from "./api.js";
@@ -29,6 +30,7 @@ export default function App() {
   const [tab, setTab] = useState("operations");
   const [hash, setHash] = useState(() => window.location.hash);
   const [error, setError] = useState(null);
+  const [builds, setBuilds] = useState(null);
 
   // `#/accounts/<id>` is the deep dive; every other tab keeps the plain state
   // router it had. A reload of a deep link reopens the same person.
@@ -39,6 +41,31 @@ export default function App() {
   }, []);
 
   const detailRoute = /^#\/accounts\/([^/]+)$/.exec(hash);
+
+  // Which builds are running. Fetched after sign-in only: the route is
+  // administrator-only, and a signed-out page has no business asking.
+  useEffect(() => {
+    if (!session) {
+      return;
+    }
+
+    let cancelled = false;
+    versionInfo()
+      .then((info) => {
+        if (!cancelled) {
+          setBuilds(info);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setBuilds({ portal: "unknown", product: null });
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [session]);
 
   useEffect(() => {
     currentSession()
@@ -67,6 +94,17 @@ export default function App() {
       <header className="brand">
         <h1>Maia LLM backoffice</h1>
         <span>{session.email}</span>
+        <span className="build-info" title="This backoffice, and the product it administers">
+          {builds ? (
+            <>
+              portal {builds.portal}
+              {" · "}
+              {builds.product
+                ? `product ${builds.product.version} (${builds.product.mode} GPUs)`
+                : "product unreachable"}
+            </>
+          ) : null}
+        </span>
         <span style={{ marginLeft: "auto" }}>
           <button
             className="ghost"

@@ -40,6 +40,9 @@ services:
       # Cloudflare is the only thing in front of this port, so the access flow
       # takes the source address from CF-Connecting-IP for per-IP limits.
       MAIA_TRUST_PROXY: ${MAIA_TRUST_PROXY:-cloudflare}
+      # Basic mode is the curated list, which lives in the portal. Without this
+      # the catalogue has no cards to show and falls back to the full grid.
+      MAIA_PORTAL_URL: ${MAIA_PORTAL_URL:-http://maia-portal:8787}
     ports:
       - "127.0.0.1:5173:5173"
     volumes:

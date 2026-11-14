@@ -32,6 +32,9 @@ export interface WebPlatformOptions {
 }
 
 export interface WebPlatform {
+  /** Release version, so a deployment can say which build it serves. */
+  version: string;
+  providerMode: "live" | "mock";
   database: DatabaseConnection;
   catalogue: CatalogueService;
   access: AccessService;
@@ -122,6 +125,7 @@ export class AccountRuntimes {
  */
 export async function createWebPlatform(options: WebPlatformOptions): Promise<WebPlatform> {
   const env = options.env ?? process.env;
+  const version = resolveVersion(env);
   const logger: WebLogger = options.logger ?? {
     info: (message: string) => console.log(`[web] ${message}`),
     warn: (message: string) => console.warn(`[web] ${message}`),
@@ -180,6 +184,7 @@ export async function createWebPlatform(options: WebPlatformOptions): Promise<We
       catalogueRepository,
       reputation,
       providerMode: options.providerMode,
+      portalUrl: env.MAIA_PORTAL_URL ?? null,
       credentialKey,
       access,
       ...(options.readinessTimeoutMinutes !== undefined
@@ -213,7 +218,7 @@ export async function createWebPlatform(options: WebPlatformOptions): Promise<We
   }
 
   const publicRegistry = createPublicRegistry(access, {
-    version: resolveVersion(env),
+    version,
     providerMode: options.providerMode
   });
 
@@ -223,6 +228,8 @@ export async function createWebPlatform(options: WebPlatformOptions): Promise<We
   pruneTimer.unref?.();
 
   return {
+    version,
+    providerMode: options.providerMode,
     database,
     catalogue,
     access,
