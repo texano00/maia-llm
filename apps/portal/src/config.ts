@@ -95,8 +95,9 @@ const DRIVERS: readonly SqlDialect[] = ["sqlite", "postgres", "mysql"];
  * `MAIA_CATALOGUE_REQUIRED` adds to them without a rebuild.
  */
 export const DEFAULT_REQUIRED_REPOSITORIES: readonly string[] = [
-  // Community abliterated quant, asked for by name; far outside the top 300.
-  "huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF"
+  // Community abliterated models, asked for by name; far outside the top 300.
+  "huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF",
+  "huihui-ai/DeepSeek-R1-Distill-Qwen-32B-abliterated"
 ];
 
 /**

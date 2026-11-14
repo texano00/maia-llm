@@ -70,4 +70,22 @@ describe("catalogue readiness", () => {
   it("defaults the filter to on: a model that cannot start is not a choice", () => {
     expect(defaultAppSettings.catalogueSupportedOnly).toBe(true);
   });
+
+  it("keeps models visible when the catalogue carries no verdicts at all", () => {
+    // A Hub listing cannot answer "can I run this"; hiding the whole catalogue
+    // because the backend was not the source is a worse answer.
+    expect(readyFor({ supported: undefined, gated: "none" }, both, { verdictsAvailable: false })).toBe(
+      true
+    );
+    // But if other rows do carry verdicts, an unproven row is still unproven.
+    expect(readyFor({ supported: undefined, gated: "none" }, both, { verdictsAvailable: true })).toBe(
+      false
+    );
+  });
+
+  it("does not empty the catalogue because a key failed verification", () => {
+    // Presence is the signal here; a rejected key is refused at start instead.
+    const stored = { huggingface: true, vastai: true };
+    expect(readyFor({ supported: true, gated: "none" }, stored)).toBe(true);
+  });
 });

@@ -1,6 +1,6 @@
 {
   "name": "@maia/web",
-  "version": "0.11.3",
+  "version": "0.11.4",
   "private": true,
   "description": "Maia LLM web app and server",
   "author": {

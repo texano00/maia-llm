@@ -15,6 +15,8 @@ import { CatalogueRepository } from "../main/services/catalogue/repository";
 import { CatalogueService } from "../main/services/catalogue/service";
 import { createFixtureCatalogueSource } from "../main/services/catalogue/fixture-source";
 import { createHuggingFaceSource } from "../main/services/catalogue/huggingface-source";
+import { createPortalCatalogueSource } from "../main/services/catalogue/portal-source";
+import { createCompositeCatalogueSource } from "../main/services/catalogue/composite-source";
 import { GpuReputationClient } from "../main/services/gpu/reputation";
 import type { IpcRegistry } from "../main/ipc/registry";
 import { createAccountRuntime, type AccountRuntime, type WebLogger } from "./accounts";
@@ -126,6 +128,8 @@ export class AccountRuntimes {
 export async function createWebPlatform(options: WebPlatformOptions): Promise<WebPlatform> {
   const env = options.env ?? process.env;
   const version = resolveVersion(env);
+  /** `MAIA_PORTAL_URL`: the deployed portal, when there is one. */
+  const portalUrl = env.MAIA_PORTAL_URL?.trim() || null;
   const logger: WebLogger = options.logger ?? {
     info: (message: string) => console.log(`[web] ${message}`),
     warn: (message: string) => console.warn(`[web] ${message}`),
@@ -157,11 +161,21 @@ export async function createWebPlatform(options: WebPlatformOptions): Promise<We
     repository: catalogueRepository,
     source:
       options.providerMode === "live"
-        ? // The catalogue is public data: it reads with the deployment token, not
-          // with anybody's personal provider key.
-          createHuggingFaceSource({
-            getToken: async () => env.MAIA_PORTAL_HF_TOKEN ?? env.HF_TOKEN
-          })
+        ? // The portal publishes the only list that carries a verdict. Listing the
+          // Hub directly left every row without one, so "only models I can run" had
+          // nothing to believe and hid the whole catalogue. No portal configured, or
+          // no snapshot published yet: fall back to the Hub, which reads with the
+          // deployment token, never with anybody's personal provider key.
+          (portalUrl
+            ? createCompositeCatalogueSource({
+                portal: createPortalCatalogueSource({ portalUrl, logger }),
+                hub: createHuggingFaceSource({
+                  getToken: async () => env.MAIA_PORTAL_HF_TOKEN ?? env.HF_TOKEN
+                })
+              })
+            : createHuggingFaceSource({
+                getToken: async () => env.MAIA_PORTAL_HF_TOKEN ?? env.HF_TOKEN
+              }))
         : createFixtureCatalogueSource(),
     logger,
     ...(options.providerMode === "mock" ? { ttlMs: 0 } : {})
@@ -184,7 +198,7 @@ export async function createWebPlatform(options: WebPlatformOptions): Promise<We
       catalogueRepository,
       reputation,
       providerMode: options.providerMode,
-      portalUrl: env.MAIA_PORTAL_URL ?? null,
+      portalUrl,
       credentialKey,
       access,
       ...(options.readinessTimeoutMinutes !== undefined

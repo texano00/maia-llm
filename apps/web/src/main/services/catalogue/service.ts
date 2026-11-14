@@ -16,6 +16,14 @@ export type CatalogueSupport = ModelSupport;
 export type { CatalogueSnapshotInfo };
 
 export interface CatalogueSource {
+  /**
+   * Rows that already carry the backend's verdict.
+   *
+   * Only a snapshot source can answer this: the Hub knows what exists, the product
+   * needs to know what runs. `null` means "no opinion", and the payload path below
+   * is used instead.
+   */
+  listResolved?(search: string, limit: number): Promise<CatalogueModel[] | null>;
   /** Latest model listing, optionally scoped by a search term. */
   listModels(options: { search?: string; limit: number }): Promise<HuggingFaceModelPayload[]>;
   /** Single model plus its file tree. */
@@ -213,6 +221,20 @@ export class CatalogueService {
   }
 
   private async refreshInto(search: string): Promise<CatalogueResult> {
+    // A snapshot source answers with verdicts already attached, which is what the
+    // readiness filter has to believe; the Hub listing is the fallback.
+    const resolved = this.options.source.listResolved
+      ? await this.options.source.listResolved(search, 100)
+      : null;
+    if (resolved) {
+      this.options.repository.saveModels(resolved);
+      return {
+        models: resolved,
+        stale: false,
+        fetchedAt: this.now().toISOString()
+      };
+    }
+
     const payloads = await this.options.source.listModels({
       limit: 100,
       ...(search.length > 0 ? { search } : {})
