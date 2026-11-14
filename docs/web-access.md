@@ -79,10 +79,61 @@ foreign keys cascade to conversations, messages, images metadata, sessions,
 metrics, settings, credential handles and credential secrets. `auth_events` and
 `access_codes` are removed by digest/address at the same time.
 
+## Appearance and configuration
+
+Light is the default. The top-bar control switches the whole product (access page,
+catalogue, chat, models, settings), and the choice is stored on the account.
+
+- Before the bundle runs, an inline script in `apps/web/src/renderer/index.html`
+  sets `<html data-theme>` from the `maia_appearance` cookie, then from
+  `localStorage["maia:appearance"]`, then `"light"`. The server writes the cookie
+  on `auth.state` and whenever `settings.update` changes the appearance. It is
+  deliberately **not** HttpOnly (the script must read it), holds only `light` or
+  `dark`, and is never used for authentication.
+- Every UI preference is account data: `appearance`, `catalogueMode`,
+  `studentMode`, `historyOpen`, `lastConversationId` and
+  `acknowledgedFailureIds` live in `account_settings` next to the provider
+  settings, so clearing browser storage loses nothing.
+- Values left in `localStorage` by an earlier version are copied once on the next
+  sign-in (the `maia:prefs-migrated` marker records the browser) and only into
+  fields still at their defaults, so a deliberate reset is never undone.
+
+### Configuration document
+
+`config.get` and `config.export` return the same versioned document:
+
+```json
+{
+  "version": 1,
+  "exportedAt": "2026-11-14T10:00:00.000Z",
+  "settings": { "appearance": "dark", "catalogueMode": "advanced" },
+  "credentials": [
+    { "provider": "huggingface", "saved": true, "status": "valid", "lastVerifiedAt": "…" }
+  ]
+}
+```
+
+- It never contains credential material — only presence and verification state.
+- `config.import` applies recognised settings, reports unknown or invalid entries
+  as `skipped`, refuses a document larger than 64 KB or with a different
+  `version`, requires `confirm: true`, and can never create, replace or remove a
+  key.
+- `config.reset` takes a scope: `appearance`, `catalogue`, `chat`, `gpu`,
+  `telemetry`, `onboarding`, `credentials` or `all`. `all` restores settings and
+  keeps provider keys; deleting keys is its own explicit scope.
+
+The same channels are usable from a person's own tooling with their session
+cookie:
+
+```bash
+curl -s -X POST https://web.maiallm.com/rpc \
+  -H 'content-type: application/json' --cookie 'maia_session=…' \
+  -d '{"channel":"config.export","payload":{}}'
+```
+
 ## Operations
 
-- `GET /health` stays public and unauthenticated: `{ "ok": true, "mode": "live" }`.
-- Logs carry neither codes (except the development transport), raw addresses nor
+- `GET /health` stays public and unauthenticated: `{ "ok": true, "mode": "live" }`.- Logs carry neither codes (except the development transport), raw addresses nor
   full IPs.
 - Backups: the database and the `images/` directory on the `webdata` volume.
   Provider secrets in a backup are ciphertext and need `MAIA_CREDENTIAL_KEY`.

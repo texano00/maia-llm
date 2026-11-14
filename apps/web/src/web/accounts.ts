@@ -22,6 +22,7 @@ import type { GpuReputationClient } from "../main/services/gpu/reputation";
 import { IpcRegistry } from "../main/ipc/registry";
 import { registerSettingsHandlers } from "../main/ipc/settings";
 import { registerWorkspaceHandlers } from "../main/ipc/workspace";
+import { registerConfigHandlers } from "../main/ipc/config";
 import type { AccessService } from "../main/services/accounts/service";
 
 export interface WebLogger {
@@ -183,6 +184,9 @@ export async function createAccountRuntime(
     images: conversationImages,
     broadcastChat: (payload) => options.onEvent(accountId, chatEventChannel, payload)
   });
+
+  // The person's own tooling reads the same document the settings screen shows.
+  registerConfigHandlers({ registry, settings, credentials });
 
   registry.register("auth.deleteAccount", authDeleteAccountSchema, async (payload, context) => {
     // A GPU must not outlive the account that rented it (Principle II), and the

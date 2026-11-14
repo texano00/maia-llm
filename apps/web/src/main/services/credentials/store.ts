@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { CredentialProvider, CredentialStatus } from "@maia/contracts";
+import type { CredentialPresence, CredentialProvider, CredentialStatus } from "@maia/contracts";
 import type { DatabaseConnection } from "../../storage/db";
 import type { SecretVault } from "./ports";
 
@@ -77,6 +77,29 @@ export class CredentialStore {
       vastai: this.getRow("vastai") !== undefined,
       s3: this.getRow("s3") !== undefined
     };
+  }
+
+  /**
+   * What a configuration document may say about provider keys: presence and
+   * verification state. The ciphertext is never read here.
+   */
+  snapshot(): CredentialPresence[] {
+    return (["huggingface", "vastai", "s3"] as const).map((provider) => {
+      const row = this.getRow(provider);
+      return {
+        provider,
+        saved: row !== undefined,
+        status: row?.status ?? "unknown",
+        lastVerifiedAt: row?.last_verified_at ?? null
+      };
+    });
+  }
+
+  /** The `credentials` reset scope: every handle and its ciphertext. */
+  async removeAll(): Promise<void> {
+    for (const provider of ["huggingface", "vastai", "s3"] as const) {
+      await this.remove(provider);
+    }
   }
 
   markVerified(provider: CredentialProvider, ok: boolean): void {

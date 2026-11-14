@@ -1,10 +1,11 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { mkdir, readFile, stat } from "node:fs/promises";
 import { extname, join, normalize, resolve } from "node:path";
-import { fail, ipcChannels, type IpcChannel, type Result } from "@maia/contracts";
+import { fail, ipcChannels, type AuthState, type IpcChannel, type Result } from "@maia/contracts";
 import { createWebPlatform, publicChannels, type WebPlatform } from "./host";
 import type { IpcRegistry } from "../main/ipc/registry";
 import { clearedSessionCookie, maxAgeSeconds, parseCookie, sessionCookie } from "./cookies";
+import { appearanceCookie } from "./preferences";
 
 const PORT = Number(process.env.MAIA_WEB_PORT ?? 5173);
 const HOST = process.env.MAIA_WEB_HOST ?? "127.0.0.1";
@@ -164,8 +165,20 @@ async function handleRpc(
     },
     clearSessionCookie: () => {
       headers["set-cookie"] = clearedSessionCookie(secureCookies);
+    },
+    setAppearance: (value) => {
+      headers["set-cookie"] = appearanceCookie(value, secureCookies);
     }
   });
+
+  // The signed-in account's stored appearance seeds the cookie a new browser
+  // reads before its first paint.
+  if (typed === "auth.state" && result.ok) {
+    const state = result.data as AuthState;
+    if (state.signedIn) {
+      headers["set-cookie"] = appearanceCookie(state.appearance, secureCookies);
+    }
+  }
 
   if (result.ok && typed === "auth.deleteAccount" && accountId) {
     platform.accounts.evict(accountId);

@@ -3,18 +3,25 @@ import { authRequestCodeSchema, authVerifyCodeSchema } from "@maia/contracts";
 import { IpcRegistry } from "../main/ipc/registry";
 import type { AccessService } from "../main/services/accounts/service";
 
+export interface PublicRegistryOptions {
+  /** Release version shown in the build-info panel. */
+  version: string;
+}
+
 /**
  * Channels that must answer before a session exists. Everything that touches
  * account data is registered on the per-account runtime instead, so a missing
  * cookie can never reach a repository.
  */
-export function createPublicRegistry(access: AccessService): IpcRegistry {
+export function createPublicRegistry(
+  access: AccessService,
+  options: PublicRegistryOptions
+): IpcRegistry {
   const registry = new IpcRegistry();
 
   registry.register("app.info", z.unknown(), () => ({
     app: "web",
-    electron: "n/a",
-    chrome: "n/a",
+    version: options.version,
     node: process.versions.node,
     platform: process.platform,
     arch: process.arch,

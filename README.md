@@ -153,6 +153,11 @@ shared, and deleting it deletes everything attached to it.
 
 - Chats, conversations and attached images are stored on the server for your
   account and are exportable from the app at any time.
+- Settings follow the account, not the browser: appearance (light by default, with
+  a top-bar switch), catalogue view and chat reading preferences all come back
+  after you sign in elsewhere. **Settings → Account → Configuration** exports them
+  as a JSON document and imports it again; provider keys appear there as "saved"
+  or "not saved", never as values.
 - Provider keys are encrypted at rest and only decrypted to call the provider you
   chose.
 - Optional usage measurements are content-free, off by default, and can be turned

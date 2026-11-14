@@ -7,11 +7,16 @@ import {
   DEFAULT_MIN_DOWNLOAD_MBPS,
   DEFAULT_MIN_UPLOAD_MBPS,
   type AppSettings,
+  type ConfigImportResult,
+  type ConfigResetResult,
+  type ConfigurationDocument,
+  type ConfigurationScope,
   type CredentialStatus,
   type CredentialTestResult,
   type GpuFilters
 } from "@maia/contracts";
 import { useAuth } from "../../shared/auth/AuthProvider";
+import { hydratePreferences } from "../../shared/preferences/store";
 import { SettingsSection } from "./SettingsSection";
 import { initialExpanded, sectionForError, toggleSection, type SettingsSectionId } from "./sections";
 
@@ -38,6 +43,9 @@ function toStartupRetries(value: string): number | null {
 export function SettingsPage() {
   const { email } = useAuth();
   const bridgeAvailable = typeof window !== "undefined" && Boolean(window.maia);
+  const [configBusy, setConfigBusy] = useState(false);
+  const [configMessage, setConfigMessage] = useState<string | null>(null);
+  const [resetScope, setResetScope] = useState<ConfigurationScope>("appearance");
 
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [diagnosticsUrl, setDiagnosticsUrl] = useState(DEFAULT_DIAGNOSTICS_URL);
@@ -287,6 +295,93 @@ export function SettingsPage() {
     setError(result.error.message);
   }
 
+  async function exportConfiguration(): Promise<void> {
+    setConfigBusy(true);
+    setConfigMessage(null);
+
+    const result = await window.maia?.invoke<ConfigurationDocument>("config.export");
+    setConfigBusy(false);
+
+    if (!result?.ok) {
+      setConfigMessage(result?.error.message ?? "The configuration could not be exported.");
+      return;
+    }
+
+    const blob = new Blob([JSON.stringify(result.data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `maia-configuration-${new Date().toISOString().slice(0, 10)}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+    setConfigMessage("Configuration exported.");
+  }
+
+  async function importConfiguration(file: File): Promise<void> {
+    setConfigBusy(true);
+    setConfigMessage(null);
+
+    try {
+      const parsed: unknown = JSON.parse(await file.text());
+      const result = await window.maia?.invoke<ConfigImportResult>("config.import", {
+        document: parsed,
+        confirm: true
+      });
+
+      if (!result?.ok) {
+        setConfigMessage(result?.error.message ?? "The configuration could not be imported.");
+        return;
+      }
+
+      setSettings(result.data.settings);
+      setDiagnosticsUrl(result.data.settings.diagnosticsUrl);
+      hydratePreferences(result.data.settings);
+
+      const skipped = result.data.skipped.length;
+      setConfigMessage(
+        `Imported ${result.data.applied.length} setting${
+          result.data.applied.length === 1 ? "" : "s"
+        }${skipped > 0 ? `, skipped ${skipped} unknown or invalid entr${skipped === 1 ? "y" : "ies"}` : ""}.`
+      );
+    } catch {
+      setConfigMessage("That file is not valid JSON.");
+    } finally {
+      setConfigBusy(false);
+    }
+  }
+
+  async function resetConfiguration(): Promise<void> {
+    const warning =
+      resetScope === "credentials"
+        ? "Delete every provider key saved for this account? This cannot be undone."
+        : resetScope === "all"
+          ? "Reset every setting to its default? Provider keys are kept."
+          : `Reset “${resetScope}” to its defaults?`;
+
+    if (!window.confirm(warning)) {
+      return;
+    }
+
+    setConfigBusy(true);
+    setConfigMessage(null);
+
+    const result = await window.maia?.invoke<ConfigResetResult>("config.reset", {
+      scope: resetScope,
+      confirm: true
+    });
+    setConfigBusy(false);
+
+    if (!result?.ok) {
+      setConfigMessage(result?.error.message ?? "The reset failed.");
+      return;
+    }
+
+    setSettings(result.data.settings);
+    setDiagnosticsUrl(result.data.settings.diagnosticsUrl);
+    hydratePreferences(result.data.settings);
+    setConfigMessage(result.data.credentialsCleared ? "Provider keys deleted." : "Settings reset.");
+  }
+
   return (
     <section>
       <p className="eyebrow">Settings</p>
@@ -309,13 +404,67 @@ export function SettingsPage() {
         expanded={expandedSections.includes("updates")}
         onToggle={handleSectionToggle}
       >
-        <div className="settings-card">
+        <div className="settings-card settings-card-stacked">
           <div>
             <h2>Account</h2>
             <p className="lede">
               Signed in as {email ?? "—"}. Conversations, images and provider keys belong to this
               address; signing out or deleting it is done from the menu in the top bar.
             </p>
+          </div>
+
+          <div>
+            <h2>Configuration</h2>
+            <p className="lede">
+              Your settings live on the server, so they follow you to any browser. The export
+              contains every preference and whether each provider key is saved — never the key
+              itself.
+            </p>
+            <div className="update-actions config-actions">
+              <button type="button" disabled={configBusy} onClick={() => void exportConfiguration()}>
+                Export configuration
+              </button>
+              <label className="link-button config-import">
+                Import configuration
+                <input
+                  type="file"
+                  accept="application/json,.json"
+                  disabled={configBusy}
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    event.target.value = "";
+                    if (file) {
+                      void importConfiguration(file);
+                    }
+                  }}
+                />
+              </label>
+            </div>
+
+            <div className="update-actions config-actions">
+              <label className="inline-field">
+                <span>Reset</span>
+                <select
+                  value={resetScope}
+                  disabled={configBusy}
+                  onChange={(event) => setResetScope(event.target.value as ConfigurationScope)}
+                >
+                  <option value="appearance">Appearance</option>
+                  <option value="catalogue">Catalogue view</option>
+                  <option value="chat">Chat reading</option>
+                  <option value="gpu">GPU preferences</option>
+                  <option value="telemetry">Usage reporting</option>
+                  <option value="onboarding">Onboarding and notices</option>
+                  <option value="credentials">Provider keys</option>
+                  <option value="all">Everything except keys</option>
+                </select>
+              </label>
+              <button type="button" disabled={configBusy} onClick={() => void resetConfiguration()}>
+                Reset
+              </button>
+            </div>
+
+            {configMessage ? <p className="field-hint">{configMessage}</p> : null}
           </div>
         </div>
       </SettingsSection>

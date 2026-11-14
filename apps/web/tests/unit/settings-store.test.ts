@@ -5,7 +5,7 @@ import {
   DEFAULT_GPU_STARTUP_RETRIES
 } from "@maia/contracts";
 import { closeDatabase, openDatabase, type DatabaseConnection } from "../../src/main/storage/db";
-import { SettingsStore } from "../../src/main/services/settings/store";
+import { SettingsStore, defaultAppSettings } from "../../src/main/services/settings/store";
 import { seedAccount } from "../helpers/accounts";
 
 describe("SettingsStore", () => {
@@ -23,17 +23,7 @@ describe("SettingsStore", () => {
   });
 
   it("returns the documented defaults before anything is saved", () => {
-    expect(store.get()).toEqual({
-      diagnosticsUrl: DEFAULT_DIAGNOSTICS_URL,
-      gpuFilters: DEFAULT_GPU_FILTERS,
-      gpuStartupRetries: DEFAULT_GPU_STARTUP_RETRIES,
-      usageReporting: false,
-      walletWarnThresholdMicroUsd: 2_000_000,
-      onboardingCompleted: false,
-      onboardingDismissedAt: null,
-      dismissedNotificationKeys: [],
-      installationId: null
-    });
+    expect(store.get()).toEqual(defaultAppSettings);
     expect(DEFAULT_DIAGNOSTICS_URL).toBe("https://api.maiallm.com");
     expect(DEFAULT_GPU_FILTERS).toEqual({
       countries: [],
@@ -50,9 +40,9 @@ describe("SettingsStore", () => {
 
   it("moves an install that still holds the old localhost default", () => {
     db.prepare(
-      "INSERT INTO preferences (key, value_json, updated_at) VALUES (?, ?, ?)"
+      "INSERT INTO account_settings (account_id, value_json, updated_at) VALUES (?, ?, ?)"
     ).run(
-      "app_settings",
+      "account-test",
       JSON.stringify({
         diagnosticsUrl: "http://localhost:8787",
         gpuFilters: DEFAULT_GPU_FILTERS,
@@ -90,45 +80,25 @@ describe("SettingsStore", () => {
 
   it("falls back to defaults when the stored row is not valid settings", () => {
     db.prepare(
-      "INSERT INTO preferences (key, value_json, updated_at) VALUES (?, ?, ?)"
-    ).run("app_settings", JSON.stringify({ diagnosticsUrl: "not a url" }), "2026-11-03T00:00:00.000Z");
+      "INSERT INTO account_settings (account_id, value_json, updated_at) VALUES (?, ?, ?)"
+    ).run("account-test", JSON.stringify({ diagnosticsUrl: "not a url" }), "2026-11-03T00:00:00.000Z");
 
-    expect(store.get()).toEqual({
-      diagnosticsUrl: DEFAULT_DIAGNOSTICS_URL,
-      gpuFilters: DEFAULT_GPU_FILTERS,
-      gpuStartupRetries: DEFAULT_GPU_STARTUP_RETRIES,
-      usageReporting: false,
-      walletWarnThresholdMicroUsd: 2_000_000,
-      onboardingCompleted: false,
-      onboardingDismissedAt: null,
-      dismissedNotificationKeys: [],
-      installationId: null
-    });
+    expect(store.get()).toEqual(defaultAppSettings);
   });
 
   it("survives a corrupted row", () => {
     db.prepare(
-      "INSERT INTO preferences (key, value_json, updated_at) VALUES (?, ?, ?)"
-    ).run("app_settings", "{not json", "2026-11-03T00:00:00.000Z");
+      "INSERT INTO account_settings (account_id, value_json, updated_at) VALUES (?, ?, ?)"
+    ).run("account-test", "{not json", "2026-11-03T00:00:00.000Z");
 
-    expect(store.get()).toEqual({
-      diagnosticsUrl: DEFAULT_DIAGNOSTICS_URL,
-      gpuFilters: DEFAULT_GPU_FILTERS,
-      gpuStartupRetries: DEFAULT_GPU_STARTUP_RETRIES,
-      usageReporting: false,
-      walletWarnThresholdMicroUsd: 2_000_000,
-      onboardingCompleted: false,
-      onboardingDismissedAt: null,
-      dismissedNotificationKeys: [],
-      installationId: null
-    });
+    expect(store.get()).toEqual(defaultAppSettings);
   });
 
   it("uses the default retry count for settings saved before the option existed", () => {
     db.prepare(
-      "INSERT INTO preferences (key, value_json, updated_at) VALUES (?, ?, ?)"
+      "INSERT INTO account_settings (account_id, value_json, updated_at) VALUES (?, ?, ?)"
     ).run(
-      "app_settings",
+      "account-test",
       JSON.stringify({
         diagnosticsUrl: DEFAULT_DIAGNOSTICS_URL,
         gpuFilters: DEFAULT_GPU_FILTERS

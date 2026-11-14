@@ -5,7 +5,9 @@ import { DEFAULT_STATUS_FILTER, filterRuns, emptyStateFor, STATUS_FILTERS, type 
 import { describeRun } from "./run-details";
 import { isChatEligible, type VisibleStatus } from "./status";
 import { ExternalAccessPanel } from "./ExternalAccessPanel";
-import { acknowledgeFailures, failedRunIds } from "./indicator";
+import { mergeAcknowledged, failedRunIds } from "./indicator";
+import { useUiPreferences } from "../../shared/preferences/useUiPreferences";
+import { updatePreferences } from "../../shared/preferences/store";
 import { useModelRuns } from "./useModelRuns";
 import { useProviderHealth } from "../../shared/health/useProviderHealth";
 import { openOnboarding } from "../onboarding/open";
@@ -24,6 +26,7 @@ const STATUS_LABELS: Record<VisibleStatus, string> = {
 export function ModelsPage() {
   const { health } = useProviderHealth();
   const { runs, historyError, reloadHistory } = useModelRuns();
+  const { acknowledgedFailureIds } = useUiPreferences();
   const [filter, setFilter] = useState<StatusFilter>(DEFAULT_STATUS_FILTER);
   const [now, setNow] = useState(() => Date.now());
   const visibleRuns = filterRuns(runs, filter);
@@ -32,8 +35,11 @@ export function ModelsPage() {
   // Opening Models acknowledges failures: the navigation indicator goes back to
   // orange and the bell stops repeating them.
   useEffect(() => {
-    acknowledgeFailures(failedRunIds(runs));
-  }, [runs]);
+    const merged = mergeAcknowledged(acknowledgedFailureIds, failedRunIds(runs));
+    if (merged.length !== acknowledgedFailureIds.length) {
+      updatePreferences({ acknowledgedFailureIds: merged });
+    }
+  }, [acknowledgedFailureIds, runs]);
 
   // The elapsed/cost meter only matters while a run is in flight; a one-second
   // tick mirrors the chat meter without touching the history query.

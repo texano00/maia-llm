@@ -38,6 +38,11 @@ export interface AccessServiceOptions {
   captcha: CaptchaVerifier;
   /** Pepper for code digests; also makes old sessions unusable when rotated. */
   sessionSecret: string;
+  /**
+   * The account's stored appearance, so `auth.state` can hand the transport a
+   * value for the pre-paint cookie. Absent means light.
+   */
+  appearanceFor?: (accountId: string) => "light" | "dark";
   codeTtlSeconds?: number;
   sessionDays?: number;
   now?: () => number;
@@ -61,6 +66,7 @@ export class AccessService {
   private readonly mailer: Mailer;
   private readonly captcha: CaptchaVerifier;
   private readonly sessionSecret: string;
+  private readonly appearanceFor: ((accountId: string) => "light" | "dark") | undefined;
   private readonly codeTtlSeconds: number;
   private readonly sessionDays: number;
   private readonly now: () => number;
@@ -71,6 +77,7 @@ export class AccessService {
     this.mailer = options.mailer;
     this.captcha = options.captcha;
     this.sessionSecret = options.sessionSecret;
+    this.appearanceFor = options.appearanceFor;
     this.codeTtlSeconds = options.codeTtlSeconds ?? ACCESS_CODE_TTL_SECONDS;
     this.sessionDays = options.sessionDays ?? ACCESS_SESSION_DAYS;
     this.now = options.now ?? (() => Date.now());
@@ -100,7 +107,8 @@ export class AccessService {
       signedIn: true,
       email: resolved.account.email,
       createdAt: resolved.account.created_at,
-      expiresAt: resolved.session.expires_at
+      expiresAt: resolved.session.expires_at,
+      appearance: this.appearanceFor?.(resolved.account.id) ?? "light"
     };
   }
 

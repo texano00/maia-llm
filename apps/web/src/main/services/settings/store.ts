@@ -4,6 +4,7 @@ import {
   DEFAULT_GPU_FILTERS,
   DEFAULT_GPU_STARTUP_RETRIES,
   type AppSettings,
+  type ConfigurationScope,
   type SettingsUpdate
 } from "@maia/contracts";
 import type { DatabaseConnection } from "../../storage/db";
@@ -24,7 +25,34 @@ export const defaultAppSettings: AppSettings = {
   onboardingCompleted: false,
   onboardingDismissedAt: null,
   dismissedNotificationKeys: [],
-  installationId: null
+  installationId: null,
+  appearance: "light",
+  catalogueMode: "basic",
+  studentMode: false,
+  historyOpen: true,
+  lastConversationId: null,
+  acknowledgedFailureIds: []
+};
+
+/**
+ * Which fields a scope restores. `all` covers every field; `credentials` is not
+ * here because provider secrets live in the credential store, not in settings.
+ */
+const SCOPE_FIELDS: Record<
+  Exclude<ConfigurationScope, "all" | "credentials">,
+  Array<keyof AppSettings>
+> = {
+  appearance: ["appearance"],
+  catalogue: ["catalogueMode"],
+  chat: ["studentMode", "historyOpen", "lastConversationId"],
+  gpu: ["gpuFilters", "gpuStartupRetries"],
+  telemetry: ["usageReporting", "walletWarnThresholdMicroUsd", "installationId"],
+  onboarding: [
+    "onboardingCompleted",
+    "onboardingDismissedAt",
+    "dismissedNotificationKeys",
+    "acknowledgedFailureIds"
+  ]
 };
 
 function migrate(settings: AppSettings): AppSettings {
@@ -70,7 +98,32 @@ export class SettingsStore {
     }
 
     const next = appSettingsSchema.parse(merged);
+    return this.persist(next);
+  }
 
+  /**
+   * Restores one section (or everything) to the documented defaults. Provider
+   * secrets are never touched here: deleting a key is its own explicit scope.
+   */
+  reset(scope: ConfigurationScope): AppSettings {
+    if (scope === "credentials") {
+      return this.get();
+    }
+
+    const next: Record<string, unknown> = { ...this.get() };
+    const keys =
+      scope === "all"
+        ? (Object.keys(defaultAppSettings) as Array<keyof AppSettings>)
+        : SCOPE_FIELDS[scope];
+
+    for (const key of keys) {
+      next[key] = defaultAppSettings[key];
+    }
+
+    return this.persist(appSettingsSchema.parse(next));
+  }
+
+  private persist(next: AppSettings): AppSettings {
     this.database
       .prepare(
         `INSERT INTO account_settings (account_id, value_json, updated_at)

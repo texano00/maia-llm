@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { Notification, NotificationSnapshot } from "@maia/contracts";
 import { useWorkspace } from "../../shared/session/WorkspaceProvider";
-import { readAcknowledgedFailures } from "../models/indicator";
+import { useUiPreferences } from "../../shared/preferences/useUiPreferences";
 
 /**
  * Header bell. Server-side conditions (credentials, balance) come from the main
@@ -38,7 +38,7 @@ export function NotificationBell() {
     return () => clearInterval(timer);
   }, [reload]);
 
-  const acknowledged = new Set(readAcknowledgedFailures());
+  const acknowledged = new Set(useUiPreferences().acknowledgedFailureIds);
   const failures: Notification[] = sessions
     .filter((session) => session.state === "failed" && !acknowledged.has(session.id))
     .map((session) => ({

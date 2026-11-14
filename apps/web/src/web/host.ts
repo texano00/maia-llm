@@ -1,10 +1,12 @@
 import { randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { IpcChannel } from "@maia/contracts";
 import { closeDatabase, createConnection, type DatabaseConnection } from "../main/storage/connection";
 import { loadMigrations } from "./migrations";
 import { AccountRepository } from "../main/services/accounts/repository";
 import { AccessService } from "../main/services/accounts/service";
+import { SettingsStore } from "../main/services/settings/store";
 import { createMailer } from "../main/services/accounts/mailer";
 import { createCaptchaVerifier } from "../main/services/accounts/turnstile";
 import { loadCredentialKey } from "../main/services/credentials/vault";
@@ -132,7 +134,10 @@ export async function createWebPlatform(options: WebPlatformOptions): Promise<We
     repository: accountsRepository,
     mailer: createMailer({ env, logger }),
     captcha: createCaptchaVerifier({ env, logger }),
-    sessionSecret: resolveSessionSecret(env, logger)
+    sessionSecret: resolveSessionSecret(env, logger),
+    // Read on `auth.state` only, so the cookie can carry the account's choice
+    // to the next first paint.
+    appearanceFor: (accountId) => new SettingsStore(database, accountId).get().appearance
   });
 
   const catalogueRepository = new CatalogueRepository(database);
@@ -199,7 +204,7 @@ export async function createWebPlatform(options: WebPlatformOptions): Promise<We
     }
   }
 
-  const publicRegistry = createPublicRegistry(access);
+  const publicRegistry = createPublicRegistry(access, { version: resolveVersion(env) });
 
   const sweepTimer = setInterval(() => accounts.sweep(30 * 60_000), 60_000);
   sweepTimer.unref?.();
@@ -221,11 +226,37 @@ export async function createWebPlatform(options: WebPlatformOptions): Promise<We
   };
 }
 
+/**
+ * Release version for the build-info panel: the deployment override first, then
+ * the package manifest beside the running bundle (source tree or container).
+ * "unknown" is a real answer the panel states in words, not a placeholder.
+ */
+function resolveVersion(env: Record<string, string | undefined>): string {
+  const explicit = env.MAIA_APP_VERSION?.trim();
+  if (explicit) {
+    return explicit;
+  }
+
+  for (const relative of ["../package.json", "../../package.json"]) {
+    try {
+      const manifest = JSON.parse(readFileSync(new URL(relative, import.meta.url), "utf8")) as {
+        version?: unknown;
+      };
+      if (typeof manifest.version === "string" && manifest.version.length > 0) {
+        return manifest.version;
+      }
+    } catch {
+      // Try the next location.
+    }
+  }
+
+  return "unknown";
+}
+
 function resolveSessionSecret(
   env: Record<string, string | undefined>,
   logger: WebLogger
-): string {
-  const secret = env.MAIA_SESSION_SECRET?.trim();
+): string {  const secret = env.MAIA_SESSION_SECRET?.trim();
   if (secret) {
     return secret;
   }

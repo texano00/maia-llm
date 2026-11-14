@@ -26,8 +26,13 @@ export function registerSettingsHandlers(options: SettingsHandlersOptions): void
 
   registry.register("settings.get", z.unknown(), (): AppSettings => store.get());
 
-  registry.register("settings.update", settingsUpdateSchema, (payload: SettingsUpdate): AppSettings => {
+  registry.register("settings.update", settingsUpdateSchema, (payload: SettingsUpdate, context): AppSettings => {
+    const before = store.get();
     const next = store.update(payload);
+    if (payload.appearance !== undefined && next.appearance !== before.appearance) {
+      context.setAppearance?.(next.appearance);
+    }
+
     onChange?.(next);
     return next;
   });
