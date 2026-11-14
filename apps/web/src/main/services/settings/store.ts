@@ -22,7 +22,7 @@ export const defaultAppSettings: AppSettings = {
   gpuStartupRetries: DEFAULT_GPU_STARTUP_RETRIES,
   usageReporting: true,
   walletWarnThresholdMicroUsd: 2_000_000,
-  catalogueSupportedOnly: false,
+  catalogueSupportedOnly: true,
   onboardingCompleted: false,
   onboardingDismissedAt: null,
   dismissedNotificationKeys: [],

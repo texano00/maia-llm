@@ -3007,6 +3007,57 @@ body {
 
 /* The drawer, the popovers and the run indicator are affordances, not decoration:
    anybody who asked the system for less motion gets none of it. */
+
+/* Live logs: a terminal inside a run card. Monospace, fixed height, scrolls on its
+   own so a long boot does not push the rest of Models off the screen. */
+.model-run-logs {
+  margin-top: 0.75rem;
+}
+
+.run-logs {
+  margin-top: 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  padding: 0.6rem 0.7rem;
+  background: rgb(0 0 0 / 12%);
+}
+
+.run-logs-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.run-logs-tabs,
+.run-logs-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.run-logs-body {
+  margin: 0.5rem 0 0;
+  padding: 0.6rem 0.7rem;
+  max-height: 18rem;
+  overflow: auto;
+  border-radius: 0.45rem;
+  background: rgb(0 0 0 / 28%);
+  color: #d8e2f2;
+  font: 0.78rem/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  tab-size: 2;
+}
+
+@media (max-width: 640px) {
+  .run-logs-body {
+    max-height: 14rem;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .chat-history,
   .info-panel,

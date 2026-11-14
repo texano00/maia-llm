@@ -46,8 +46,19 @@ describe("header notifications and provider health", () => {
 
     accountId = accounts.createAccount("person@example.com", NOW).id;
 
+    runtime = await buildRuntime("live");
+  });
+
+  /**
+   * One account runtime in the mode under test.
+   *
+   * The setup prompts only make sense on a live deployment, and only mock mode has
+   * a wallet that does not require the provider's API — so each test builds the
+   * mode it is about.
+   */
+  async function buildRuntime(mode: "live" | "mock"): Promise<AccountRuntime> {
     const catalogueRepository = new CatalogueRepository(db);
-    runtime = await createAccountRuntime({
+    return createAccountRuntime({
       accountId,
       database: db,
       imagesDir,
@@ -57,13 +68,13 @@ describe("header notifications and provider health", () => {
       }),
       catalogueRepository,
       reputation: { snapshot: () => [], report: () => undefined } as unknown as GpuReputationClient,
-      providerMode: "mock",
+      providerMode: mode,
       credentialKey: KEY,
       access,
       logger: silentLogger,
       onEvent: () => undefined
     });
-  });
+  }
 
   afterEach(async () => {
     runtime.suspend();
@@ -88,6 +99,8 @@ describe("header notifications and provider health", () => {
     const snapshotHealth = await health();
 
     expect(snapshot.indicator).not.toBe("none");
+    // A live deployment without keys cannot rent or download anything, so the
+    // setup prompts are the point of this surface.
     expect(snapshotHealth.vastai.state).toBe("missing");
     expect(snapshotHealth.huggingface.state).toBe("missing");
   });
@@ -126,8 +139,9 @@ describe("header notifications and provider health", () => {
     expect(saved.ok).toBe(true);
 
     const snapshotHealth = await health();
+    // The key exists, so it is no longer "missing". Whether vast.ai accepts it is a
+    // network question this test does not ask.
     expect(snapshotHealth.vastai.state).not.toBe("missing");
-    expect(snapshotHealth.balance.state).toBe("known");
 
     const snapshot = await notifications();
     expect(snapshot.notifications.some((entry) => entry.key === "credential:vastai:missing")).toBe(false);
@@ -139,9 +153,14 @@ describe("header notifications and provider health", () => {
   });
 
   it("reports the mock wallet without a key and keeps it after the key is replaced", async () => {
-    // Mock mode has no wallet to read, so the fixture amount stands in; what matters
-    // is that the badge is never blank and never a stale zero.
+    // A simulated deployment rents nothing and needs no key, so it reports every
+    // provider ready and a fixture balance; what matters is that the badge is never
+    // blank and never a stale zero.
+    runtime.suspend();
+    runtime = await buildRuntime("mock");
+
     const withoutKey = await health();
+    expect(withoutKey.vastai.state).toBe("ok");
     expect(withoutKey.balance.state).toBe("known");
     expect(withoutKey.balance.amountMicroUsd).toBeGreaterThan(0);
 
@@ -159,10 +178,11 @@ describe("header notifications and provider health", () => {
     const replaced = await health();
     expect(replaced.balance.state).toBe("known");
 
-    // Clearing the key makes the provider missing again, which the bell reports.
+    // A simulation stays ready even with no key: nothing is verified, nothing is
+    // rented, and the readiness filter must not hide a catalogue that works.
     await runtime.registry.invoke("settings.credentials.clear", { provider: "vastai" });
     const cleared = await health();
-    expect(cleared.vastai.state).toBe("missing");
+    expect(cleared.vastai.state).toBe("ok");
     expect(cleared.balance.amountMicroUsd).not.toBe(0);
   });
 });

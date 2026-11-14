@@ -67,7 +67,7 @@ describe("catalogue readiness", () => {
     expect(preferencesSnapshot().catalogueSupportedOnly).toBe(false);
   });
 
-  it("defaults the filter to off so nothing startable is hidden by surprise", () => {
-    expect(defaultAppSettings.catalogueSupportedOnly).toBe(false);
+  it("defaults the filter to on: a model that cannot start is not a choice", () => {
+    expect(defaultAppSettings.catalogueSupportedOnly).toBe(true);
   });
 });

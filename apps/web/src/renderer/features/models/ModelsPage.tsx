@@ -5,6 +5,7 @@ import { DEFAULT_STATUS_FILTER, filterRuns, emptyStateFor, STATUS_FILTERS, type 
 import { describeRun } from "./run-details";
 import { isChatEligible, type VisibleStatus } from "./status";
 import { ExternalAccessPanel } from "./ExternalAccessPanel";
+import { RunLogs } from "./RunLogs";
 import { mergeAcknowledged, failedRunIds } from "./indicator";
 import { useUiPreferences } from "../../shared/preferences/useUiPreferences";
 import { updatePreferences } from "../../shared/preferences/store";
@@ -29,6 +30,9 @@ export function ModelsPage() {
   const { acknowledgedFailureIds } = useUiPreferences();
   const [filter, setFilter] = useState<StatusFilter>(DEFAULT_STATUS_FILTER);
   const [now, setNow] = useState(() => Date.now());
+  // One panel at a time: two live logs side by side would poll the provider twice
+  // for no benefit.
+  const [logsOpen, setLogsOpen] = useState<string | null>(null);
   const visibleRuns = filterRuns(runs, filter);
   const empty = emptyStateFor(filter);
 
@@ -193,6 +197,20 @@ export function ModelsPage() {
                 {details.accruedMicroUsd !== null ? <p className="muted small">{details.note}</p> : null}
 
                 {run.state === "active" ? <ExternalAccessPanel sessionId={run.id} /> : null}
+
+  {/* Every run can be diagnosed, including the ones that never started: that is
+      exactly when the log is the only way to find out why. */}
+  <div className="model-run-logs">
+    <button
+      type="button"
+      className="ghost-button"
+      aria-expanded={logsOpen === run.id}
+      onClick={() => setLogsOpen((current) => (current === run.id ? null : run.id))}
+    >
+      {logsOpen === run.id ? "Hide logs" : "Read more logs"}
+    </button>
+    {logsOpen === run.id ? <RunLogs sessionId={run.id} /> : null}
+  </div>
 
                 {isChatEligible(run.state) ? (
                   <div className="model-run-actions">

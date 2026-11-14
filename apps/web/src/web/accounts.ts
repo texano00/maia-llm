@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   authDeleteAccountSchema,
+  sessionLogsRequestSchema,
   capabilityForPipelineTag,
   chatEventChannel,
   type ProviderHealth
@@ -160,17 +161,27 @@ export async function createAccountRuntime(
     }
   };
 
+  // The simulated provider needs no key and verifies nothing, so a mock deployment
+  // reports every provider as ready. Without this, a demo or a local run showed
+  // "no key" and hid the whole catalogue from the readiness filter — the exact
+  // state the filter is meant to describe, but false in a simulation.
+  const simulated = options.providerMode === "mock";
+
   const health = new ProviderHealthMonitor({
-    hasHuggingFace: async () => Boolean(await credentials.get("huggingface")),
-    hasVastai: async () => Boolean(await credentials.get("vastai")),
+    hasHuggingFace: async () =>
+      simulated || Boolean(await credentials.get("huggingface")),
+    hasVastai: async () => simulated || Boolean(await credentials.get("vastai")),
     verifyVastai: async () => {
+      if (simulated) {
+        return true;
+      }
       const secret = await credentials.get("vastai");
       return secret ? new VastAiClient(secret).testConnection() : false;
     },
     getBalanceMicroUsd: async () => {
       // Mock mode has no wallet: a fixed amount keeps the badge meaningful without
       // pretending a real balance was read.
-      if (options.providerMode !== "live") {
+      if (simulated) {
         return MOCK_BALANCE_MICRO_USD;
       }
       const secret = await credentials.get("vastai");
@@ -193,8 +204,10 @@ export async function createAccountRuntime(
     logger
   });
 
+  const sessionStore = new SessionStore(database, accountId);
+
   const sessions = new SessionOrchestrator({
-    store: new SessionStore(database, accountId),
+    store: sessionStore,
     compute,
     inference,
     idleTimeoutMinutes: options.idleTimeoutMinutes ?? 10,
@@ -223,6 +236,111 @@ export async function createAccountRuntime(
   registry.register("update.check", z.unknown(), () => idleUpdateStatus());
   registry.register("update.download", z.unknown(), () => idleUpdateStatus());
   registry.register("update.install", z.unknown(), () => idleUpdateStatus());
+
+  // Live logs for a run: the container's stdout, and the instance record plus the
+  // daemon log that explain a container which never started. Polled by the view
+  // while it is open, which is what makes it "live" without a second event bus.
+  registry.register("session.logs", sessionLogsRequestSchema, async (payload) => {
+    const session = sessionStore.get(payload.sessionId);
+    const fetchedAt = new Date().toISOString();
+    if (!session) {
+      throw new Error("That run is not part of this account.");
+    }
+
+    // "Live" means the run can still make news: the view polls only while this is
+    // true, so a finished run does not keep asking the provider.
+    const live = ["estimated", "provisioning", "ready", "active"].includes(session.state);
+    const instanceId = session.instanceId;
+    if (instanceId === null || instanceId === undefined) {
+      return {
+        sessionId: session.id,
+        kind: payload.kind,
+        text: null,
+        note:
+          options.providerMode === "mock"
+            ? "Simulated runs rent nothing, so there are no vast.ai logs to read."
+            : "This run has no provider instance yet: the machine has not been booked.",
+        fetchedAt,
+        live
+      };
+    }
+
+    if (options.providerMode === "mock") {
+      return {
+        sessionId: session.id,
+        kind: payload.kind,
+        text: null,
+        note: "Simulated runs rent nothing, so there are no vast.ai logs to read.",
+        fetchedAt,
+        live
+      };
+    }
+
+    const secret = await credentials.get("vastai");
+    if (!secret) {
+      return {
+        sessionId: session.id,
+        kind: payload.kind,
+        text: null,
+        note: "No vast.ai key is saved, so the provider cannot be asked for logs.",
+        fetchedAt,
+        live
+      };
+    }
+
+    const client = new VastAiClient(secret);
+    if (payload.kind === "instance") {
+      const text = await client.getInstanceLogs(instanceId, { tail: payload.tail });
+
+      return {
+        sessionId: session.id,
+        kind: payload.kind,
+        text,
+        note: text ? null : "The container has not printed anything yet.",
+        fetchedAt,
+        live
+      };
+    }
+
+    // Debug: what vast.ai thinks of the instance, then the daemon log.
+    const details: string[] = [];
+    try {
+      const instance = await client.getInstance(instanceId);
+      const fields: Array<[string, unknown]> = [
+        ["instance", instance.id],
+        ["machine", instance.machine_id],
+        ["label", instance.label],
+        ["status", instance.actual_status],
+        ["message", instance.status_msg],
+        ["host", instance.public_ipaddr ?? instance.ssh_host]
+      ];
+      for (const [label, value] of fields) {
+        if (value !== null && value !== undefined && String(value).length > 0) {
+          details.push(`${label}: ${String(value)}`);
+        }
+      }
+      const ports = instance.ports;
+      if (ports && Object.keys(ports).length > 0) {
+        details.push(`ports: ${JSON.stringify(ports)}`);
+      }
+    } catch (error) {
+      details.push(`instance details unavailable: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    const daemon = await client.getInstanceLogs(instanceId, { tail: payload.tail, daemon: true });
+    const text = [details.join("\n"), daemon ? `\n--- daemon log ---\n${daemon}` : ""]
+      .join("")
+      .trim();
+
+    return {
+      sessionId: session.id,
+      kind: payload.kind,
+      text: text.length > 0 ? text : null,
+      note: text.length > 0 ? null : "vast.ai returned no daemon log for this instance.",
+      fetchedAt,
+      live
+    };
+  });
 
   registerSystemHandlers({ registry, notifications, health, onHealth: syncHealth });
   // Seeded before the first render so the bell is correct without a client poll.
