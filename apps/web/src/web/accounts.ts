@@ -21,6 +21,7 @@ import { createMockComputeProvider, createMockInference } from "../main/services
 import { createVastComputeProvider } from "../main/services/providers/vastai/compute-provider";
 import { createProviderRouter } from "../main/services/providers/provider-router";
 import { createPortalUseCaseReader } from "../main/services/catalogue/portal-use-cases";
+import { deriveDefaultScenarios } from "../main/services/catalogue/default-scenarios";
 import { VastAiClient } from "../main/services/providers/vastai/client";
 import { createVllmRuntime } from "../main/services/inference/vllm";
 import { createModelPlanResolver } from "../main/services/inference/model-plan-resolver";
@@ -273,6 +274,12 @@ export async function createAccountRuntime(
         supported: support?.supported === true,
         reason: support?.supported === false ? (support.reason ?? null) : null
       };
+    },
+    // A deployment whose curator has written nothing still gets a usable basic
+    // mode, derived from models the backend already marked runnable.
+    fallback: async () => {
+      const result = await options.catalogue.search({ limit: 80 });
+      return deriveDefaultScenarios(result.models);
     },
     logger
   });

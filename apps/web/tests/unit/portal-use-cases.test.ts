@@ -160,4 +160,74 @@ describe("basic-mode use cases", () => {
     expect(await reader.list()).toEqual(first);
     expect(calls.count).toBe(2);
   });
+
+  it("falls back to the catalogue's own scenarios when the curator published none", async () => {
+    const calls = { count: 0 };
+    const reader = createPortalUseCaseReader({
+      portalUrl: "http://portal.test",
+      resolve,
+      fetchImpl: fakeFetch({ useCases: [] }, calls),
+      fallback: async () => [
+        {
+          id: "default-best",
+          title: "The best model available",
+          description: "Derived from the catalogue.",
+          imageUrl: null,
+          modelId: "Qwen/Qwen2.5-7B-Instruct",
+          modelName: "Qwen2.5 7B Instruct",
+          reason: null
+        }
+      ]
+    });
+
+    const cards = await reader.list();
+
+    expect(cards.map((card) => card.id)).toEqual(["default-best"]);
+  });
+
+  it("falls back without asking the portal when no URL is configured", async () => {
+    const calls = { count: 0 };
+    const reader = createPortalUseCaseReader({
+      portalUrl: null,
+      resolve,
+      fetchImpl: fakeFetch(portalAnswer, calls),
+      fallback: async () => [
+        {
+          id: "default-best",
+          title: "Best",
+          description: "x".repeat(12),
+          imageUrl: null,
+          modelId: "Qwen/Qwen2.5-7B-Instruct",
+          modelName: "Qwen2.5 7B Instruct",
+          reason: null
+        }
+      ],
+      logger: { warn: () => undefined }
+    });
+
+    expect((await reader.list()).map((card) => card.id)).toEqual(["default-best"]);
+    expect(calls.count).toBe(0);
+  });
+
+  it("falls back when the portal is broken and nothing was cached", async () => {
+    const reader = createPortalUseCaseReader({
+      portalUrl: "http://portal.test",
+      resolve,
+      fetchImpl: fakeFetch({ error: "boom" }, { count: 0 }, 503),
+      fallback: async () => [
+        {
+          id: "default-best",
+          title: "Best",
+          description: "x".repeat(12),
+          imageUrl: null,
+          modelId: "Qwen/Qwen2.5-7B-Instruct",
+          modelName: "Qwen2.5 7B Instruct",
+          reason: null
+        }
+      ],
+      logger: { warn: () => undefined }
+    });
+
+    expect((await reader.list()).map((card) => card.id)).toEqual(["default-best"]);
+  });
 });

@@ -11,6 +11,7 @@ import {
 import { useWorkspace } from "../../shared/session/WorkspaceProvider";
 import { useProviderHealth } from "../../shared/health/useProviderHealth";
 import { openOnboarding } from "../onboarding/open";
+import { requestNotificationPermission } from "../../shared/notify";
 import { hiddenCount, readinessFor } from "./readiness";
 import { PowerPicker } from "./PowerPicker";
 import { formatParameters, formatContext, formatBytes, formatUsd } from "../../shared/format";
@@ -32,7 +33,6 @@ export function CataloguePage() {
     mode,
     setMode,
     useCases,
-    reloadUseCases,
     refreshCatalogue,
     selectModel,
     selected,
@@ -73,10 +73,13 @@ export function CataloguePage() {
   // without a vast.ai key, cannot be started, so the filter and the start button
   // ask the same function.
   const credentialStatus = {
-    // An unverified key is not a missing one; only an explicit "missing" hides
-    // models, and before the first health snapshot nothing is hidden.
-    huggingface: health ? health.huggingface.state !== "missing" : true,
-    vastai: health ? health.vastai.state !== "missing" : true
+    // `missing` and `invalid` both mean "no usable key"; only an unverified key
+    // (`unknown`) counts as present, and before the first health snapshot nothing
+    // is hidden.
+    huggingface: health
+      ? health.huggingface.state === "ok" || health.huggingface.state === "unknown"
+      : true,
+    vastai: health ? health.vastai.state === "ok" || health.vastai.state === "unknown" : true
   };
   const hidden = hiddenCount(models, credentialStatus);
   const visibleModels = supportedOnly
@@ -236,15 +239,6 @@ export function CataloguePage() {
             </button>
           </article>
         ))}
-        {useCases.length === 0 ? (
-          <p className="muted">
-            No curated use cases yet.{" "}
-            <button type="button" className="ghost-button" onClick={() => void reloadUseCases()}>
-              Reload
-            </button>{" "}
-            or switch to Advanced to browse the whole catalogue.
-          </p>
-        ) : null}
       </div>
 
       <div className="catalogue-grid" hidden={mode !== "advanced"}>
@@ -477,11 +471,19 @@ export function CataloguePage() {
                       (access !== null && gatedConsentModelId !== selected.model.id)
                     }
                     onClick={() => {
-                      navigate("/chat");
+                      // A GPU takes minutes; ask now, while the click is still a
+                      // user gesture, so the boot can be announced later.
+                      void requestNotificationPermission();
                       void startSession(
                         selected.model.id,
                         access !== null && gatedConsentModelId === selected.model.id
-                      );
+                      ).then((session) => {
+                        // A booked run belongs in Models, where its boot progress
+                        // and cost live. Chat is for talking to a model that is up.
+                        if (session) {
+                          navigate("/models");
+                        }
+                      });
                     }}
                   >
                     {starting

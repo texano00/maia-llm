@@ -39,6 +39,11 @@ export interface UseCaseReaderOptions {
   } | null;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
+  /**
+   * Cards to show when the portal publishes none: there is no portal, it is
+   * unreachable, or the curator has not written any yet.
+   */
+  fallback?: (() => Promise<UseCaseCard[]>) | undefined;
   /** How long an answer is reused; the backoffice edits are not per-request news. */
   ttlMs?: number;
   now?: () => number;
@@ -60,10 +65,15 @@ export function createPortalUseCaseReader(options: UseCaseReaderOptions): UseCas
   let cached: { at: number; cards: UseCaseCard[] } | null = null;
   let inFlight: Promise<UseCaseCard[]> | null = null;
 
+  async function fallbackCards(): Promise<UseCaseCard[]> {
+    return options.fallback ? options.fallback() : [];
+  }
+
   async function fetchCards(): Promise<UseCaseCard[]> {
     const base = options.portalUrl?.replace(/\/$/, "");
     if (!base) {
-      return [];
+      options.logger?.warn("use cases: MAIA_PORTAL_URL is unset, using the catalogue's own scenarios");
+      return fallbackCards();
     }
 
     const response = await fetchImpl(`${base}/v1/config/use-cases`, {
@@ -79,7 +89,14 @@ export function createPortalUseCaseReader(options: UseCaseReaderOptions): UseCas
       throw new Error("the portal returned an unexpected use-case list");
     }
 
-    return parsed.data.useCases
+    const curated = parsed.data.useCases;
+    if (curated.length === 0) {
+      // No curation yet: show what the catalogue can actually run instead of an
+      // empty screen that suggests basic mode is broken.
+      return fallbackCards();
+    }
+
+    return curated
       .slice()
       .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
       .map((useCase) => {
@@ -129,7 +146,11 @@ export function createPortalUseCaseReader(options: UseCaseReaderOptions): UseCas
           options.logger?.warn(
             `use cases unavailable: ${error instanceof Error ? error.message : String(error)}`
           );
-          return cached?.cards ?? [];
+          if (cached) {
+            return cached.cards;
+          }
+
+          return fallbackCards().catch(() => []);
         })
         .finally(() => {
           inFlight = null;
