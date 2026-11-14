@@ -7,9 +7,7 @@ import { migrations } from "../../src/db/migrations/index.js";
 import { openSqliteDatabase, type SqliteDatabase } from "../../src/db/sqlite.js";
 import {
   AdminAuthService,
-  TokenService,
-  hashPassword,
-  verifyPassword
+  TokenService
 } from "../../src/services/portal-auth.js";
 
 const HOUR = 60 * 60_000;
@@ -103,7 +101,7 @@ describe("installation credentials", () => {
   });
 });
 
-describe("administrator sessions", () => {
+describe("operator sessions", () => {
   let directory: string;
   let db: SqliteDatabase;
   let clock: number;
@@ -115,7 +113,6 @@ describe("administrator sessions", () => {
     await migrate(db, migrations);
     clock = Date.parse("2026-11-07T10:00:00.000Z");
     admins = new AdminAuthService({ db, sessionTtlMs: 12 * HOUR, now: () => clock });
-    await admins.seed("admin@maia.test", "correct horse");
   });
 
   afterEach(async () => {
@@ -123,28 +120,37 @@ describe("administrator sessions", () => {
     rmSync(directory, { recursive: true, force: true });
   });
 
-  it("hashes passwords with a salted scrypt digest", () => {
-    const stored = hashPassword("correct horse");
+  it("keys the session by the product account that was verified", async () => {
+    const session = await admins.signInVerified("account-1", "Operator@Maia.test");
 
-    expect(stored).toMatch(/^scrypt\$[0-9a-f]{32}\$[0-9a-f]{128}$/);
-    expect(verifyPassword("correct horse", stored)).toBe(true);
-    expect(verifyPassword("wrong", stored)).toBe(false);
+    expect(session.adminId).toBe("account-1");
+    expect(session.email).toBe("operator@maia.test");
+    await expect(admins.sessionFor(session.sessionToken)).resolves.toMatchObject({
+      adminId: "account-1",
+      email: "operator@maia.test"
+    });
   });
 
-  it("signs in, resolves the session, expires it and signs out", async () => {
-    await expect(admins.signIn("admin@maia.test", "wrong")).resolves.toBeNull();
+  it("admits the same operator twice without a duplicate row", async () => {
+    await admins.signInVerified("account-1", "operator@maia.test");
+    const second = await admins.signInVerified("account-1", "operator@maia.test");
 
-    const session = await admins.signIn("admin@maia.test", "correct horse");
-    expect(session?.email).toBe("admin@maia.test");
-    await expect(admins.sessionFor(session!.sessionToken)).resolves.toMatchObject({
-      email: "admin@maia.test"
-    });
+    const rows = (await db.query("SELECT id FROM admin_users WHERE email = ?", [
+      "operator@maia.test"
+    ])) as unknown as Array<{ id: string }>;
+    expect(rows).toHaveLength(1);
+    expect(second.adminId).toBe("account-1");
+  });
 
-    await admins.signOut(session!.sessionToken);
-    await expect(admins.sessionFor(session!.sessionToken)).resolves.toBeNull();
+  it("resolves a session, expires it and signs out", async () => {
+    const session = await admins.signInVerified("account-1", "operator@maia.test");
+    await expect(admins.sessionFor(session.sessionToken)).resolves.not.toBeNull();
 
-    const second = await admins.signIn("admin@maia.test", "correct horse");
+    await admins.signOut(session.sessionToken);
+    await expect(admins.sessionFor(session.sessionToken)).resolves.toBeNull();
+
+    const second = await admins.signInVerified("account-1", "operator@maia.test");
     clock += 12 * HOUR + 1;
-    await expect(admins.sessionFor(second!.sessionToken)).resolves.toBeNull();
+    await expect(admins.sessionFor(second.sessionToken)).resolves.toBeNull();
   });
 });

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { capabilitiesSchema } from "./capabilities";
 
 /**
  * Passwordless access: an email address and a one-time code. One page creates
@@ -65,7 +66,9 @@ export const authStateSchema = z.discriminatedUnion("signedIn", [
     createdAt: z.string(),
     expiresAt: z.string(),
     /** The account's appearance, mirrored into the pre-paint cookie. */
-    appearance: z.enum(["light", "dark"])
+    appearance: z.enum(["light", "dark"]),
+    /** Effective capabilities: `operator` implies `debug`. */
+    capabilities: capabilitiesSchema
   })
 ]);
 

@@ -16,6 +16,7 @@ import { GpuReputationService } from "./services/gpu-reputation-service.js";
 import { TelemetryService } from "./services/telemetry-service.js";
 import { UsageService } from "./services/usage-service.js";
 import { AdminAuthService, TokenService } from "./services/portal-auth.js";
+import { InternalClient } from "./services/internal-client.js";
 import { createHuggingFaceCatalogueClient } from "./services/catalogue/huggingface.js";
 import { SnapshotService } from "./services/catalogue/snapshot-service.js";
 import { createUseCaseReader, type UseCaseSummary } from "./services/catalogue/use-cases.js";
@@ -30,6 +31,8 @@ export interface AppContext {
   failures: FailureService;
   tokens: TokenService;
   admins: AdminAuthService;
+  /** The product's `/internal/*` API: the portal's only source of identities. */
+  internal: InternalClient;
   snapshot: SnapshotService;
   useCases: () => Promise<UseCaseSummary[]>;
   useCaseAdmin: UseCaseAdminService;
@@ -107,11 +110,12 @@ export async function createAppContext(options: CreateAppContextOptions = {}): P
     ...(options.now ? { now: options.now } : {}),
   });
 
-  // Bootstrap the single administrator from deployment configuration; the
-  // backoffice has no self-service sign-up.
-  if (config.adminEmail && config.adminPassword) {
-    await admins.seed(config.adminEmail, config.adminPassword);
-  }
+  // Operators are product accounts with the `operator` capability; there is no
+  // portal-side account or password to seed.
+  const internal = new InternalClient({
+    baseUrl: config.webInternalUrl,
+    token: config.internalToken,
+  });
 
   const snapshot = new SnapshotService({
     db,
@@ -138,6 +142,7 @@ export async function createAppContext(options: CreateAppContextOptions = {}): P
     usage,
     tokens,
     admins,
+    internal,
     snapshot,
     useCases,
     useCaseAdmin,

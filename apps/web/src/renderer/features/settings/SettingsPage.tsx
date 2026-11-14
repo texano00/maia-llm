@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useLocation } from "react-router-dom";
 import {
   DEFAULT_DIAGNOSTICS_URL,
   DEFAULT_GPU_FILTERS,
@@ -18,7 +19,13 @@ import {
 import { useAuth } from "../../shared/auth/AuthProvider";
 import { hydratePreferences } from "../../shared/preferences/store";
 import { SettingsSection } from "./SettingsSection";
-import { initialExpanded, sectionForError, toggleSection, type SettingsSectionId } from "./sections";
+import {
+  initialExpanded,
+  sectionForError,
+  toggleSection,
+  type SettingsSectionId
+} from "./sections";
+import { isVisibleSection, requestedSection } from "./visibility";
 
 function toPositiveInt(value: string): number | null {
   const trimmed = value.trim();
@@ -41,8 +48,12 @@ function toStartupRetries(value: string): number | null {
 }
 
 export function SettingsPage() {
-  const { email } = useAuth();
+  const { email, capabilities } = useAuth();
+  const location = useLocation();
   const bridgeAvailable = typeof window !== "undefined" && Boolean(window.maia);
+  // The developer sections are not part of an ordinary account's screen, and the
+  // server sends no values for them either.
+  const showDeveloperSections = isVisibleSection("diagnostics", capabilities);
   const [configBusy, setConfigBusy] = useState(false);
   const [configMessage, setConfigMessage] = useState<string | null>(null);
   const [resetScope, setResetScope] = useState<ConfigurationScope>("appearance");
@@ -78,6 +89,22 @@ export function SettingsPage() {
     }
   }, [error]);
 
+  // The bell links here as `/settings?section=vastai`; an unknown id is ignored so
+  // a hand-typed URL cannot scroll to nothing.
+  useEffect(() => {
+    const target = requestedSection(location.search);
+    if (!target) {
+      return;
+    }
+
+    setExpandedSections((current) => (current.includes(target) ? current : [...current, target]));
+    const handle = window.setTimeout(() => {
+      document.getElementById(`settings-section-${target}`)?.scrollIntoView({ block: "start" });
+    }, 50);
+
+    return () => window.clearTimeout(handle);
+  }, [location.search]);
+
   function handleSectionToggle(id: SettingsSectionId, open: boolean): void {
     setExpandedSections((current) => (open ? toggleSection(current, id) : current.filter((entry) => entry !== id)));
   }
@@ -96,7 +123,7 @@ export function SettingsPage() {
 
       if (result.ok) {
         setSettings(result.data);
-        setDiagnosticsUrl(result.data.diagnosticsUrl);
+        setDiagnosticsUrl(result.data.diagnosticsUrl ?? DEFAULT_DIAGNOSTICS_URL);
         applyGpuFilters(result.data.gpuFilters);
         setGpuStartupRetries(String(result.data.gpuStartupRetries));
         setWalletWarnUsd(String(result.data.walletWarnThresholdMicroUsd / 1_000_000));
@@ -286,7 +313,7 @@ export function SettingsPage() {
 
     if (result.ok) {
       setSettings(result.data);
-      setDiagnosticsUrl(result.data.diagnosticsUrl);
+      setDiagnosticsUrl(result.data.diagnosticsUrl ?? DEFAULT_DIAGNOSTICS_URL);
       setSaveState("saved");
       return;
     }
@@ -334,7 +361,7 @@ export function SettingsPage() {
       }
 
       setSettings(result.data.settings);
-      setDiagnosticsUrl(result.data.settings.diagnosticsUrl);
+      setDiagnosticsUrl(result.data.settings.diagnosticsUrl ?? DEFAULT_DIAGNOSTICS_URL);
       hydratePreferences(result.data.settings);
 
       const skipped = result.data.skipped.length;
@@ -377,7 +404,7 @@ export function SettingsPage() {
     }
 
     setSettings(result.data.settings);
-    setDiagnosticsUrl(result.data.settings.diagnosticsUrl);
+    setDiagnosticsUrl(result.data.settings.diagnosticsUrl ?? DEFAULT_DIAGNOSTICS_URL);
     hydratePreferences(result.data.settings);
     setConfigMessage(result.data.credentialsCleared ? "Provider keys deleted." : "Settings reset.");
   }
@@ -734,6 +761,7 @@ export function SettingsPage() {
       </form>
       </SettingsSection>
 
+      {showDeveloperSections ? (
       <SettingsSection
         id="diagnostics"
         title="Telemetry and diagnostics host"
@@ -793,7 +821,9 @@ export function SettingsPage() {
         </div>
       </form>
       </SettingsSection>
+      ) : null}
 
+      {showDeveloperSections ? (
       <SettingsSection
         id="usage"
         title="Usage reporting"
@@ -805,16 +835,17 @@ export function SettingsPage() {
         <div>
           <h2>Usage reporting</h2>
           <p className="lede">
-            Optional. When on, Maia sends one content-free measurement per finished run: the model,
-            its capability, how many tokens it produced, how long generation took, the resulting
-            tokens per second, and the outcome. It also sends a pseudonymous installation id, device
-            facts (operating system, version, architecture) and the network address observed by the
-            server, which is kept without an expiry.
+            On by default, and yours to switch off. While it is on, Maia sends one content-free
+            measurement per finished run: the model, its capability, how many tokens it produced,
+            how long generation took, the resulting tokens per second, and the outcome. It also
+            sends a pseudonymous installation id, device facts (operating system, version,
+            architecture) and the network address observed by the server, which is kept without an
+            expiry.
           </p>
           <p className="lede">
             It never sends prompts, responses, images, file paths or credentials. Your email is used
             only to own your data and receive access codes, and the data is never sold. Turning this
-            off stops the next run from reporting.
+            off stops the next run from reporting, and nothing is sent retrospectively.
           </p>
         </div>
         <div className="update-actions">
@@ -829,6 +860,7 @@ export function SettingsPage() {
         </div>
       </section>
       </SettingsSection>
+      ) : null}
     </section>
   );
 }

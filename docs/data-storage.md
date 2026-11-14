@@ -152,13 +152,14 @@ The work is confined to one new adapter and a short verification pass:
 - `sqlite3 var/maia.sqlite 'select * from gpu_machines'` works from any shell.
 - Telemetry can be read over HTTP: `GET /v1/diagnostics/logs?level=error&limit=50`.
 
-## Opt-in usage samples (portal)
+## Usage samples (portal)
 
-`usage_samples` holds one content-free measurement per finished model run, sent only
-when the user turns usage reporting on. The desktop sends the model, capability,
-output tokens, generation time, resulting tokens per second, the outcome, a
-pseudonymous installation id, device facts (OS, version, architecture) and the
-timestamp. It never sends prompts, responses, images, file paths or credentials.
+`usage_samples` holds one content-free measurement per finished model run, sent
+by default and switched off only when the owner turns usage reporting off
+(Principle I, version 1.1.0). The product sends the model, capability, output
+tokens, generation time, resulting tokens per second, the outcome, a pseudonymous
+installation id, device facts (OS, version, architecture) and the timestamp. It
+never sends prompts, responses, images, file paths or credentials.
 
 - `POST /api/v0/usage` accepts one sample; unknown or content-like keys are
   rejected with `400` and nothing is stored.
@@ -197,3 +198,24 @@ no column to add when a preference appears. `config.reset` restores a named scop
 (`appearance`, `catalogue`, `chat`, `gpu`, `telemetry`, `onboarding`),
 `credentials` deletes the handles and their ciphertext, and `all` resets settings
 without touching keys.
+
+### Capabilities and projections (migration 0013)
+
+`accounts.capabilities_json` holds a JSON array of `debug` / `operator`, default
+`[]`. It is the only authority the product and the portal share:
+
+- `operator` implies `debug` on every read; the stored value is exactly what an
+  operator granted, so a revocation removes one entry, not a chain.
+- Unknown entries are dropped on read, so a hand-edited row cannot invent
+  authority.
+- The last `operator` cannot be revoked (`409 last-operator`), which is why the
+  grant is held in the product rather than in the portal's session.
+
+Two settings belong to development rather than to the person using the product:
+`diagnosticsUrl` and `usageReporting`. Unless the caller has `debug`/`operator`
+they are **absent** from `settings.get`, `settings.update`'s answer, `config.get`,
+`config.export` and `config.reset`, and `config.import` reports them as
+`skipped`/`unsupported`. They stay in `account_settings.value_json` untouched, so
+a capability change reveals the same values again. Keeping them out of the
+payload — not just out of the view — is what makes the projection a boundary
+rather than a hint.

@@ -179,7 +179,7 @@ export const appSettingsSchema = z.object({
    * Opt-in, content-free usage measurements (tokens per second per run). Off by
    * default: nothing leaves the machine until the user enables it.
    */
-  usageReporting: z.boolean().default(false),
+  usageReporting: z.boolean().default(true),
   /** Warn when the prepaid GPU balance falls below this amount. */
   walletWarnThresholdMicroUsd: z.number().int().positive().default(2_000_000),
   /** Set once both provider keys have been verified in the guided flow. */
@@ -221,6 +221,20 @@ export const settingsUpdateSchema = z.object(
     })
   )
 );
+
+/**
+ * What `settings.get` returns. The two developer settings are absent for an
+ * account without `debug` or `operator`: hiding them in the view alone would
+ * leave the payload as a disclosure path.
+ */
+export const settingsSnapshotSchema = appSettingsSchema
+  .omit({ diagnosticsUrl: true, usageReporting: true })
+  .extend({
+    diagnosticsUrl: httpUrlSchema.optional(),
+    usageReporting: z.boolean().optional()
+  });
+
+export type SettingsSnapshot = z.infer<typeof settingsSnapshotSchema>;
 
 const credentialSecretSchema = z.string().min(1).max(4_000);
 
@@ -283,7 +297,9 @@ export const notificationSchema = z.object({
   action: z
     .object({ label: z.string().min(1), route: z.string().min(1) })
     .optional(),
-  createdAt: z.string()
+  createdAt: z.string(),
+  /** Setup requirements cannot be dismissed; transient notices can. */
+  dismissible: z.boolean()
 });
 
 export const notificationSnapshotSchema = z.object({

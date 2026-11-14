@@ -2,6 +2,8 @@ export * from "./domain";
 export * from "./catalogue";
 export * from "./sessions";
 export * from "./auth";
+export * from "./capabilities";
+export * from "./internal";
 export * from "./config";
 export * from "./ipc";
 export * from "./reputation";

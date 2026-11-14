@@ -25,8 +25,11 @@ export async function api(path, init = {}) {
   return body;
 }
 
-export const signIn = (email, password) =>
-  api("/v1/admin/session", { method: "POST", body: JSON.stringify({ email, password }) });
+export const requestSignInCode = (email) =>
+  api("/v1/admin/code", { method: "POST", body: JSON.stringify({ email }) });
+
+export const signIn = (email, code) =>
+  api("/v1/admin/session", { method: "POST", body: JSON.stringify({ email, code }) });
 
 export const signOut = () => api("/v1/admin/session", { method: "DELETE" });
 
@@ -54,3 +57,19 @@ export const revokeInstallation = (id) =>
   api(`/v1/admin/installations/${id}`, { method: "DELETE" });
 
 export const listAudit = () => api("/v1/admin/audit").then((body) => body.entries);
+
+export const listAccounts = (params = {}) => {
+  const query = new URLSearchParams();
+  if (params.query) {
+    query.set("query", params.query);
+  }
+  query.set("limit", String(params.limit ?? 50));
+  query.set("offset", String(params.offset ?? 0));
+  return api(`/admin-api/accounts?${query.toString()}`);
+};
+
+export const changeCapability = (accountId, change) =>
+  api(`/admin-api/accounts/${encodeURIComponent(accountId)}/capabilities`, {
+    method: "POST",
+    body: JSON.stringify({ ...change, confirm: true })
+  });

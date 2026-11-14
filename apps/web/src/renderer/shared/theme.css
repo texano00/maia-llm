@@ -2157,6 +2157,19 @@ textarea {
   letter-spacing: 0.01em;
 }
 
+/* A reading that could not be refreshed: still readable, visibly not current. */
+.balance-stale {
+  opacity: 0.62;
+  border-style: dashed;
+}
+
+.balance-stale .balance-amount::after {
+  content: "*";
+  margin-left: 0.1rem;
+  font-size: 0.7rem;
+  vertical-align: super;
+}
+
 .models-nav-indicator {
   display: inline-block;
   width: 0.55rem;

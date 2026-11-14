@@ -139,6 +139,19 @@ curl -s -X POST https://web.maiallm.com/rpc \
   Provider secrets in a backup are ciphertext and need `MAIA_CREDENTIAL_KEY`.
 - To force everybody to sign in again, rotate `MAIA_SESSION_SECRET` and restart.
 
+## What is reported, and by whom
+
+Every finished run posts one content-free usage sample (model, capability, tokens,
+timings, outcome, a pseudonymous installation id, device facts and the address the
+server observed). It is on by default — the product cannot be measured otherwise —
+and the owner can switch it off in Settings; nothing is sent retrospectively and
+no prompt, response, image, path or key is ever part of a sample. Adding any other
+data to it needs explicit consent (Principle I, version 1.1.0).
+
+The diagnostics host and the usage switch are developer settings: an account
+without `debug`/`operator` neither sees them nor receives their values, and the
+defaults keep working for everyone.
+
 ## Manual checks
 
 | # | Do | Expect |

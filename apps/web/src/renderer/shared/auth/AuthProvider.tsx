@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode
 } from "react";
-import type { AuthConfig, AuthState } from "@maia/contracts";
+import type { AuthConfig, AuthState, Capability } from "@maia/contracts";
 
 type Phase = "loading" | "signed-out" | "signed-in";
 
@@ -15,6 +15,8 @@ interface AuthValue {
   phase: Phase;
   email: string | null;
   config: AuthConfig | null;
+  /** Effective capabilities of the signed-in account; empty when signed out. */
+  capabilities: Capability[];
   /** Re-reads `auth.state`; returns true when a session is now usable. */
   refresh(): Promise<boolean>;
   signOut(): Promise<boolean>;
@@ -32,6 +34,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [phase, setPhase] = useState<Phase>("loading");
   const [email, setEmail] = useState<string | null>(null);
   const [config, setConfig] = useState<AuthConfig | null>(null);
+  const [capabilities, setCapabilities] = useState<Capability[]>([]);
 
   const refresh = useCallback(async (): Promise<boolean> => {
     const bridge = window.maia;
@@ -43,11 +46,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const result = await bridge.invoke<AuthState>("auth.state");
     if (result.ok && result.data.signedIn) {
       setEmail(result.data.email);
+      setCapabilities(result.data.capabilities);
       setPhase("signed-in");
       return true;
     }
 
     setEmail(null);
+    setCapabilities([]);
     setPhase("signed-out");
     return false;
   }, []);
@@ -82,6 +87,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signOut = useCallback(async (): Promise<boolean> => {
     const result = await window.maia?.invoke("auth.signOut");
     setEmail(null);
+    setCapabilities([]);
     setPhase("signed-out");
     return result?.ok ?? false;
   }, []);
@@ -90,6 +96,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const result = await window.maia?.invoke("auth.deleteAccount", { confirmation: "DELETE" });
     if (result?.ok) {
       setEmail(null);
+      setCapabilities([]);
       setPhase("signed-out");
       return true;
     }
@@ -98,8 +105,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo<AuthValue>(
-    () => ({ phase, email, config, refresh, signOut, deleteAccount }),
-    [config, deleteAccount, email, phase, refresh, signOut]
+    () => ({ phase, email, config, capabilities, refresh, signOut, deleteAccount }),
+    [capabilities, config, deleteAccount, email, phase, refresh, signOut]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

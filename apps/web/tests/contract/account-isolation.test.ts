@@ -130,11 +130,13 @@ describe("account isolation", () => {
   });
 
   it("keeps settings private", () => {
-    a.settings.update({ onboardingCompleted: true, usageReporting: true });
+    a.settings.update({ onboardingCompleted: true, usageReporting: false });
 
     expect(a.settings.get().onboardingCompleted).toBe(true);
     expect(b.settings.get().onboardingCompleted).toBe(false);
-    expect(b.settings.get().usageReporting).toBe(false);
+    // Reporting is on by default, so B must not inherit A's opt-out.
+    expect(b.settings.get().usageReporting).toBe(true);
+    expect(a.settings.get().usageReporting).toBe(false);
   });
 
   it("keeps provider credentials private", async () => {

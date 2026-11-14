@@ -49,7 +49,10 @@ describe("configuration persistence", () => {
     registerSettingsHandlers({
       registry,
       store: new SettingsStore(db, accountId),
-      credentials: new CredentialStore(db, new EncryptedSecretVault(db, accountId, KEY), accountId)
+      credentials: new CredentialStore(db, new EncryptedSecretVault(db, accountId, KEY), accountId),
+      // These tests are about persistence and isolation, not the developer
+      // projection, so they speak as an operator.
+      capabilities: () => ["debug", "operator"]
     });
 
     return registry;
