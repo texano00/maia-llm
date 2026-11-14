@@ -44,6 +44,9 @@ function fakeClient(overrides: Partial<CatalogueClient> = {}): CatalogueClient {
     async hasChatTemplate(modelId) {
       return modelId !== "openai-community/gpt2";
     },
+    async readModel(modelId) {
+      return payloads.find((payload) => payload.id === modelId) ?? null;
+    },
     ...overrides
   };
 }
@@ -61,6 +64,71 @@ describe("catalogue snapshots", () => {
   afterEach(async () => {
     await db.close();
     rmSync(directory, { recursive: true, force: true });
+  });
+
+  it("includes a required repository the ranked listing never returns", async () => {
+    // A community GGUF mirror is newer and far less downloaded than the top 300,
+    // so popularity alone can never surface it.
+    const requiredId = "huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF";
+    const required: HubModelPayload = {
+      id: requiredId,
+      pipeline_tag: "text-generation",
+      downloads: 12,
+      siblings: [
+        { rfilename: "Q4_K_M/model.gguf", size: 4_000 },
+        { rfilename: "Q8_0/model.gguf", size: 8_000 }
+      ]
+    };
+
+    const service = new SnapshotService({
+      db,
+      client: fakeClient({
+        async listModels() {
+          return payloads;
+        },
+        async readModel(modelId) {
+          return modelId === requiredId ? required : null;
+        },
+        async getFiles(modelId) {
+          if (modelId === requiredId) {
+            return required.siblings ?? [];
+          }
+          return [
+            { rfilename: "config.json", size: 1 },
+            { rfilename: "model.safetensors", size: 1_000 }
+          ];
+        }
+      }),
+      required: [requiredId]
+    });
+
+    const run = await service.refresh("scheduled");
+    expect(run.outcome).toBe("success");
+
+    const current = await service.current();
+    const model = current?.models.find((entry) => entry.id === requiredId);
+
+    expect(model).toBeDefined();
+    // A quant in a subfolder is still servable by llama.cpp.
+    expect(model?.engine).toBe("llamacpp");
+    expect(model?.supported).toBe(true);
+  });
+
+  it("ignores a required repository the Hub does not have", async () => {
+    const service = new SnapshotService({
+      db,
+      client: fakeClient({
+        async readModel() {
+          return null;
+        }
+      }),
+      required: ["nobody/no-such-repo"]
+    });
+
+    const run = await service.refresh("scheduled");
+
+    expect(run.outcome).toBe("success");
+    expect(run.models).toBe(payloads.length);
   });
 
   it("publishes an immutable version with the supported verdict", async () => {

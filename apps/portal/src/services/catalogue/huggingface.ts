@@ -5,6 +5,8 @@ export interface CatalogueClient {
   listModels(limit: number): Promise<HubModelPayload[]>;
   /** Files with sizes; the listing endpoint omits them. */
   getFiles(modelId: string): Promise<HubSibling[]>;
+  /** One repository by id, for the always-included list. `null` when absent. */
+  readModel(modelId: string): Promise<HubModelPayload | null>;
   /** Chat-template verdict, following a GGUF mirror to its base repository. */
   hasChatTemplate(modelId: string): Promise<boolean>;
 }
@@ -101,6 +103,18 @@ export function createHuggingFaceCatalogueClient(
 
       const payload = (await response.json()) as HubModelPayload;
       return payload.siblings ?? [];
+    },
+
+    async readModel(modelId) {
+      const response = await get(`/api/models/${modelPath(modelId)}`);
+      if (response.status === 404 || response.status === 400) {
+        return null;
+      }
+      if (!response.ok) {
+        throw new Error(`Hugging Face model ${modelId} failed with ${response.status}`);
+      }
+
+      return (await response.json()) as HubModelPayload;
     },
 
     async hasChatTemplate(modelId) {

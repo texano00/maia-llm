@@ -129,7 +129,7 @@ export function mapCatalogModel(input: MapModelInput): CatalogModel {
   const supportedReason = loadable.problem
     ? loadable.problem
     : engine === null
-      ? "no servable weights at the repository root"
+      ? "no servable weights in the repository"
       : input.chatTemplate
         ? null
         : "the model defines no chat template, so it cannot answer chat requests";
@@ -157,9 +157,10 @@ export function mapCatalogModel(input: MapModelInput): CatalogModel {
 }
 
 /**
- * GGUF weights are served by llama.cpp, safetensors by vLLM. Root-level files
- * only: `vllm serve` and `llama-server` both look at the repository root, so a
- * quant parked in a subfolder does not make the repository servable.
+ * GGUF weights are served by llama.cpp, safetensors by vLLM. Safetensors must
+ * sit at the repository root because `vllm serve` loads the repository as a
+ * whole; a GGUF is served by naming one file, so a quant in `Q4_K_M/` is just
+ * as usable as one at the root — which is how community GGUF mirrors ship.
  */
 export function deriveEngine(
   libraryName: string | null,
@@ -171,7 +172,7 @@ export function deriveEngine(
 
   const root = files.filter((file) => !file.path.includes("/"));
   const hasSafetensors = root.some((file) => file.path.toLowerCase().endsWith(".safetensors"));
-  const hasGguf = root.some((file) => file.path.toLowerCase().endsWith(".gguf"));
+  const hasGguf = files.some((file) => file.path.toLowerCase().endsWith(".gguf"));
 
   if (hasGguf && !hasSafetensors) {
     return "llamacpp";
@@ -191,10 +192,10 @@ export function assessLoadable(
 
   const root = files.filter((file) => !file.path.includes("/"));
   const hasSafetensors = root.some((file) => file.path.toLowerCase().endsWith(".safetensors"));
-  const hasGguf = root.some((file) => file.path.toLowerCase().endsWith(".gguf"));
+  const hasGguf = files.some((file) => file.path.toLowerCase().endsWith(".gguf"));
 
   if (!hasSafetensors && !hasGguf) {
-    return { problem: "the repository root has no safetensors or GGUF weights" };
+    return { problem: "the repository holds no safetensors or GGUF weights" };
   }
 
   if (hasSafetensors && !root.some((file) => file.path === "config.json")) {

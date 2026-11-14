@@ -219,3 +219,28 @@ they are **absent** from `settings.get`, `settings.update`'s answer, `config.get
 a capability change reveals the same values again. Keeping them out of the
 payload — not just out of the view — is what makes the projection a boundary
 rather than a hint.
+
+## The account detail projection
+
+The backoffice account page (`GET /admin-api/accounts/:id`, proxied to the
+product's `GET /internal/accounts/:id`) is the one place where per-account data
+leaves the product for an operator. It is a **whitelist**: the projection in
+`apps/web/src/main/services/accounts/detail.ts` names every field it returns, and
+the SQL it uses carries the `account_id` predicate itself, so no handler can widen
+it by forgetting a filter.
+
+| Section | Source | Notes |
+| --- | --- | --- |
+| `account` | `accounts` | id, email, created/last-seen, capabilities, active run count |
+| `now` | `sessions` (active states) | elapsed time and accrued cost computed from the stored hourly rate |
+| `history` | `sessions` | paged; `simulated` comes from the stored `maia:mock:` label |
+| `usage` | `session_metrics` joined to `sessions` | windowed by `windowDays`; `available: false` and no figures when the account switched reporting off |
+| `storage` | `conversations`, `messages`, `conversation_images` | counts and a date range only |
+| `settings` | `account_settings` | named keys via the same `appSettingsSchema` the product uses; never the raw document |
+| `credentials` | `credential_handles` | presence, last verification and status |
+
+`credential_secrets` is never queried. Conversation titles, message text and image
+rows' `relative_path` are never selected — a title is text the person wrote, and a
+path reveals the on-disk layout. Active runs are marked `simulated` when their
+label carries the mock prefix, which is how the product already remembers that no
+machine was rented.

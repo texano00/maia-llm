@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import {
   adminCookie,
@@ -29,7 +29,6 @@ export interface PortalAuthRouteOptions {
   now?: () => number;
 }
 
-const MAX_INSTALLATIONS = 500;
 
 /**
  * Enrollment, token refresh and the administrator session.
@@ -42,15 +41,6 @@ export function registerPortalAuthRoutes(app: FastifyInstance, options: PortalAu
   const { tokens, admins } = options;
   const now = options.now ?? (() => Date.now());
 
-  const requireAdmin = async (request: FastifyRequest): Promise<string | null> => {
-    const token = adminSessionToken(request);
-    if (!token) {
-      return null;
-    }
-
-    const session = await admins.sessionFor(token);
-    return session?.adminId ?? null;
-  };
 
   app.post("/v1/installations", async (request, reply) => {
     const parsed = enrollSchema.safeParse(request.body);
@@ -101,29 +91,6 @@ export function registerPortalAuthRoutes(app: FastifyInstance, options: PortalAu
 
     reply.header("set-cookie", clearedAdminCookie(options.secureCookies));
     return reply.status(204).send();
-  });
-
-  app.get("/v1/admin/installations", async (request, reply) => {
-    if (!(await requireAdmin(request))) {
-      return reply.status(401).send({ error: "not_authenticated" });
-    }
-
-    const query = (request.query ?? {}) as Record<string, unknown>;
-    const raw = Number(query.limit ?? 100);
-    const limit = Number.isFinite(raw) ? Math.min(Math.max(Math.trunc(raw), 1), MAX_INSTALLATIONS) : 100;
-
-    return { installations: await tokens.listInstallations(limit), serverTime: new Date(now()).toISOString() };
-  });
-
-  app.delete("/v1/admin/installations/:id", async (request, reply) => {
-    if (!(await requireAdmin(request))) {
-      return reply.status(401).send({ error: "not_authenticated" });
-    }
-
-    const id = (request.params as { id?: string }).id ?? "";
-    const revoked = await tokens.revokeInstallation(id, "admin");
-
-    return revoked ? reply.status(204).send() : reply.status(404).send({ error: "unknown_installation" });
   });
 
   // A session cookie is only useful if the backoffice can tell it is signed in.

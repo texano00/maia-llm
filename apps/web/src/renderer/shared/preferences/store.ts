@@ -11,6 +11,8 @@ import type { AppSettings, SettingsUpdate } from "@maia/contracts";
 
 export interface UiPreferences {
   catalogueMode: "basic" | "advanced";
+  /** Hide models this account cannot start right now. */
+  catalogueSupportedOnly: boolean;
   studentMode: boolean;
   historyOpen: boolean;
   lastConversationId: string | null;
@@ -19,6 +21,7 @@ export interface UiPreferences {
 
 export const FALLBACK_PREFERENCES: UiPreferences = {
   catalogueMode: "basic",
+  catalogueSupportedOnly: false,
   studentMode: false,
   historyOpen: true,
   lastConversationId: null,
@@ -28,6 +31,7 @@ export const FALLBACK_PREFERENCES: UiPreferences = {
 function pick(settings: AppSettings): UiPreferences {
   return {
     catalogueMode: settings.catalogueMode,
+    catalogueSupportedOnly: settings.catalogueSupportedOnly,
     studentMode: settings.studentMode,
     historyOpen: settings.historyOpen,
     lastConversationId: settings.lastConversationId,

@@ -42,11 +42,37 @@ export interface ServerConfig {
   catalogueRefreshHours: number;
   /** How many models one snapshot pass covers. */
   catalogueLimit: number;
+  /**
+   * Repositories that are always included, whatever their download rank.
+   * Popularity alone hides the community finetunes people actually look for.
+   */
+  catalogueRequired: string[];
   /** Accept opt-in usage measurements at `/api/v0/usage`. */
   usageEnabled: boolean;
 }
 
 const DRIVERS: readonly SqlDialect[] = ["sqlite", "postgres", "mysql"];
+
+/**
+ * `owner/name` entries, comma separated. Anything without a slash is dropped:
+ * a malformed entry would otherwise be requested from the Hub forever.
+ */
+export function parseRepositoryList(raw: string | undefined): string[] {
+  if (!raw) {
+    return [];
+  }
+
+  const seen = new Set<string>();
+  for (const part of raw.split(",")) {
+    const id = part.trim();
+    const segments = id.split("/");
+    if (segments.length === 2 && segments.every((segment) => segment.length > 0)) {
+      seen.add(id);
+    }
+  }
+
+  return [...seen];
+}
 
 const positive = (raw: string | undefined, fallback: number): number => {
   const value = Number(raw);
@@ -91,6 +117,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     hfToken: env.MAIA_PORTAL_HF_TOKEN ?? env.HF_TOKEN ?? null,
     catalogueRefreshHours: positive(env.MAIA_CATALOGUE_REFRESH_HOURS, 6),
     catalogueLimit: positive(env.MAIA_CATALOGUE_LIMIT, 300),
+    catalogueRequired: parseRepositoryList(env.MAIA_CATALOGUE_REQUIRED),
     usageEnabled: env.MAIA_USAGE_ENABLED !== "false",
   };
 }

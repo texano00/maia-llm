@@ -20,6 +20,10 @@ export const errorCodeSchema = z.enum([
   "GATED_ACCESS_REQUIRED",
   "CAPABILITY_UNSUPPORTED",
   "USAGE_OPTED_OUT",
+  /** No provider credential is saved for an action that needs one. */
+  "CREDENTIAL_MISSING",
+  /** The provider rejected the credential that is saved. */
+  "CREDENTIAL_INVALID",
   "INTERNAL"
 ]);
 
@@ -41,6 +45,12 @@ export const appInfoSchema = z.object({
   node: z.string(),
   platform: z.string(),
   arch: z.string(),
+  /**
+   * Whether this deployment rents real machines or runs the simulated provider.
+   * It belongs in build information: "my GPU looks mocked" is unanswerable
+   * without it.
+   */
+  providerMode: z.enum(["live", "mock"]),
   channel: releaseChannelSchema,
   packaged: z.boolean()
 });
@@ -182,6 +192,11 @@ export const appSettingsSchema = z.object({
   usageReporting: z.boolean().default(true),
   /** Warn when the prepaid GPU balance falls below this amount. */
   walletWarnThresholdMicroUsd: z.number().int().positive().default(2_000_000),
+  /**
+   * Whether the catalogue hides models this account cannot start right now.
+   * Stored with the other UI preferences so it survives a reload.
+   */
+  catalogueSupportedOnly: z.boolean().default(false),
   /** Set once both provider keys have been verified in the guided flow. */
   onboardingCompleted: z.boolean().default(false),
   /** Set when the guided flow is dismissed; it does not interrupt again. */

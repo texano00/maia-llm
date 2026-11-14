@@ -48,11 +48,6 @@ export const reorderUseCases = (ids) =>
 export const uploadImage = (contentType, base64) =>
   api("/v1/admin/assets", { method: "POST", body: JSON.stringify({ contentType, base64 }) });
 
-export const listInstallations = () =>
-  api("/v1/admin/installations").then((body) => body.installations);
-export const revokeInstallation = (id) =>
-  api(`/v1/admin/installations/${id}`, { method: "DELETE" });
-
 export const listAudit = () => api("/v1/admin/audit").then((body) => body.entries);
 
 export const listAccounts = (params = {}) => {
@@ -63,6 +58,14 @@ export const listAccounts = (params = {}) => {
   query.set("limit", String(params.limit ?? 50));
   query.set("offset", String(params.offset ?? 0));
   return api(`/admin-api/accounts?${query.toString()}`);
+};
+
+export const accountDetail = (accountId, params = {}) => {
+  const query = new URLSearchParams();
+  query.set("windowDays", String(params.windowDays ?? 30));
+  query.set("limit", String(params.limit ?? 20));
+  query.set("offset", String(params.offset ?? 0));
+  return api(`/admin-api/accounts/${encodeURIComponent(accountId)}?${query.toString()}`);
 };
 
 export const changeCapability = (accountId, change) =>

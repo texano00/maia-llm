@@ -127,6 +127,7 @@ export async function createAppContext(options: CreateAppContextOptions = {}): P
     db,
     client: createHuggingFaceCatalogueClient({ token: config.hfToken }),
     limit: config.catalogueLimit,
+    required: config.catalogueRequired,
     ...(options.now ? { now: options.now } : {}),
   });
   const useCases = createUseCaseReader(db);

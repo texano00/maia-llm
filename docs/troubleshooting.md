@@ -67,3 +67,18 @@ server, a failed deploy, or a blocked request. It explains the whole class of
 3. Log the state transition on the main side; it then appears in the live stream.
 4. Make the renderer render the failure path explicitly — never a bare `return`.
 5. Verify the packaged build through the log stream, then the UI.
+
+## 6. "The GPUs are mocked"
+
+Read the provider mode first: the `i` button in the top bar shows
+`providerMode`, and `GET /health` on the product reports it. `mock` means the
+deployment asked for the simulated provider. On a `live` deployment a missing key
+does not fall back to the simulation: the request is refused with
+`CREDENTIAL_MISSING`, and a key vast.ai rejects is `CREDENTIAL_INVALID`. Save the
+key under **Settings → vast.ai**; it takes effect on the next request.
+
+To prove a rental really happened, follow `specs/009-live-gpu-account-detail/quickstart.md`
+§1: start a run, then compare the machine id the product shows (Models view, and
+the backoffice `#/accounts/<id>` page under **Running now**) with the instance
+list in the vast.ai console. The run's label starts with `maia:` and carries the
+account id.

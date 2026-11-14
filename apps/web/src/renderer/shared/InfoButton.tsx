@@ -75,6 +75,11 @@ export function InfoButton() {
             <span>Version</span>
             <strong>{version}</strong>
           </p>
+          <p className="info-row">
+            <span>GPUs</span>
+            {/* "Why is this mocked" is answerable only if the mode is visible. */}
+            <strong>{info ? (info.providerMode === "live" ? "live" : "simulated") : "…"}</strong>
+          </p>
         </div>
       ) : null}
     </div>

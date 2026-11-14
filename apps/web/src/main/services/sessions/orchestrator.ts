@@ -118,6 +118,10 @@ export type SessionErrorCode =
   | "MODEL_NOT_READY"
   | "PROVIDER_UNAVAILABLE"
   | "CAPABILITY_UNSUPPORTED"
+  /** No provider credential is saved, so nothing can be rented. */
+  | "CREDENTIAL_MISSING"
+  /** The saved credential was rejected by the provider. */
+  | "CREDENTIAL_INVALID"
   | "NOT_FOUND";
 
 export class SessionError extends Error {

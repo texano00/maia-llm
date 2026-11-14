@@ -19,7 +19,7 @@ import type {
   UseCaseCard
 } from "@maia/contracts";
 import { useUiPreferences } from "../preferences/useUiPreferences";
-import { updatePreferences } from "../preferences/store";
+import { preferencesSnapshot, updatePreferences } from "../preferences/store";
 
 export type CatalogueMode = "basic" | "advanced";
 
@@ -73,15 +73,23 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [sort, setSort] = useState<CatalogueSort>("downloads");
   const [capability, setCapability] = useState("");
   // FR-089: unsupported models are hidden until the user asks to see them. The
-  // portal flags things vLLM cannot serve, and renting a GPU for one of those
-  // costs money before it fails.
-  const [supportedOnly, setSupportedOnly] = useState(true);
+  // portal flags things vLLM cannot serve, and renting a GPU for one
+  // of those costs money before it fails. The verdict itself is computed in the
+  // catalogue from per-account readiness, never from a global flag here.
   const [snapshot, setSnapshot] = useState<CatalogueSnapshotInfo | null>(null);
   // Basic mode is the product default once the backend publishes use cases; a
   // deployment without them starts on the full list instead of an empty screen.
   const { catalogueMode: mode } = useUiPreferences();
   const setMode = useCallback((value: CatalogueMode): void => {
     updatePreferences({ catalogueMode: value });
+  }, []);
+  // The readiness filter is a stored preference, so a reload keeps it.
+  const [supportedOnly, setSupportedOnlyState] = useState<boolean>(
+    () => preferencesSnapshot().catalogueSupportedOnly
+  );
+  const setSupportedOnly = useCallback((value: boolean): void => {
+    setSupportedOnlyState(value);
+    updatePreferences({ catalogueSupportedOnly: value });
   }, []);
   const [useCases, setUseCases] = useState<UseCaseCard[]>([]);
   const [selected, setSelected] = useState<ModelDetail | null>(null);
@@ -107,7 +115,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const loadCatalogue = useCallback(
-    async (term: string, order: CatalogueSort, feature: string, runnableOnly: boolean) => {
+    async (term: string, order: CatalogueSort, feature: string) => {
       const bridge = window.maia;
       if (!bridge) {
         return;
@@ -118,7 +126,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         search: term || undefined,
         sort: order,
         capability: feature || undefined,
-        ...(runnableOnly ? { supportedOnly: true } : {}),
+        // The full list is fetched so the page can say how many models the
+        // readiness filter hides; the filtering happens there, per account.
         limit: 100
       });
       setLoadingCatalogue(false);
@@ -138,11 +147,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   // Hugging Face search is not called on every keystroke.
   useEffect(() => {
     const timer = setTimeout(() => {
-      void loadCatalogue(search, sort, capability, supportedOnly);
+      void loadCatalogue(search, sort, capability);
     }, search.length > 0 ? 400 : 0);
 
     return () => clearTimeout(timer);
-  }, [capability, loadCatalogue, search, sort, supportedOnly]);
+  }, [capability, loadCatalogue, search, sort]);
 
   useEffect(() => {
     void reloadSessions();
@@ -199,11 +208,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setLoadingCatalogue(false);
 
     if (result.ok) {
-      await loadCatalogue(search, sort, capability, supportedOnly);
+      await loadCatalogue(search, sort, capability);
     } else {
       setError(result.error.message);
     }
-  }, [capability, loadCatalogue, search, sort, supportedOnly]);
+  }, [capability, loadCatalogue, search, sort]);
 
   const selectModel = useCallback(async (id: string) => {
     const bridge = window.maia;
