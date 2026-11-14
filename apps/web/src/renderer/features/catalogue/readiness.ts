@@ -10,8 +10,12 @@
 
 export interface ReadinessModel {
   /**
-   * The backend's verdict. Absent on snapshots that predate the field; an
-   * unknown verdict is not a refusal, so nothing startable is ever hidden.
+   * The backend's verdict, which must be a positive "yes".
+   *
+   * A missing verdict is not a yes: a search result fetched live from the Hub, or
+   * a row from a snapshot that predates the field, is exactly the model that fails
+   * at start. "Only models I can run" therefore hides anything unproven, which is
+   * what the label promises.
    */
   supported?: boolean | null | undefined;
   gated?: "none" | "auto" | "manual" | null | undefined;
@@ -36,10 +40,13 @@ export interface Readiness {
  * allowed, and no GPU can be rented without a vast.ai key.
  */
 export function readinessFor(model: ReadinessModel, status: CredentialStatus): Readiness {
-  if (model.supported === false) {
+  if (model.supported !== true) {
     return {
       ready: false,
-      reason: "no engine can serve this repository",
+      reason:
+        model.supported === false
+          ? "no engine can serve this repository"
+          : "this repository has no runnable verdict yet",
       section: null
     };
   }
@@ -57,7 +64,7 @@ export function readinessFor(model: ReadinessModel, status: CredentialStatus): R
   if (!status.vastai) {
     return {
       ready: false,
-      reason: "no GPU can be rented until a vast.ai key is saved",
+      reason: "no GPU can be rented until a working vast.ai key is saved",
       section: "vastai"
     };
   }

@@ -21,6 +21,7 @@ import type {
 } from "@maia/contracts";
 import { useUiPreferences } from "../preferences/useUiPreferences";
 import { preferencesSnapshot, updatePreferences } from "../preferences/store";
+import { announceReadyRuns, notify } from "../notify";
 
 export type CatalogueMode = "basic" | "advanced";
 
@@ -101,6 +102,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [focusSessionId, setFocusSessionId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Last known state per run, so a start that completes while the tab is hidden
+  // produces exactly one notification and never repeats it.
+  const runStates = useRef<Record<string, string>>({});
+
   const reloadSessions = useCallback(async () => {
     const bridge = window.maia;
     if (!bridge) {
@@ -112,6 +117,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       // Returning the previous array keeps the provider value stable, so the
       // whole tree does not re-render every polling tick.
       setSessions((current) => (sameSessions(current, result.data) ? current : result.data));
+
+    // A boot takes minutes, so the person is usually elsewhere when it lands.
+    announceReadyRuns(runStates.current, result.data, notify, (id) => setFocusSessionId(id));
+    runStates.current = Object.fromEntries(result.data.map((run) => [run.id, run.state]));
     }
   }, []);
 
@@ -262,9 +271,24 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const startSession = useCallback(
     async (modelId: string, confirmGatedAccess = false) => {
       const bridge = window.maia;
-      const estimate = estimates[modelId];
-      if (!bridge || !estimate) {
+      if (!bridge) {
         return null;
+      }
+
+      // A missing estimate used to make this return `null` without a word, which
+      // looked exactly like a dead button. Booking needs an estimate, so make one.
+      let estimate = estimates[modelId];
+      if (!estimate) {
+        const created = await bridge.invoke<Estimate>("estimate.create", {
+          modelId,
+          expectedMinutes: 30
+        });
+        if (!created.ok) {
+          setError(created.error.message);
+          return null;
+        }
+        estimate = created.data;
+        setEstimates((current) => ({ ...current, [modelId]: created.data }));
       }
 
       if (

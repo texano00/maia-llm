@@ -26,6 +26,14 @@ describe("catalogue readiness", () => {
     expect(readinessFor(gated, gpuOnly)).toMatchObject({ section: "huggingface" });
   });
 
+  it("does not call a model ready when the catalogue has no verdict for it", () => {
+    // A live search result, or a row from a snapshot that predates the field: the
+    // exact model that fails at start.
+    expect(readyFor({ supported: undefined, gated: "none" }, both)).toBe(false);
+    expect(readyFor({ supported: null, gated: "none" }, both)).toBe(false);
+    expect(readinessFor({ supported: undefined }, both).reason).toBeTruthy();
+  });
+
   it("never calls an unsupported model ready, whatever credentials exist", () => {
     expect(readyFor({ supported: false, gated: "none" }, both)).toBe(false);
     expect(readinessFor({ supported: false, gated: "none" }, both).reason).toBeTruthy();
