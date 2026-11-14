@@ -74,12 +74,17 @@ describe("session endpoint", () => {
     return started;
   }
 
-  it("offers nothing until the run is serving", async () => {
+  // The address and the key belong to the run, not to its readiness: a boot that is
+  // slow or stuck is exactly when somebody needs to look at it.
+  it("offers the address as soon as the host publishes the port", async () => {
     const orchestrator = orchestratorWith(() => ({ host: "203.0.113.10", port: 41234 }), 60);
     const started = await startSession(orchestrator);
 
     expect(started.state).toBe("provisioning");
-    expect(orchestrator.describeEndpoint(started.id)).toBeNull();
+    expect(orchestrator.describeEndpoint(started.id)).toMatchObject({
+      baseUrl: "http://203.0.113.10:41234/v1",
+      modelId: MODEL_ID
+    });
 
     await orchestrator.awaitProvisioning(started.id);
     await orchestrator.end(started.id, "user");

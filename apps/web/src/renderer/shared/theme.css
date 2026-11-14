@@ -3008,6 +3008,36 @@ body {
 /* The drawer, the popovers and the run indicator are affordances, not decoration:
    anybody who asked the system for less motion gets none of it. */
 
+
+/* Per-tool instructions inside the model card: each tool collapses on its own, so
+   the card stays short until someone needs it. */
+.external-access-tool {
+  border: 1px solid var(--border);
+  border-radius: 0.55rem;
+  padding: 0.5rem 0.7rem;
+  margin-top: 0.5rem;
+}
+
+.external-access-tool > summary {
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.external-access-tool > summary .muted {
+  font-weight: 400;
+}
+
+.external-access-steps {
+  margin: 0.5rem 0 0;
+  padding-left: 1.2rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.external-access-steps li {
+  margin-bottom: 0.25rem;
+}
+
 /* Live logs: a terminal inside a run card. Monospace, fixed height, scrolls on its
    own so a long boot does not push the rest of Models off the screen. */
 .model-run-logs {

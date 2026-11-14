@@ -26,6 +26,7 @@ import { deriveDefaultScenarios } from "../main/services/catalogue/default-scena
 import { VastAiClient } from "../main/services/providers/vastai/client";
 import { createVllmRuntime } from "../main/services/inference/vllm";
 import { createModelPlanResolver } from "../main/services/inference/model-plan-resolver";
+import { resolveEngine } from "../main/services/inference/engine-choice";
 import { createFailureReporter } from "../main/services/diagnostics/failures";
 import { NotificationCenter } from "../main/services/notifications/center";
 import {
@@ -124,7 +125,14 @@ export async function createAccountRuntime(
           artifacts: (modelId) => options.catalogueRepository.getArtifacts(modelId),
           loadDetail: (modelId) => options.catalogue.detail(modelId),
           get: (modelId) => options.catalogueRepository.get(modelId),
-          engine: (modelId) => options.catalogue.supportFor(modelId)?.engine ?? null
+          // The published verdict first; the weights when the backend has not
+          // judged the row. A GGUF planned as vLLM never serves.
+          engine: (modelId) =>
+            resolveEngine(
+              modelId,
+              options.catalogue.supportFor(modelId)?.engine,
+              options.catalogueRepository.getArtifacts(modelId)
+            )
         }),
         readyTimeoutMs: (options.readinessTimeoutMinutes ?? 20) * 60_000,
         logger

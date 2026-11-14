@@ -227,6 +227,13 @@ export class ProviderHttpClient {
       }
     }
 
+    // A rate limit is not a hiccup: providers meter over a window, so retrying in
+    // half a second only spends another request against the same budget. Wait long
+    // enough for the window to move.
+    if (response?.status === 429) {
+      return Math.max(3_000, this.retryBaseMs * 2 ** (attempt + 2));
+    }
+
     return this.retryBaseMs * 2 ** attempt;
   }
 

@@ -225,18 +225,41 @@ export function toComputeOffer(payload: VastAiOfferPayload): ComputeOffer | null
   };
 }
 
+/** Nothing about one instance changes faster than this. */
+const INSTANCE_CACHE_MS = 3_000;
+/** Reconciling and health checks share one account listing for this long. */
+const LIST_CACHE_MS = 5_000;
+
 export class VastAiClient {
   private readonly http: ProviderHttpClient;
   private readonly fetchImpl: typeof fetch;
+  /** Polling reads the instance every few seconds; the answer is reused briefly. */
+  private readonly instanceCache = new Map<number, { at: number; value: VastAiInstancePayload }>();
+  private readonly instanceInFlight = new Map<number, Promise<VastAiInstancePayload>>();
+  private listCache: { at: number; value: VastAiInstancePayload[] } | null = null;
+  private listInFlight: Promise<VastAiInstancePayload[]> | null = null;
+  private readonly now: () => number;
 
   constructor(
     private readonly apiKey: string,
-    options: { client?: ProviderHttpClient; fetchImpl?: typeof fetch } = {}
+    options: {
+      client?: ProviderHttpClient;
+      fetchImpl?: typeof fetch;
+      now?: () => number;
+    } = {}
   ) {
     this.http =
       options.client ??
-      new ProviderHttpClient({ baseUrl: VASTAI_BASE_URL, timeoutMs: 20_000, maxRetries: 2 });
+      // A boot polls for twenty minutes; the whole point is to stay under the
+      // provider's rate limit rather than to hammer it and retry.
+      new ProviderHttpClient({
+        baseUrl: VASTAI_BASE_URL,
+        timeoutMs: 20_000,
+        maxRetries: 3,
+        minIntervalMs: 250
+      });
     this.fetchImpl = options.fetchImpl ?? ((...args) => fetch(...args));
+    this.now = options.now ?? (() => Date.now());
   }
 
   async testConnection(): Promise<boolean> {
@@ -389,31 +412,87 @@ export class VastAiClient {
   }
 
   /**
-   * `GET /api/v0/instances/` is deprecated in favour of `/api/v1/instances/`,
-   * so listing and filtering by id is the shape that stays valid.
+   * One instance.
+   *
+   * A boot polls this every few seconds, and the old implementation fetched the
+   * whole account and filtered it — one boot plus one open Models tab was enough
+   * to earn `429 API requests too frequent`. A single-instance read is one request,
+   * and the answer is reused for a couple of seconds because nothing on this
+   * machine changes faster than that.
    */
   async getInstance(instanceId: number): Promise<VastAiInstancePayload> {
-    const list = await this.listInstances();
-    const found = list.find((instance) => instance.id === instanceId);
-    if (!found) {
-      throw new Error(`vast.ai instance ${instanceId} is not visible any more.`);
+    const cached = this.instanceCache.get(instanceId);
+    if (cached && this.now() - cached.at < INSTANCE_CACHE_MS) {
+      return cached.value;
     }
 
-    return found;
+    const inFlight = this.instanceInFlight.get(instanceId);
+    if (inFlight) {
+      return inFlight;
+    }
+
+    const request = (async () => {
+      try {
+        const response = await this.http.request(`/api/v0/instances/${instanceId}/`, {
+          headers: this.authHeaders()
+        });
+        const payload = (await response.json()) as VastAiInstancePayload;
+        const value = payload;
+        this.instanceCache.set(instanceId, { at: this.now(), value });
+        return value;
+      } catch {
+        // v0 is the documented single-instance shape; fall back to the list so a
+        // rename on their side is a slowdown, never an outage.
+        const list = await this.listInstances(true);
+        const found = list.find((instance) => instance.id === instanceId);
+        if (!found) {
+          throw new Error(`vast.ai instance ${instanceId} is not visible any more.`);
+        }
+
+        this.instanceCache.set(instanceId, { at: this.now(), value: found });
+        return found;
+      } finally {
+        this.instanceInFlight.delete(instanceId);
+      }
+    })();
+
+    this.instanceInFlight.set(instanceId, request);
+    return request;
   }
 
   /** Every instance on the account, used to find machines the app lost track of. */
-  async listInstances(): Promise<VastAiInstancePayload[]> {
-    const response = await this.http.request("/api/v1/instances/", {
-      headers: this.authHeaders()
-    });
+  async listInstances(force = false): Promise<VastAiInstancePayload[]> {
+    const fresh = this.listCache;
+    if (!force && fresh && this.now() - fresh.at < LIST_CACHE_MS) {
+      return fresh.value;
+    }
+    if (this.listInFlight) {
+      return this.listInFlight;
+    }
+
+    const request = (async () => {
+      const response = await this.http.request("/api/v1/instances/", {
+        headers: this.authHeaders()
+      });
 
     const payload = (await response.json()) as {
       instances?: VastAiInstancePayload[] | Record<string, VastAiInstancePayload> | null;
     };
 
-    const instances = payload.instances;
-    return Array.isArray(instances) ? instances : instances ? Object.values(instances) : [];
+      const instances = payload.instances;
+      const value = Array.isArray(instances)
+        ? instances
+        : instances
+          ? Object.values(instances)
+          : [];
+      this.listCache = { at: this.now(), value };
+      return value;
+    })().finally(() => {
+      this.listInFlight = null;
+    });
+
+    this.listInFlight = request;
+    return request;
   }
 
   /**
