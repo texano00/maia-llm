@@ -83,10 +83,10 @@ export function CataloguePage() {
       <p className="eyebrow">Catalogue</p>
       <h1>Pick a model to run</h1>
       <p className="lede">
-        Free and fully open: no account, no email, no data selling. You bring your own
-        provider keys and pay them directly. Models come from the catalogue MaiaLLM
-        publishes, so the list is the same everywhere and works offline from the last
-        snapshot. Nothing is provisioned until you review and confirm the cost estimate.
+        Free and fully open, with no data selling. You bring your own provider keys and pay them
+        directly. Models come from the catalogue MaiaLLM publishes, so the list is the same
+        everywhere and works offline from the last snapshot. Nothing is provisioned until you
+        review and confirm the cost estimate.
       </p>      {health?.huggingface.state === "missing" ? (
         <div className="alert">
           <span>Add your Hugging Face token to download models.</span>

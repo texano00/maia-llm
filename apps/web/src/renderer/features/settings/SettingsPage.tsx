@@ -663,8 +663,9 @@ export function SettingsPage() {
             server, which is kept without an expiry.
           </p>
           <p className="lede">
-            It never sends prompts, responses, images, file paths or credentials. There is no account
-            and the data is never sold. Turning this off stops the next run from reporting.
+            It never sends prompts, responses, images, file paths or credentials. Your email is used
+            only to own your data and receive access codes, and the data is never sold. Turning this
+            off stops the next run from reporting.
           </p>
         </div>
         <div className="update-actions">
