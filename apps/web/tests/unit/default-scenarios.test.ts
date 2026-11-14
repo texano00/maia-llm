@@ -35,6 +35,16 @@ describe("default basic-mode scenarios", () => {
     expect(cards.every((card) => card.modelId === "a/runnable")).toBe(true);
   });
 
+  it("still offers scenarios for a catalogue that carries no verdicts at all", () => {
+    // The fixture catalogue used by mock mode has no support fields.
+    const cards = deriveDefaultScenarios([
+      model({ id: "a/first", supported: undefined }),
+      model({ id: "a/second", supported: undefined })
+    ]);
+
+    expect(cards.length).toBeGreaterThan(0);
+  });
+
   it("says nothing when the catalogue has nothing runnable", () => {
     expect(deriveDefaultScenarios([model({ id: "a/x", supported: false })])).toEqual([]);
     expect(deriveDefaultScenarios([])).toEqual([]);

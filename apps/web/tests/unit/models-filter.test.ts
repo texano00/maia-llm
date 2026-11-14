@@ -34,9 +34,14 @@ const terminated = run("terminated-run", "ended", "2026-11-11T08:00:00.000Z");
 const all = [running, initializing, terminated];
 
 describe("status filter", () => {
-  it("defaults to Running", () => {
-    expect(DEFAULT_STATUS_FILTER).toBe("running");
-    expect(filterRuns(all, DEFAULT_STATUS_FILTER).map((entry) => entry.id)).toEqual(["running-run"]);
+  it("defaults to every run, so nothing is hidden on arrival", () => {
+    expect(DEFAULT_STATUS_FILTER).toBe("all");
+    // Order is the list's own (started-at), not the filter's: every run is kept.
+    expect(filterRuns(all, DEFAULT_STATUS_FILTER).map((entry) => entry.id).sort()).toEqual([
+      "initializing-run",
+      "running-run",
+      "terminated-run"
+    ]);
   });
 
   it("selects exactly the matching runs for each status", () => {

@@ -1,4 +1,4 @@
-import type { CatalogueModel, UseCaseCard } from "@maia/contracts";
+import { isChatCapableModel, type CatalogueModel, type UseCaseCard } from "@maia/contracts";
 
 /**
  * Basic-mode cards for a deployment whose curator has published none.
@@ -13,7 +13,15 @@ import type { CatalogueModel, UseCaseCard } from "@maia/contracts";
  * rather than invented editorial.
  */
 export function deriveDefaultScenarios(models: readonly CatalogueModel[]): UseCaseCard[] {
-  const runnable = models.filter((model) => model.supported === true);
+  // A snapshot row always carries a verdict. A fixture catalogue (mock mode) and a
+  // live Hub search do not, so when *nothing* has been judged, fall back to "not
+  // explicitly unusable" — otherwise a demo catalogue has no scenarios at all.
+  // A diffusion pack or an embedding model is never a chat scenario, whatever its
+  // download count says.
+  const chat = models.filter((model) => isChatCapableModel(model));
+
+  const judged = chat.filter((model) => model.supported === true);
+  const runnable = judged.length > 0 ? judged : chat.filter((model) => model.supported !== false);
   if (runnable.length === 0) {
     return [];
   }

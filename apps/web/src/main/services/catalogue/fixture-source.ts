@@ -147,6 +147,50 @@ export function createFixtureCatalogueSource(): CatalogueSource {
     // boots and then rejects chat requests.
     async getChatTemplate(id) {
       return id !== "openai-community/gpt2";
+    },
+
+    /**
+     * The verdict the portal would publish, computed the same way: an engine must
+     * exist, the repository must be loadable, and a chat template must be present.
+     *
+     * Without it a mock deployment had no verdicts at all, so the readiness filter
+     * hid its whole catalogue and basic mode had nothing to offer — a demo that
+     * looked broken.
+     */
+    getSupport(id) {
+      const model = MODELS.find((entry) => entry.id === id);
+      if (!model) {
+        return null;
+      }
+
+      const files = (FILES[id] ?? []).map((file) => file.path);
+      const hasSafetensors = files.some((path) => path.endsWith(".safetensors"));
+      const hasConfig = files.includes("config.json");
+      const template = id !== "openai-community/gpt2";
+
+      if (!hasSafetensors) {
+        return {
+          supported: false,
+          engine: null,
+          reason: "vLLM cannot load this repository: it is a ComfyUI diffusion pack, not a text-generation transformer"
+        };
+      }
+      if (!hasConfig) {
+        return {
+          supported: false,
+          engine: "vllm",
+          reason: "the repository root has no config.json"
+        };
+      }
+      if (!template) {
+        return {
+          supported: false,
+          engine: "vllm",
+          reason: "the model defines no chat template, so it cannot answer chat requests"
+        };
+      }
+
+      return { supported: true, engine: "vllm", reason: null };
     }
   };
 }

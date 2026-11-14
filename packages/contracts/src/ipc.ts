@@ -34,6 +34,36 @@ export const apiErrorSchema = z.object({
   details: z.record(z.string(), z.unknown()).optional()
 });
 
+/**
+ * Live logs for one run.
+ *
+ * `instance` is the container's stdout — what the engine itself prints. `debug` is
+ * everything around it: the instance record vast.ai keeps (status, machine, image,
+ * ports) plus the daemon log, which is where a container that never started
+ * explains itself.
+ */
+export const sessionLogsRequestSchema = z.object({
+  sessionId: z.string().min(1),
+  kind: z.enum(["instance", "debug"]).default("instance"),
+  /** Lines to ask for; vast.ai caps this server-side. */
+  tail: z.number().int().min(10).max(2000).default(200)
+});
+
+export const sessionLogsResultSchema = z.object({
+  sessionId: z.string(),
+  kind: z.enum(["instance", "debug"]),
+  /** The log itself, or null when there is nothing to read yet. */
+  text: z.string().nullable(),
+  /** One sentence when `text` is null, so an empty panel is never a mystery. */
+  note: z.string().nullable(),
+  fetchedAt: z.string(),
+  /** True while the run is still provisioning, so the view keeps polling. */
+  live: z.boolean()
+});
+
+export type SessionLogsRequest = z.infer<typeof sessionLogsRequestSchema>;
+export type SessionLogsResult = z.infer<typeof sessionLogsResultSchema>;
+
 export const appInfoSchema = z.object({
   app: z.string(),
   /**
@@ -118,6 +148,7 @@ export const ipcChannels = [
   "session.list",
   /** Locally persisted sessions in a terminal/teardown state (Models view). */
   "session.history",
+  "session.logs",
   "session.status",
   "session.start",
   "session.end",
@@ -194,9 +225,10 @@ export const appSettingsSchema = z.object({
   walletWarnThresholdMicroUsd: z.number().int().positive().default(2_000_000),
   /**
    * Whether the catalogue hides models this account cannot start right now.
+   * On by default: a model that cannot start is not a choice, it is a dead end.
    * Stored with the other UI preferences so it survives a reload.
    */
-  catalogueSupportedOnly: z.boolean().default(false),
+  catalogueSupportedOnly: z.boolean().default(true),
   /** Set once both provider keys have been verified in the guided flow. */
   onboardingCompleted: z.boolean().default(false),
   /** Set when the guided flow is dismissed; it does not interrupt again. */

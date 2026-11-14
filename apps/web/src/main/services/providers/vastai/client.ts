@@ -342,15 +342,24 @@ export class VastAiClient {
    *
    * vast.ai serves logs in two steps: `PUT /instances/request_logs/{id}/` queues
    * a request and answers with a signed URL that is readable for a short while.
-   * Used only when a boot fails, where the container output is the difference
-   * between "the port never opened" and the real traceback.
+   * Used when a boot fails, where the container output is the difference between
+   * "the port never opened" and the real traceback — and now also for the live log
+   * view, which is why it takes a tail size and a daemon flag.
    */
-  async getInstanceLogs(instanceId: number, options: { tail?: number } = {}): Promise<string | null> {
+  async getInstanceLogs(
+    instanceId: number,
+    options: { tail?: number; daemon?: boolean } = {}
+  ): Promise<string | null> {
     try {
       const response = await this.http.request(`/api/v0/instances/request_logs/${instanceId}/`, {
         method: "PUT",
         headers: { ...this.authHeaders(), "content-type": "application/json" },
-        body: JSON.stringify({ tail: String(options.tail ?? 200) })
+        // `daemon` selects the host-side log instead of the container's stdout,
+        // which is the only place a container that refused to start speaks.
+        body: JSON.stringify({
+          tail: String(options.tail ?? 200),
+          ...(options.daemon ? { daemon: true } : {})
+        })
       });
 
       const payload = (await response.json()) as { result_url?: unknown };

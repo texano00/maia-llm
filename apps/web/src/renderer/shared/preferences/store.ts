@@ -21,7 +21,7 @@ export interface UiPreferences {
 
 export const FALLBACK_PREFERENCES: UiPreferences = {
   catalogueMode: "basic",
-  catalogueSupportedOnly: false,
+  catalogueSupportedOnly: true,
   studentMode: false,
   historyOpen: true,
   lastConversationId: null,

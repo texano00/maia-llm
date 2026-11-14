@@ -4,7 +4,7 @@ import { toVisibleStatus, type VisibleStatus } from "./status";
 /** View-local selection; deliberately not persisted so every visit starts on Running. */
 export type StatusFilter = VisibleStatus | "all";
 
-export const DEFAULT_STATUS_FILTER: StatusFilter = "running";
+export const DEFAULT_STATUS_FILTER: StatusFilter = "all";
 
 export const STATUS_FILTERS: ReadonlyArray<{ value: StatusFilter; label: string }> = [
   { value: "initializing", label: "Initializing" },
