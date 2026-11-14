@@ -90,7 +90,10 @@ export interface AppendMessageInput {
 }
 
 export class HistoryRepository {
-  constructor(private readonly db: DatabaseConnection) {}
+  constructor(
+    private readonly db: DatabaseConnection,
+    private readonly accountId: string
+  ) {}
 
   createConversation(input: CreateConversationInput): Conversation {
     const title = input.title.trim();
@@ -105,12 +108,13 @@ export class HistoryRepository {
     this.db
       .prepare(
         `INSERT INTO conversations
-          (id, title, model_id, origin, client_label, session_id, settings_json, created_at, updated_at, archived)
+          (id, account_id, title, model_id, origin, client_label, session_id, settings_json, created_at, updated_at, archived)
          VALUES
-          (@id, @title, @modelId, @origin, @clientLabel, @sessionId, @settings, @now, @now, 0)`
+          (@id, @accountId, @title, @modelId, @origin, @clientLabel, @sessionId, @settings, @now, @now, 0)`
       )
       .run({
         id,
+        accountId: this.accountId,
         title,
         modelId: input.modelId ?? null,
         origin: input.origin,
@@ -194,8 +198,8 @@ export class HistoryRepository {
 
   getConversation(id: string): { conversation: Conversation; messages: Message[] } | null {
     const conversation = this.db
-      .prepare("SELECT * FROM conversations WHERE id = ?")
-      .get(id) as ConversationRow | undefined;
+      .prepare("SELECT * FROM conversations WHERE id = ? AND account_id = ?")
+      .get(id, this.accountId) as ConversationRow | undefined;
 
     if (!conversation) {
       return null;
@@ -220,10 +224,11 @@ export class HistoryRepository {
         `SELECT c.id, c.title, c.model_id, c.origin, c.updated_at, c.pinned,
                 (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id) AS message_count
          FROM conversations c
+         WHERE c.account_id = ?
          ORDER BY c.pinned DESC, c.updated_at DESC
          LIMIT ? OFFSET ?`
       )
-      .all(safeLimit, safeOffset) as Array<{
+      .all(this.accountId, safeLimit, safeOffset) as Array<{
       id: string;
       title: string;
       model_id: string | null;
@@ -261,12 +266,12 @@ export class HistoryRepository {
          FROM messages_fts
          JOIN messages m ON m.rowid = messages_fts.rowid
          JOIN conversations c ON c.id = m.conversation_id
-         WHERE messages_fts MATCH ?
+         WHERE messages_fts MATCH ? AND c.account_id = ?
          GROUP BY c.id
          ORDER BY c.pinned DESC, c.updated_at DESC
          LIMIT ?`
       )
-      .all(match, safeLimit) as Array<{
+      .all(match, this.accountId, safeLimit) as Array<{
       id: string;
       title: string;
       model_id: string | null;
@@ -306,8 +311,8 @@ export class HistoryRepository {
   /** Pins or unpins a conversation so it sorts above the rest. */
   setPinned(id: string, pinned: boolean): void {
     const result = this.db
-      .prepare("UPDATE conversations SET pinned = ? WHERE id = ?")
-      .run(pinned ? 1 : 0, id);
+      .prepare("UPDATE conversations SET pinned = ? WHERE id = ? AND account_id = ?")
+      .run(pinned ? 1 : 0, id, this.accountId);
 
     if (result.changes === 0) {
       throw new Error("Conversation not found");
@@ -316,9 +321,15 @@ export class HistoryRepository {
 
   /** Re-binds a conversation to another model after an explicit switch. */
   updateConversationModel(id: string, modelId: string, sessionId: string | null): void {
-    this.db
-      .prepare("UPDATE conversations SET model_id = ?, session_id = ?, updated_at = ? WHERE id = ?")
-      .run(modelId, sessionId, new Date().toISOString(), id);
+    const result = this.db
+      .prepare(
+        "UPDATE conversations SET model_id = ?, session_id = ?, updated_at = ? WHERE id = ? AND account_id = ?"
+      )
+      .run(modelId, sessionId, new Date().toISOString(), id, this.accountId);
+
+    if (result.changes === 0) {
+      throw new Error("Conversation not found");
+    }
   }
 
   renameConversation(id: string, title: string): void {
@@ -328,8 +339,8 @@ export class HistoryRepository {
     }
 
     const result = this.db
-      .prepare("UPDATE conversations SET title = ?, updated_at = ? WHERE id = ?")
-      .run(trimmed, new Date().toISOString(), id);
+      .prepare("UPDATE conversations SET title = ?, updated_at = ? WHERE id = ? AND account_id = ?")
+      .run(trimmed, new Date().toISOString(), id, this.accountId);
 
     if (result.changes === 0) {
       throw new Error("Conversation not found");
@@ -337,7 +348,9 @@ export class HistoryRepository {
   }
 
   deleteConversation(id: string): void {
-    const result = this.db.prepare("DELETE FROM conversations WHERE id = ?").run(id);
+    const result = this.db
+      .prepare("DELETE FROM conversations WHERE id = ? AND account_id = ?")
+      .run(id, this.accountId);
 
     if (result.changes === 0) {
       throw new Error("Conversation not found");

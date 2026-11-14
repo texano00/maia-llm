@@ -8,8 +8,6 @@ import {
 } from "@maia/contracts";
 import type { DatabaseConnection } from "../../storage/db";
 
-const SETTINGS_KEY = "app_settings";
-
 /**
  * The diagnostics host before api.maiallm.com existed. A stored value equal to
  * it was almost certainly never chosen by hand, so it follows the new default
@@ -36,16 +34,19 @@ function migrate(settings: AppSettings): AppSettings {
 }
 
 /**
- * Small typed wrapper over the `preferences` table. Values are validated on the
- * way out as well as in, so a hand-edited row can never crash the app.
+ * Small typed wrapper over the `account_settings` table. Values are validated on
+ * the way out as well as in, so a hand-edited row can never crash the app.
  */
 export class SettingsStore {
-  constructor(private readonly database: DatabaseConnection) {}
+  constructor(
+    private readonly database: DatabaseConnection,
+    private readonly accountId: string
+  ) {}
 
   get(): AppSettings {
     const row = this.database
-      .prepare("SELECT value_json FROM preferences WHERE key = ?")
-      .get(SETTINGS_KEY) as { value_json: string } | undefined;
+      .prepare("SELECT value_json FROM account_settings WHERE account_id = ?")
+      .get(this.accountId) as { value_json: string } | undefined;
 
     if (!row) {
       return { ...defaultAppSettings };
@@ -72,11 +73,17 @@ export class SettingsStore {
 
     this.database
       .prepare(
-        `INSERT INTO preferences (key, value_json, updated_at)
-         VALUES (@key, @value, @updatedAt)
-         ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at`
+        `INSERT INTO account_settings (account_id, value_json, updated_at)
+         VALUES (@accountId, @value, @updatedAt)
+         ON CONFLICT(account_id) DO UPDATE SET
+           value_json = excluded.value_json,
+           updated_at = excluded.updated_at`
       )
-      .run({ key: SETTINGS_KEY, value: JSON.stringify(next), updatedAt: new Date().toISOString() });
+      .run({
+        accountId: this.accountId,
+        value: JSON.stringify(next),
+        updatedAt: new Date().toISOString()
+      });
 
     return next;
   }

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { closeDatabase, openDatabase, type DatabaseConnection } from "../../src/main/storage/db";
+import { seedAccount } from "../helpers/accounts";
 import {
   SessionOrchestrator,
   type ComputeProvider
@@ -33,7 +34,8 @@ describe("session endpoint", () => {
 
   beforeEach(() => {
     db = openDatabase(":memory:");
-    store = new SessionStore(db);
+    seedAccount(db);
+    store = new SessionStore(db, "account-test");
     clock = Date.parse("2026-11-12T10:00:00.000Z");
   });
 

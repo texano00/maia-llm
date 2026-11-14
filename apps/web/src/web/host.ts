@@ -1,246 +1,244 @@
-import { z } from "zod";
+import { randomBytes } from "node:crypto";
 import { dirname, join } from "node:path";
-import { capabilityForPipelineTag, chatEventChannel, type IpcChannel } from "@maia/contracts";
+import type { IpcChannel } from "@maia/contracts";
 import { closeDatabase, createConnection, type DatabaseConnection } from "../main/storage/connection";
 import { loadMigrations } from "./migrations";
-import { HistoryRepository } from "../main/services/history/repository";
-import { ConversationImageStore } from "../main/services/history/images";
-import { SettingsStore } from "../main/services/settings/store";
+import { AccountRepository } from "../main/services/accounts/repository";
+import { AccessService } from "../main/services/accounts/service";
+import { createMailer } from "../main/services/accounts/mailer";
+import { createCaptchaVerifier } from "../main/services/accounts/turnstile";
+import { loadCredentialKey } from "../main/services/credentials/vault";
 import { CatalogueRepository } from "../main/services/catalogue/repository";
 import { CatalogueService } from "../main/services/catalogue/service";
 import { createFixtureCatalogueSource } from "../main/services/catalogue/fixture-source";
-import {
-  createHuggingFaceSource,
-  testHuggingFaceToken
-} from "../main/services/catalogue/huggingface-source";
-import { assertChatRunnable } from "../main/services/catalogue/runnable";
-import { CredentialStore } from "../main/services/credentials/store";
-import { SessionOrchestrator } from "../main/services/sessions/orchestrator";
-import { SessionStore } from "../main/services/sessions/store";
-import { createMockComputeProvider, createMockInference } from "../main/services/providers/mock-runtime";
-import { createVastComputeProvider } from "../main/services/providers/vastai/compute-provider";
-import { VastAiClient } from "../main/services/providers/vastai/client";
-import { createVllmRuntime } from "../main/services/inference/vllm";
-import { createModelPlanResolver } from "../main/services/inference/model-plan-resolver";
-import { createFailureReporter } from "../main/services/diagnostics/failures";
+import { createHuggingFaceSource } from "../main/services/catalogue/huggingface-source";
 import { GpuReputationClient } from "../main/services/gpu/reputation";
-import { IpcRegistry } from "../main/ipc/registry";
-import { registerSettingsHandlers } from "../main/ipc/settings";
-import { registerWorkspaceHandlers } from "../main/ipc/workspace";
-import { EnvSecretVault } from "./vault";
+import type { IpcRegistry } from "../main/ipc/registry";
+import { createAccountRuntime, type AccountRuntime, type WebLogger } from "./accounts";
+import { createPublicRegistry } from "./public";
 
-export interface WebHostOptions {
+export interface WebPlatformOptions {
   databasePath: string;
   providerMode: "live" | "mock";
   readinessTimeoutMinutes?: number;
   idleTimeoutMinutes?: number;
-  onEvent?: ((channel: string, payload: unknown) => void) | undefined;
-  logger?: {
-    info(message: string, context?: Record<string, unknown>): void;
-    warn(message: string, context?: Record<string, unknown>): void;
-    error(message: string, context?: Record<string, unknown>): void;
-  };
+  /** Shared event sink; the account id is part of every record. */
+  onEvent?: ((accountId: string, channel: string, payload: unknown) => void) | undefined;
+  logger?: WebLogger;
+  env?: Record<string, string | undefined>;
 }
 
-export interface WebHost {
-  registry: IpcRegistry;
-  invoke(channel: IpcChannel, payload: unknown): Promise<unknown>;
+export interface WebPlatform {
+  database: DatabaseConnection;
+  catalogue: CatalogueService;
+  access: AccessService;
+  /** Channels callable without a session: `app.info` and the access flow. */
+  publicRegistry: IpcRegistry;
+  accounts: AccountRuntimes;
   dispose(): Promise<void>;
 }
 
+/** Channels that must work before a session exists. */
+export const publicChannels = new Set<IpcChannel>([
+  "app.info",
+  "auth.config",
+  "auth.state",
+  "auth.requestCode",
+  "auth.verifyCode",
+  "auth.signOut"
+]);
+
 /**
- * Runs the desktop services inside a plain Node process so the same renderer can
- * be exercised in a browser. Only the transport differs: channels are invoked
- * over HTTP and chat/update events are pushed over SSE.
+ * Keeps one service graph per account in memory.
+ *
+ * The graph owns the session orchestrator, so it must outlive a single request
+ * (a chat turn streams across many). An evicted graph is suspended, not torn
+ * down: sessions stay in SQLite and the next request rehydrates them.
  */
-export async function createWebHost(options: WebHostOptions): Promise<WebHost> {
-  const logger = options.logger ?? {
+export class AccountRuntimes {
+  private readonly entries = new Map<string, { runtime: AccountRuntime; lastUsedAt: number }>();
+
+  constructor(
+    private readonly factory: (accountId: string) => Promise<AccountRuntime>,
+    private readonly now: () => number = () => Date.now()
+  ) {}
+
+  async get(accountId: string): Promise<AccountRuntime> {
+    const existing = this.entries.get(accountId);
+    if (existing) {
+      existing.lastUsedAt = this.now();
+      return existing.runtime;
+    }
+
+    const runtime = await this.factory(accountId);
+    this.entries.set(accountId, { runtime, lastUsedAt: this.now() });
+    return runtime;
+  }
+
+  evict(accountId: string): void {
+    const entry = this.entries.get(accountId);
+    if (!entry) {
+      return;
+    }
+
+    entry.runtime.suspend();
+    this.entries.delete(accountId);
+  }
+
+  /** Suspends graphs idle for longer than `idleMs`; returns how many. */
+  sweep(idleMs: number): number {
+    const now = this.now();
+    let evicted = 0;
+
+    for (const [accountId, entry] of this.entries) {
+      if (now - entry.lastUsedAt < idleMs) {
+        continue;
+      }
+
+      entry.runtime.suspend();
+      this.entries.delete(accountId);
+      evicted += 1;
+    }
+
+    return evicted;
+  }
+
+  async disposeAll(): Promise<void> {
+    for (const [, entry] of this.entries) {
+      await entry.runtime.endSessions("app_exit");
+    }
+
+    this.entries.clear();
+  }
+}
+
+/**
+ * The shared platform: the database, the public catalogue and the access flow.
+ * Account data is never reached from here — that is what `AccountRuntimes`
+ * builds on demand.
+ */
+export async function createWebPlatform(options: WebPlatformOptions): Promise<WebPlatform> {
+  const env = options.env ?? process.env;
+  const logger: WebLogger = options.logger ?? {
     info: (message: string) => console.log(`[web] ${message}`),
     warn: (message: string) => console.warn(`[web] ${message}`),
     error: (message: string) => console.error(`[web] ${message}`)
   };
 
-  const database: DatabaseConnection = createConnection(options.databasePath, loadMigrations());
-  const settings = new SettingsStore(database);
-  const repository = new HistoryRepository(database);
-  // The web host has no Electron userData path, so images sit beside the
-  // database file it was given.
-  const conversationImages = new ConversationImageStore(
-    database,
-    join(dirname(options.databasePath), "images")
-  );
-  const credentials = new CredentialStore(database, new EnvSecretVault());
+  const database = createConnection(options.databasePath, loadMigrations());
+  const accountsRepository = new AccountRepository(database);
 
-  // Keys from the environment (VAST_API_KEY, HF_TOKEN) go through the normal
-  // store so `credentials.status()` and the connection tests see them.
-  for (const [provider, secret] of [
-    ["vastai", process.env.VAST_API_KEY],
-    ["huggingface", process.env.HF_TOKEN]
-  ] as const) {
-    if (secret && !(await credentials.get(provider))) {
-      await credentials.set(provider, secret);
-    }
-  }
+  const access = new AccessService({
+    repository: accountsRepository,
+    mailer: createMailer({ env, logger }),
+    captcha: createCaptchaVerifier({ env, logger }),
+    sessionSecret: resolveSessionSecret(env, logger)
+  });
 
   const catalogueRepository = new CatalogueRepository(database);
   const catalogue = new CatalogueService({
     repository: catalogueRepository,
     source:
       options.providerMode === "live"
-        ? createHuggingFaceSource({ getToken: () => credentials.get("huggingface") })
+        ? // The catalogue is public data: it reads with the deployment token, not
+          // with anybody's personal provider key.
+          createHuggingFaceSource({
+            getToken: async () => env.MAIA_PORTAL_HF_TOKEN ?? env.HF_TOKEN
+          })
         : createFixtureCatalogueSource(),
     logger,
     ...(options.providerMode === "mock" ? { ttlMs: 0 } : {})
   });
 
   const reputation = new GpuReputationClient({
-    getBaseUrl: () => process.env.MAIA_REPUTATION_URL ?? settings.get().diagnosticsUrl,
+    getBaseUrl: () => env.MAIA_REPUTATION_URL ?? "https://api.maiallm.com",
     logger
   });
 
-  const hasVastKey = Boolean(await credentials.get("vastai"));
-  const useLiveGpu = options.providerMode === "live" && hasVastKey;
+  const { key: credentialKey } = loadCredentialKey({ env, logger });
+  const imagesDir = join(dirname(options.databasePath), "images");
 
-  const compute = useLiveGpu
-    ? createVastComputeProvider({
-        getApiKey: () => credentials.get("vastai"),
-        getHfToken: () => credentials.get("huggingface"),
-        getParameterCount: async (modelId) => catalogueRepository.get(modelId)?.parameterCount ?? null,
-        getFilters: () => settings.get().gpuFilters,
-        getReputations: () => reputation.snapshot(),
-        reportOutcome: (input) => reputation.report(input),
-        // Same launch plan as the desktop build: the GGUF plugin, its tokenizer,
-        // and a `--max-model-len` that fits the card the offer is for.
-        getModelPlan: createModelPlanResolver({
-          artifacts: (modelId) => catalogueRepository.getArtifacts(modelId),
-          loadDetail: (modelId) => catalogue.detail(modelId),
-          get: (modelId) => catalogueRepository.get(modelId),
-          engine: (modelId) => catalogue.supportFor(modelId)?.engine ?? null
-        }),
-        readyTimeoutMs: (options.readinessTimeoutMinutes ?? 20) * 60_000,
-        logger
-      })
-    : createMockComputeProvider({ provisionDelayMs: 400 });
+  const accounts = new AccountRuntimes((accountId) =>
+    createAccountRuntime({
+      accountId,
+      database,
+      imagesDir,
+      catalogue,
+      catalogueRepository,
+      reputation,
+      providerMode: options.providerMode,
+      credentialKey,
+      access,
+      ...(options.readinessTimeoutMinutes !== undefined
+        ? { readinessTimeoutMinutes: options.readinessTimeoutMinutes }
+        : {}),
+      ...(options.idleTimeoutMinutes !== undefined
+        ? { idleTimeoutMinutes: options.idleTimeoutMinutes }
+        : {}),
+      logger,
+      onEvent: (id, channel, payload) => options.onEvent?.(id, channel, payload)
+    })
+  );
 
-  const inference = useLiveGpu
-    ? createVllmRuntime({
-        resolveEndpoint: (instanceId) =>
-          "resolveEndpoint" in compute ? compute.resolveEndpoint(instanceId) : null
-      })
-    : createMockInference({ chunkDelayMs: 12 });
+  // Only at process start: sessions left in the database belong to a previous
+  // process, and their keys are gone, so the first run of each account releases
+  // the GPU before anyone can send a message to it.
+  const orphans = database
+    .prepare(
+      `SELECT DISTINCT account_id FROM sessions
+        WHERE account_id IS NOT NULL
+          AND state IN ('estimated', 'provisioning', 'ready', 'active', 'ending')`
+    )
+    .all() as Array<{ account_id: string }>;
 
-  const reportFailure = createFailureReporter({
-    url: process.env.MAIA_FAILURE_REPORT_URL ?? settings.get().diagnosticsUrl,
-    appVersion: process.env.MAIA_APP_VERSION ?? "web",
-    platform: process.platform,
-    retryDelayMs: 0,
-    logger
-  });
-
-  const sessions = new SessionOrchestrator({
-    store: new SessionStore(database),
-    compute,
-    inference,
-    idleTimeoutMinutes: options.idleTimeoutMinutes ?? 10,
-    readinessTimeoutMs: (options.readinessTimeoutMinutes ?? 20) * 60_000,
-    filters: () => settings.get().gpuFilters,
-    startupRetries: () => settings.get().gpuStartupRetries,
-    assertRunnable: async (modelId) => {
-      await assertChatRunnable(catalogue, modelId);
-    },
-    capabilityFor: (modelId) =>
-      capabilityForPipelineTag(catalogueRepository.get(modelId)?.pipelineTag ?? null),
-    reportFailure,
-    logger
-  });
-
-  const reconciled = await sessions.reconcile();
-  if (reconciled > 0) {
-    logger.warn(`released ${reconciled} session(s) left behind by a previous run`);
+  for (const row of orphans) {
+    const runtime = await accounts.get(row.account_id);
+    const released = await runtime.orchestrator.reconcile();
+    if (released > 0) {
+      logger.warn(`released ${released} session(s) left behind by a previous run`);
+    }
   }
 
-  const registry = new IpcRegistry({
-    onError: (channel, error) => {
-      logger.error(`channel ${channel} failed: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  });
+  const publicRegistry = createPublicRegistry(access);
 
-  registry.register("app.info", z.unknown(), () => ({
-    app: "web",
-    electron: "n/a",
-    chrome: "n/a",
-    node: process.versions.node,
-    platform: process.platform,
-    arch: process.arch,
-    channel: "stable" as const,
-    packaged: false
-  }));
-
-  // The browser build has no updater; report idle so the UI keeps working.
-  registry.register("update.status", z.unknown(), () => idleUpdateStatus());
-  registry.register("update.check", z.unknown(), () => idleUpdateStatus());
-  registry.register("update.download", z.unknown(), () => idleUpdateStatus());
-  registry.register("update.install", z.unknown(), () => idleUpdateStatus());
-
-  registerSettingsHandlers({
-    registry,
-    store: settings,
-    credentials,
-    testCredential: async (provider, secret) => {
-      try {
-        if (provider === "huggingface") {
-          const ok = await testHuggingFaceToken(secret);
-          return { ok, message: ok ? "Hugging Face accepted the token." : "Hugging Face rejected the token." };
-        }
-
-        if (provider === "vastai") {
-          const ok = await new VastAiClient(secret).testConnection();
-          return { ok, message: ok ? "vast.ai accepted the API key." : "vast.ai rejected the API key." };
-        }
-
-        return { ok: false, message: `${provider} connection tests are not wired yet.` };
-      } catch (error) {
-        return { ok: false, message: error instanceof Error ? error.message : `${provider} request failed` };
-      }
-    }
-  });
-
-
-  registerWorkspaceHandlers({
-    registry,
-    catalogue,
-    sessions,
-    history: repository,
-    images: conversationImages,
-    broadcastChat: (payload) => options.onEvent?.(chatEventChannel, payload)
-  });
-
-  const idleTimer = setInterval(() => void sessions.reapIdle(), 30_000);
-  idleTimer.unref?.();
+  const sweepTimer = setInterval(() => accounts.sweep(30 * 60_000), 60_000);
+  sweepTimer.unref?.();
+  const pruneTimer = setInterval(() => access.prune(), 10 * 60_000);
+  pruneTimer.unref?.();
 
   return {
-    registry,
-    async invoke(channel, payload) {
-      const result = await registry.invoke(channel, payload);
-      if (result.ok) {
-        return result.data;
-      }
-
-      throw Object.assign(new Error(result.error.message), { code: result.error.code });
-    },
+    database,
+    catalogue,
+    access,
+    publicRegistry,
+    accounts,
     async dispose() {
-      clearInterval(idleTimer);
-      await sessions.endAll("app_exit");
+      clearInterval(sweepTimer);
+      clearInterval(pruneTimer);
+      await accounts.disposeAll();
       closeDatabase(database);
     }
   };
 }
 
-function idleUpdateStatus() {
-  return {
-    phase: "idle" as const,
-    currentVersion: "web",
-    channel: "stable" as const,
-    message: "Updates are handled by the installed desktop app."
-  };
+function resolveSessionSecret(
+  env: Record<string, string | undefined>,
+  logger: WebLogger
+): string {
+  const secret = env.MAIA_SESSION_SECRET?.trim();
+  if (secret) {
+    return secret;
+  }
+
+  if (env.NODE_ENV === "production") {
+    throw new Error(
+      "MAIA_SESSION_SECRET is required in production: access codes are keyed with it. " +
+        "Generate one with: openssl rand -base64 48"
+    );
+  }
+
+  logger.warn(
+    "MAIA_SESSION_SECRET is not set: using an ephemeral secret, existing sessions and codes stop working on restart"
+  );
+  return randomBytes(32).toString("hex");
 }

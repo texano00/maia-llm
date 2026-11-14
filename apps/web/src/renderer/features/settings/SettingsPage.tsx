@@ -11,8 +11,7 @@ import {
   type CredentialTestResult,
   type GpuFilters
 } from "@maia/contracts";
-import { useUpdates } from "../../shared/updates/UpdatesProvider";
-import { describeUpdateStatus } from "../../shared/updates/UpdateToast";
+import { useAuth } from "../../shared/auth/AuthProvider";
 import { SettingsSection } from "./SettingsSection";
 import { initialExpanded, sectionForError, toggleSection, type SettingsSectionId } from "./sections";
 
@@ -37,8 +36,8 @@ function toStartupRetries(value: string): number | null {
 }
 
 export function SettingsPage() {
-  const { appInfo, status, bridgeAvailable, check, download, install } = useUpdates();
-  const busy = status?.phase === "checking" || status?.phase === "downloading";
+  const { email } = useAuth();
+  const bridgeAvailable = typeof window !== "undefined" && Boolean(window.maia);
 
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [diagnosticsUrl, setDiagnosticsUrl] = useState(DEFAULT_DIAGNOSTICS_URL);
@@ -293,63 +292,32 @@ export function SettingsPage() {
       <p className="eyebrow">Settings</p>
       <h1>Providers and preferences</h1>
       <p className="lede">
-        Hugging Face, vast.ai, and S3 credentials will be stored in the operating-system credential
-        vault here.
+        Hugging Face, vast.ai, and S3 credentials are encrypted with the server key and bound to the
+        account you signed in with.
       </p>
-
-      {appInfo?.app === "web" ? (
-        <p className="field-hint">
-          Browser preview: secrets are kept in memory for this session and are never written to
-          disk. Use the desktop build for stored credentials and in-app updates.
-        </p>
-      ) : null}
 
       {bridgeAvailable ? null : (
         <p className="field-error">
-          The application bridge is unavailable. Settings cannot be read or saved — reinstall Maia
-          LLM.
+          The application bridge is unavailable. Settings cannot be read or saved — reload the page.
         </p>
       )}
 
       <SettingsSection
         id="updates"
-        title="Application updates"
-        summary={`Installed ${appInfo?.app ?? "—"} on the ${status?.channel ?? "stable"} channel`}
+        title="Account"
+        summary={email ?? "Not signed in"}
         expanded={expandedSections.includes("updates")}
         onToggle={handleSectionToggle}
       >
-      <div className="settings-card">
-        <div>
-          <h2>Application updates</h2>
-          <p className="lede">
-            Installed version {appInfo?.app ?? "—"} on the {status?.channel ?? "stable"} channel.
-          </p>
-          <p className="update-meta">{describeUpdateStatus(status)}</p>
+        <div className="settings-card">
+          <div>
+            <h2>Account</h2>
+            <p className="lede">
+              Signed in as {email ?? "—"}. Conversations, images and provider keys belong to this
+              address; signing out or deleting it is done from the menu in the top bar.
+            </p>
+          </div>
         </div>
-        <div className="update-actions">
-          {status?.phase === "available" ? (
-            <button type="button" onClick={() => void download()}>
-              Update now
-            </button>
-          ) : status?.phase === "ready" ? (
-            <button type="button" onClick={() => void install()}>
-              Restart and install
-            </button>
-          ) : status?.phase === "installing" ? (
-            <button type="button" disabled>
-              Installing…
-            </button>
-          ) : (
-            <button
-              type="button"
-              disabled={busy || (status !== null && !status.supported)}
-              onClick={() => void check()}
-            >
-              {status?.phase === "checking" ? "Checking…" : "Check for updates"}
-            </button>
-          )}
-        </div>
-      </div>
       </SettingsSection>
 
       <SettingsSection
@@ -695,8 +663,9 @@ export function SettingsPage() {
             server, which is kept without an expiry.
           </p>
           <p className="lede">
-            It never sends prompts, responses, images, file paths or credentials. There is no account
-            and the data is never sold. Turning this off stops the next run from reporting.
+            It never sends prompts, responses, images, file paths or credentials. Your email is used
+            only to own your data and receive access codes, and the data is never sold. Turning this
+            off stops the next run from reporting.
           </p>
         </div>
         <div className="update-actions">

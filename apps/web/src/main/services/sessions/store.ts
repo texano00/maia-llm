@@ -23,7 +23,10 @@ interface SessionRow {
 
 /** Persistence for the session lifecycle; the schema enforces one active row. */
 export class SessionStore {
-  constructor(private readonly database: DatabaseConnection) {}
+  constructor(
+    private readonly database: DatabaseConnection,
+    private readonly accountId: string
+  ) {}
 
   insert(input: {
     id: string;
@@ -43,14 +46,15 @@ export class SessionStore {
     this.database
       .prepare(
         `INSERT INTO sessions
-           (id, model_id, provider, state, runtime, container_image, gpu_name, gpu_ram_gb,
+           (id, account_id, model_id, provider, state, runtime, container_image, gpu_name, gpu_ram_gb,
             hourly_rate_microusd, estimated_total_microusd, label, started_at, power_tier, capability)
          VALUES
-           (@id, @modelId, 'vastai', @state, @runtime, @containerImage, @gpuName, @gpuRamGb,
+           (@id, @accountId, @modelId, 'vastai', @state, @runtime, @containerImage, @gpuName, @gpuRamGb,
             @hourlyRateMicroUsd, @estimatedTotalMicroUsd, @label, @startedAt, @powerTier, @capability)`
       )
       .run({
         id: input.id,
+        accountId: this.accountId,
         modelId: input.modelId,
         state: input.state,
         runtime: input.runtime,
@@ -85,10 +89,11 @@ export class SessionStore {
                 ended_at = COALESCE(@endedAt, ended_at),
                 end_reason = COALESCE(@endReason, end_reason),
                 failure_code = COALESCE(@failureCode, failure_code)
-          WHERE id = @id`
+          WHERE id = @id AND account_id = @accountId`
       )
       .run({
         id: sessionId,
+        accountId: this.accountId,
         state,
         readyAt: patch.readyAt ?? null,
         endedAt: patch.endedAt ?? null,
@@ -101,18 +106,18 @@ export class SessionStore {
     const rows = this.database
       .prepare(
         `SELECT * FROM sessions
-          WHERE state IN ('estimated', 'provisioning', 'ready', 'active', 'ending')
+          WHERE account_id = ? AND state IN ('estimated', 'provisioning', 'ready', 'active', 'ending')
           ORDER BY started_at DESC`
       )
-      .all() as SessionRow[];
+      .all(this.accountId) as SessionRow[];
 
     return rows.map((row) => toSession(row, this.eventsFor(row.id)));
   }
 
   get(sessionId: string): Session | null {
-    const row = this.database.prepare("SELECT * FROM sessions WHERE id = ?").get(sessionId) as
-      | SessionRow
-      | undefined;
+    const row = this.database
+      .prepare("SELECT * FROM sessions WHERE id = ? AND account_id = ?")
+      .get(sessionId, this.accountId) as SessionRow | undefined;
 
     return row ? toSession(row, this.eventsFor(sessionId)) : null;
   }
@@ -197,10 +202,10 @@ export class SessionStore {
     const rows = this.database
       .prepare(
         `SELECT * FROM sessions
-          WHERE state IN ('ending', 'ended', 'cancelled', 'failed')
+          WHERE account_id = ? AND state IN ('ending', 'ended', 'cancelled', 'failed')
           ORDER BY started_at DESC`
       )
-      .all() as SessionRow[];
+      .all(this.accountId) as SessionRow[];
 
     return rows.map((row) => toSession(row, this.eventsFor(row.id)));
   }

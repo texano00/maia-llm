@@ -169,3 +169,21 @@ timestamp. It never sends prompts, responses, images, file paths or credentials.
   application logs.
 - Samples contain no content, so deleting a local conversation does not remove them.
 - `MAIA_USAGE_ENABLED=false` turns the ingestion routes off entirely.
+
+## Web app database (specs/005-web-access)
+
+The product container keeps its own SQLite file at `MAIA_WEB_DATA/maia.db`
+(`/data/maia.db` in the image) with the conversations, sessions, images metadata,
+per-account settings and provider credentials of every account. It is separate
+from the portal database above and never receives telemetry.
+
+Account-scoped tables (`conversations`, `sessions`, `conversation_images`,
+`credential_handles`, `credential_secrets`, `account_settings`) carry
+`account_id`; deleting an `accounts` row cascades. Image bytes live under
+`MAIA_WEB_DATA/images/<accountId>/`, next to the database, and are removed by the
+service because a foreign key cannot delete files.
+
+Provider keys are ciphertext in `credential_secrets` (AES-256-GCM, account id as
+additional authenticated data). Without `MAIA_CREDENTIAL_KEY` a restored backup
+cannot decrypt them. See [`web-access.md`](./web-access.md) for the full
+operational checklist.

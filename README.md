@@ -10,20 +10,20 @@
 </p>
 
 <p align="center">
-  <strong>Free and fully open. No account, no email, no data selling.</strong><br />
-  You bring your own provider keys and pay those providers directly. Maia LLM charges
-  nothing, sells nothing, and keeps your conversations on your machine.
+  <strong>Free and fully open. No password, no data selling.</strong><br />
+  You sign in with an email address and a one-time code. You bring your own provider keys
+  and pay those providers directly. Maia LLM charges nothing and sells nothing.
 </p>
 
 <p align="center">
   <sub>
-    <a href="https://maiallm.com">maiallm.com</a>&nbsp;&nbsp;·&nbsp;&nbsp;Windows 10/11 x64&nbsp;&nbsp;·&nbsp;&nbsp;vLLM + llama.cpp&nbsp;&nbsp;·&nbsp;&nbsp;GGUF + safetensors&nbsp;&nbsp;·&nbsp;&nbsp;Ollama-compatible local API
+    <a href="https://maiallm.com">maiallm.com</a>&nbsp;&nbsp;·&nbsp;&nbsp;web.maiallm.com&nbsp;&nbsp;·&nbsp;&nbsp;vLLM + llama.cpp&nbsp;&nbsp;·&nbsp;&nbsp;GGUF + safetensors&nbsp;&nbsp;·&nbsp;&nbsp;OpenAI-compatible endpoint
   </sub>
 </p>
 
 ---
 
-Maia LLM is a Windows desktop app for people who want to *use* open-weight
+Maia LLM is a web app for people who want to *use* open-weight
 models, not operate a cluster. It turns "I want to try this model" into a few
 clicks: browse the catalogue, see exactly what the run will cost before anything
 is created, let Maia rent a matching GPU on vast.ai, chat in a normal LLM
@@ -56,8 +56,9 @@ Three ideas shape everything in the app:
    Maia provisions anything.
 2. **Your GPU time is yours to control.** Several models can run in parallel, each
    with its own meter; stopping a model or closing the app releases the hardware.
-3. **Your data stays yours.** Chats live in a local SQLite file, credentials live
-   in the Windows credential vault, and no conversation content leaves the machine.
+3. **Your data stays yours.** Chats live in your account on the server and are
+   never used for analytics, profiling or training; provider keys are encrypted
+   with a server-side key and bound to your account.
 
 ## What you get
 

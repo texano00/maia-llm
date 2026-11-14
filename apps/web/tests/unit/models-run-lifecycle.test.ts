@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { closeDatabase, openDatabase, type DatabaseConnection } from "../../src/main/storage/db";
+import { seedAccount } from "../helpers/accounts";
 import { SessionStore } from "../../src/main/services/sessions/store";
 import {
   SessionOrchestrator,
@@ -26,7 +27,8 @@ describe("model run lifecycle", () => {
 
   beforeEach(() => {
     db = openDatabase(":memory:");
-    store = new SessionStore(db);
+    seedAccount(db);
+    store = new SessionStore(db, "account-test");
     clock = Date.parse("2026-11-11T10:00:00.000Z");
   });
 

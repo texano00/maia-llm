@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ConversationDetail, Session } from "@maia/contracts";
 import { closeDatabase, openDatabase, type DatabaseConnection } from "../../src/main/storage/db";
+import { seedAccount } from "../helpers/accounts";
 import { HistoryRepository } from "../../src/main/services/history/repository";
 import { ConversationImageStore } from "../../src/main/services/history/images";
 import { IpcRegistry } from "../../src/main/ipc/registry";
@@ -35,8 +36,8 @@ function harness(
   capability: Session["capability"]
 ): Harness {
   const registry = new IpcRegistry();
-  const history = new HistoryRepository(db);
-  const images = new ConversationImageStore(db, imagesDir);
+  const history = new HistoryRepository(db, "account-test");
+  const images = new ConversationImageStore(db, imagesDir, "account-test");
   const sent: InferenceImage[][] = [];
 
   const session: Session = {
@@ -93,6 +94,7 @@ describe("chat.send with images", () => {
 
   beforeEach(async () => {
     db = openDatabase(":memory:");
+    seedAccount(db);
     imagesDir = await mkdtemp(join(tmpdir(), "maia-chat-attach-"));
   });
 

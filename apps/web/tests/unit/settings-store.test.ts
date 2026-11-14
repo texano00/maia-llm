@@ -6,6 +6,7 @@ import {
 } from "@maia/contracts";
 import { closeDatabase, openDatabase, type DatabaseConnection } from "../../src/main/storage/db";
 import { SettingsStore } from "../../src/main/services/settings/store";
+import { seedAccount } from "../helpers/accounts";
 
 describe("SettingsStore", () => {
   let db: DatabaseConnection;
@@ -13,7 +14,8 @@ describe("SettingsStore", () => {
 
   beforeEach(() => {
     db = openDatabase(":memory:");
-    store = new SettingsStore(db);
+    seedAccount(db);
+    store = new SettingsStore(db, "account-test");
   });
 
   afterEach(() => {

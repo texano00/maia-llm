@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { closeDatabase, openDatabase, type DatabaseConnection } from "../../src/main/storage/db";
+import { seedAccount } from "../helpers/accounts";
 import { HistoryRepository } from "../../src/main/services/history/repository";
 import {
   ConversationImageStore,
@@ -75,9 +76,10 @@ describe("ConversationImageStore", () => {
 
   beforeEach(async () => {
     db = openDatabase(":memory:");
-    history = new HistoryRepository(db);
+    seedAccount(db);
+    history = new HistoryRepository(db, "account-test");
     root = await mkdtemp(join(tmpdir(), "maia-images-"));
-    store = new ConversationImageStore(db, root);
+    store = new ConversationImageStore(db, root, "account-test");
 
     conversationId = history.createConversation({
       title: "Look at this",
@@ -107,7 +109,7 @@ describe("ConversationImageStore", () => {
 
     expect(image).toMatchObject({ mimeType: "image/png", width: 1280, height: 720 });
 
-    const files = await readdir(join(root, conversationId));
+    const files = await readdir(join(root, "account-test", conversationId));
     expect(files).toEqual([`${image.id}.png`]);
   });
 
@@ -208,7 +210,7 @@ describe("ConversationImageStore", () => {
 
     expect(await store.load("missing-image")).toBeNull();
 
-    await unlink(join(root, conversationId, `${image.id}.png`));
+    await unlink(join(root, "account-test", conversationId, `${image.id}.png`));
     expect(await store.load(image.id)).toBeNull();
   });
 

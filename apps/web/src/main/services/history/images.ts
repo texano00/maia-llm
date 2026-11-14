@@ -42,15 +42,20 @@ function invalid(message: string): Error {
 }
 
 /**
- * Image attachments for vision runs. Bytes live under `userData/images/<chat>/`
+ * Image attachments for vision runs. Bytes live under `images/<account>/<chat>/`
  * and only metadata is stored in SQLite, so a transcript query never has to load
- * megabytes it is not showing.
+ * megabytes it is not showing. Every row and path is bound to one account.
  */
 export class ConversationImageStore {
+  private readonly rootDir: string;
+
   constructor(
     private readonly db: DatabaseConnection,
-    private readonly rootDir: string
-  ) {}
+    baseDir: string,
+    private readonly accountId: string
+  ) {
+    this.rootDir = join(baseDir, accountId);
+  }
 
   async save(input: SaveImageInput): Promise<ChatImage> {
     const buffer = decodeImage(input.dataBase64);
@@ -72,12 +77,13 @@ export class ConversationImageStore {
       this.db
         .prepare(
           `INSERT INTO conversation_images
-            (id, conversation_id, message_id, direction, mime_type, width, height, relative_path, created_at)
+            (id, account_id, conversation_id, message_id, direction, mime_type, width, height, relative_path, created_at)
            VALUES
-            (@id, @conversationId, @messageId, @direction, @mimeType, @width, @height, @relativePath, @now)`
+            (@id, @accountId, @conversationId, @messageId, @direction, @mimeType, @width, @height, @relativePath, @now)`
         )
         .run({
           id,
+          accountId: this.accountId,
           conversationId: input.conversationId,
           messageId: input.messageId,
           direction: input.direction,
@@ -103,10 +109,10 @@ export class ConversationImageStore {
     const rows = this.db
       .prepare(
         `SELECT * FROM conversation_images
-         WHERE conversation_id = ? AND message_id = ?
+         WHERE account_id = ? AND conversation_id = ? AND message_id = ?
          ORDER BY created_at ASC`
       )
-      .all(conversationId, messageId) as ImageRow[];
+      .all(this.accountId, conversationId, messageId) as ImageRow[];
 
     return rows.map(toChatImage);
   }
@@ -116,10 +122,10 @@ export class ConversationImageStore {
     const rows = this.db
       .prepare(
         `SELECT * FROM conversation_images
-         WHERE conversation_id = ?
+         WHERE account_id = ? AND conversation_id = ?
          ORDER BY created_at ASC`
       )
-      .all(conversationId) as ImageRow[];
+      .all(this.accountId, conversationId) as ImageRow[];
 
     const grouped = new Map<string, ChatImage[]>();
     for (const row of rows) {
@@ -137,9 +143,9 @@ export class ConversationImageStore {
 
   /** Reads one image back as base64 so the renderer can show it. */
   async load(id: string): Promise<{ id: string; mimeType: ImageMimeType; dataBase64: string } | null> {
-    const row = this.db.prepare("SELECT * FROM conversation_images WHERE id = ?").get(id) as
-      | ImageRow
-      | undefined;
+    const row = this.db
+      .prepare("SELECT * FROM conversation_images WHERE id = ? AND account_id = ?")
+      .get(id, this.accountId) as ImageRow | undefined;
 
     if (!row) {
       return null;
@@ -161,6 +167,11 @@ export class ConversationImageStore {
     }
 
     await rm(join(this.rootDir, id), { recursive: true, force: true });
+  }
+
+  /** Account deletion: the database cascade cannot remove bytes on disk. */
+  async deleteAllForAccount(): Promise<void> {
+    await rm(this.rootDir, { recursive: true, force: true });
   }
 
   private absolutePath(relativePath: string): string {
