@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { authDeleteAccountSchema, capabilityForPipelineTag, chatEventChannel } from "@maia/contracts";
+import {
+  authDeleteAccountSchema,
+  capabilityForPipelineTag,
+  chatEventChannel,
+  type ProviderHealth
+} from "@maia/contracts";
 import type { DatabaseConnection } from "../main/storage/db";
 import { HistoryRepository } from "../main/services/history/repository";
 import { ConversationImageStore } from "../main/services/history/images";
@@ -18,11 +23,18 @@ import { VastAiClient } from "../main/services/providers/vastai/client";
 import { createVllmRuntime } from "../main/services/inference/vllm";
 import { createModelPlanResolver } from "../main/services/inference/model-plan-resolver";
 import { createFailureReporter } from "../main/services/diagnostics/failures";
+import { NotificationCenter } from "../main/services/notifications/center";
+import {
+  deriveHealthNotifications,
+  HEALTH_NOTIFICATION_KEYS,
+  ProviderHealthMonitor
+} from "../main/services/health/monitor";
 import type { GpuReputationClient } from "../main/services/gpu/reputation";
 import { IpcRegistry } from "../main/ipc/registry";
 import { registerSettingsHandlers } from "../main/ipc/settings";
 import { registerWorkspaceHandlers } from "../main/ipc/workspace";
 import { registerConfigHandlers } from "../main/ipc/config";
+import { registerSystemHandlers } from "../main/ipc/system";
 import type { AccessService } from "../main/services/accounts/service";
 
 export interface WebLogger {
@@ -30,6 +42,12 @@ export interface WebLogger {
   warn(message: string, context?: Record<string, unknown>): void;
   error(message: string, context?: Record<string, unknown>): void;
 }
+
+/** Mock mode has no wallet; the badge still needs a believable number. */
+const MOCK_BALANCE_MICRO_USD = 25_000_000;
+
+/** The header polls every 5 s; providers are asked at most this often. */
+const HEALTH_REFRESH_FLOOR_MS = 20_000;
 
 export interface AccountRuntimeOptions {
   accountId: string;
@@ -84,6 +102,49 @@ export async function createAccountRuntime(
   const hasVastKey = Boolean(await credentials.get("vastai"));
   const useLiveGpu = options.providerMode === "live" && hasVastKey;
 
+  // Header surface: one snapshot feeds the bell, the balance badge and the
+  // missing-key prompts. Provider checks never throw; `unknown` is a valid state.
+  const notifications = new NotificationCenter(settings);
+
+  // Resolved conditions disappear from the bell; their dismissal also resets so a
+  // recurrence notifies again.
+  const syncHealth = (snapshot: ProviderHealth): void => {
+    const entries = deriveHealthNotifications(snapshot);
+    const active = new Set(entries.map((entry) => entry.key));
+    for (const key of HEALTH_NOTIFICATION_KEYS) {
+      if (!active.has(key)) {
+        notifications.clear(key);
+      }
+    }
+    for (const entry of entries) {
+      notifications.set(entry);
+    }
+  };
+
+  const health = new ProviderHealthMonitor({
+    hasHuggingFace: async () => Boolean(await credentials.get("huggingface")),
+    hasVastai: async () => Boolean(await credentials.get("vastai")),
+    verifyVastai: async () => {
+      const secret = await credentials.get("vastai");
+      return secret ? new VastAiClient(secret).testConnection() : false;
+    },
+    getBalanceMicroUsd: async () => {
+      // Mock mode has no wallet: a fixed amount keeps the badge meaningful without
+      // pretending a real balance was read.
+      if (options.providerMode !== "live") {
+        return MOCK_BALANCE_MICRO_USD;
+      }
+      const secret = await credentials.get("vastai");
+      return secret ? new VastAiClient(secret).getBalanceMicroUsd() : null;
+    },
+    getThresholdMicroUsd: () => settings.get().walletWarnThresholdMicroUsd,
+    minIntervalMs: HEALTH_REFRESH_FLOOR_MS
+  });
+
+  const refreshHealth = async (): Promise<void> => {
+    health.invalidate();
+    syncHealth(await health.refresh());
+  };
   const compute = useLiveGpu
     ? createVastComputeProvider({
         getApiKey: () => credentials.get("vastai"),
@@ -150,10 +211,19 @@ export async function createAccountRuntime(
   registry.register("update.download", z.unknown(), () => idleUpdateStatus());
   registry.register("update.install", z.unknown(), () => idleUpdateStatus());
 
+  registerSystemHandlers({ registry, notifications, health, onHealth: syncHealth });
+  // Seeded before the first render so the bell is correct without a client poll.
+  void health.refresh().then(syncHealth, () => undefined);
+
   registerSettingsHandlers({
     registry,
     store: settings,
     credentials,
+    capabilities: () => options.access.capabilitiesOf(accountId),
+    onCredentialChange: () => {
+      // The saved key must show up in the badge in the same interaction.
+      void refreshHealth();
+    },
     testCredential: async (provider, secret) => {
       try {
         if (provider === "huggingface") {
@@ -186,7 +256,12 @@ export async function createAccountRuntime(
   });
 
   // The person's own tooling reads the same document the settings screen shows.
-  registerConfigHandlers({ registry, settings, credentials });
+  registerConfigHandlers({
+    registry,
+    settings,
+    credentials,
+    capabilities: () => options.access.capabilitiesOf(accountId)
+  });
 
   registry.register("auth.deleteAccount", authDeleteAccountSchema, async (payload, context) => {
     // A GPU must not outlive the account that rented it (Principle II), and the

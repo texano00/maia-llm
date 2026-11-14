@@ -6,6 +6,7 @@ import { createWebPlatform, publicChannels, type WebPlatform } from "./host";
 import type { IpcRegistry } from "../main/ipc/registry";
 import { clearedSessionCookie, maxAgeSeconds, parseCookie, sessionCookie } from "./cookies";
 import { appearanceCookie } from "./preferences";
+import { createInternalRoutes } from "./internal";
 
 const PORT = Number(process.env.MAIA_WEB_PORT ?? 5173);
 const HOST = process.env.MAIA_WEB_HOST ?? "127.0.0.1";
@@ -67,6 +68,12 @@ async function main(): Promise<void> {
 
   const allowed = new Set<string>(ipcChannels);
 
+  // Absent token: nothing is mounted, so every `/internal/*` path is a 404.
+  const internal = createInternalRoutes({
+    platform,
+    token: process.env.MAIA_INTERNAL_TOKEN?.trim() || null
+  });
+
   const server = createServer(async (request, response) => {
     try {
       const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
@@ -91,6 +98,10 @@ async function main(): Promise<void> {
 
       if (url.pathname === "/health") {
         sendJson(response, 200, { ok: true, mode: providerMode });
+        return;
+      }
+
+      if (internal && (await internal.handle(request, response, url))) {
         return;
       }
 

@@ -9,7 +9,8 @@ import {
   type AuthRequestCodeResult,
   type AuthState,
   type AuthVerifyCode,
-  type AuthVerifyCodeResult
+  type AuthVerifyCodeResult,
+  type Capability
 } from "@maia/contracts";
 import {
   digestsEqual,
@@ -43,6 +44,11 @@ export interface AccessServiceOptions {
    * value for the pre-paint cookie. Absent means light.
    */
   appearanceFor?: (accountId: string) => "light" | "dark";
+  /**
+   * `MAIA_OPERATOR_EMAILS`: these addresses receive `operator` on first sign-in, so
+   * a fresh deployment has somebody who can grant it to the others.
+   */
+  operatorEmails?: readonly string[];
   codeTtlSeconds?: number;
   sessionDays?: number;
   now?: () => number;
@@ -52,6 +58,8 @@ export interface VerifiedSession {
   result: AuthVerifyCodeResult;
   token: string;
   expiresAt: string;
+  accountId: string;
+  capabilities: Capability[];
 }
 
 const HOUR_MS = 60 * 60 * 1_000;
@@ -67,6 +75,7 @@ export class AccessService {
   private readonly captcha: CaptchaVerifier;
   private readonly sessionSecret: string;
   private readonly appearanceFor: ((accountId: string) => "light" | "dark") | undefined;
+  private readonly operatorEmails: readonly string[];
   private readonly codeTtlSeconds: number;
   private readonly sessionDays: number;
   private readonly now: () => number;
@@ -78,6 +87,7 @@ export class AccessService {
     this.captcha = options.captcha;
     this.sessionSecret = options.sessionSecret;
     this.appearanceFor = options.appearanceFor;
+    this.operatorEmails = options.operatorEmails ?? [];
     this.codeTtlSeconds = options.codeTtlSeconds ?? ACCESS_CODE_TTL_SECONDS;
     this.sessionDays = options.sessionDays ?? ACCESS_SESSION_DAYS;
     this.now = options.now ?? (() => Date.now());
@@ -108,13 +118,32 @@ export class AccessService {
       email: resolved.account.email,
       createdAt: resolved.account.created_at,
       expiresAt: resolved.session.expires_at,
-      appearance: this.appearanceFor?.(resolved.account.id) ?? "light"
+      appearance: this.appearanceFor?.(resolved.account.id) ?? "light",
+      capabilities: this.repository.capabilitiesOf(resolved.account.id)
     };
+  }
+
+  /**
+   * Runs at boot so an account created before it was listed in
+   * `MAIA_OPERATOR_EMAILS` still gains the capability.
+   */
+  bootstrapOperators(): void {
+    for (const email of this.operatorEmails) {
+      const account = this.repository.findAccountByEmail(normalizeEmail(email));
+      if (account) {
+        this.repository.grantCapability(account.id, "operator");
+      }
+    }
   }
 
   /** Account id for a valid cookie, or null. Used by the transport to route. */
   accountFor(token: string | null): string | null {
     return this.resolve(token)?.account.id ?? null;
+  }
+
+  /** Effective capabilities, read fresh so a grant applies without a re-login. */
+  capabilitiesOf(accountId: string): Capability[] {
+    return this.repository.capabilitiesOf(accountId);
   }
 
   async requestCode(input: AuthRequestCode, context: AccessRequestContext): Promise<AuthRequestCodeResult> {
@@ -215,6 +244,9 @@ export class AccessService {
     const account =
       this.repository.findAccountByEmail(email) ?? this.repository.createAccount(email, now);
     this.repository.touchAccount(account.id, now);
+    if (this.operatorEmails.includes(email)) {
+      this.repository.grantCapability(account.id, "operator");
+    }
 
     const token = generateSessionToken();
     const expiresAt = new Date(this.now() + this.sessionDays * 24 * HOUR_MS).toISOString();
@@ -227,7 +259,13 @@ export class AccessService {
     });
     this.repository.recordEvent("code_verified", emailHash, ipHash, now);
 
-    return { result: { signedIn: true, email: account.email }, token, expiresAt };
+    return {
+      result: { signedIn: true, email: account.email },
+      token,
+      expiresAt,
+      accountId: account.id,
+      capabilities: this.repository.capabilitiesOf(account.id)
+    };
   }
 
   /** Revokes the row immediately: the same cookie value fails afterwards. */

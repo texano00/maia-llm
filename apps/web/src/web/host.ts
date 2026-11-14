@@ -6,6 +6,7 @@ import { closeDatabase, createConnection, type DatabaseConnection } from "../mai
 import { loadMigrations } from "./migrations";
 import { AccountRepository } from "../main/services/accounts/repository";
 import { AccessService } from "../main/services/accounts/service";
+import { parseOperatorEmails } from "../main/services/accounts/capabilities";
 import { SettingsStore } from "../main/services/settings/store";
 import { createMailer } from "../main/services/accounts/mailer";
 import { createCaptchaVerifier } from "../main/services/accounts/turnstile";
@@ -137,8 +138,15 @@ export async function createWebPlatform(options: WebPlatformOptions): Promise<We
     sessionSecret: resolveSessionSecret(env, logger),
     // Read on `auth.state` only, so the cookie can carry the account's choice
     // to the next first paint.
-    appearanceFor: (accountId) => new SettingsStore(database, accountId).get().appearance
+    appearanceFor: (accountId) => new SettingsStore(database, accountId).get().appearance,
+    // Accounts named here are operators from birth: a fresh deployment needs
+    // somebody who can grant the others.
+    operatorEmails: parseOperatorEmails(env.MAIA_OPERATOR_EMAILS)
   });
+
+  // Accounts that predate the capability column keep their identity and gain the
+  // grant now, so nobody is locked out of the portal after an upgrade.
+  access.bootstrapOperators();
 
   const catalogueRepository = new CatalogueRepository(database);
   const catalogue = new CatalogueService({

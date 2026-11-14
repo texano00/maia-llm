@@ -36,24 +36,24 @@ and `docs/`.
 
 ## Phase 1: Setup (governance and contracts)
 
-- [ ] T001 Amend `.specify/memory/constitution.md` Principle I: the content-free usage sample becomes enabled by default with an explicit opt-out; the allowlist and scrubbing rules are unchanged; note the amendment in the governance section and bump the version.
-- [ ] T002 [P] Create `packages/contracts/src/capabilities.ts`: `capabilitySchema` = `z.enum(["debug", "operator"])`; `capabilitiesSchema` = array of it, max 2, deduplicated; `accountSummarySchema` = `{ id, email, createdAt, lastSeenAt: string | null, capabilities, activeSessions: number >= 0 }`; `capabilityChangeSchema` = object with optional `grant` and optional `revoke`, `confirm: z.literal(true)`, and a refinement that exactly one of grant/revoke is present.
-- [ ] T003 [P] Create `packages/contracts/src/internal.ts`: `internalRequestCodeSchema` (`email: accessEmailSchema`), `internalVerifyCodeSchema` (`email`, `code: accessCodeSchema`), `internalAccountListSchema` (`query` ≤ 254 chars optional, `limit` 1..200 default 50, `offset` ≥ 0 default 0), and the response shapes from `contracts/internal-accounts-api.md`.
-- [ ] T004 Update `packages/contracts/src/ipc.ts`: add `capabilities` (effective list) to the signed-in branch of `authStateSchema`; add `settingsSnapshotSchema` = `appSettingsSchema` with `diagnosticsUrl` and `usageReporting` omitted-then-optional, and export `SettingsSnapshot`; add `dismissible: z.boolean()` to `notificationSchema`; re-export the new modules from `packages/contracts/src/index.ts`.
-- [ ] T005 [P] Add migration `apps/web/src/main/storage/migrations/0013_account_capabilities.sql` (`ALTER TABLE accounts ADD COLUMN capabilities_json TEXT NOT NULL DEFAULT '[]'`) and import it in `apps/web/src/main/storage/migrations/index.ts` as version 13 (`?raw`).
-- [ ] T006 [P] Document the new deployment variables in `.env.example` and `infra/.env.production.example`: `MAIA_INTERNAL_TOKEN` (unset disables `/internal/*`), `MAIA_OPERATOR_EMAILS` (bootstrap), `MAIA_WEB_INTERNAL_URL` (portal side); mark `MAIA_ADMIN_PASSWORD` as retired and ignored.
+- [x] T001 Amend `.specify/memory/constitution.md` Principle I: the content-free usage sample becomes enabled by default with an explicit opt-out; the allowlist and scrubbing rules are unchanged; note the amendment in the governance section and bump the version.
+- [x] T002 [P] Create `packages/contracts/src/capabilities.ts`: `capabilitySchema` = `z.enum(["debug", "operator"])`; `capabilitiesSchema` = array of it, max 2, deduplicated; `accountSummarySchema` = `{ id, email, createdAt, lastSeenAt: string | null, capabilities, activeSessions: number >= 0 }`; `capabilityChangeSchema` = object with optional `grant` and optional `revoke`, `confirm: z.literal(true)`, and a refinement that exactly one of grant/revoke is present.
+- [x] T003 [P] Create `packages/contracts/src/internal.ts`: `internalRequestCodeSchema` (`email: accessEmailSchema`), `internalVerifyCodeSchema` (`email`, `code: accessCodeSchema`), `internalAccountListSchema` (`query` ≤ 254 chars optional, `limit` 1..200 default 50, `offset` ≥ 0 default 0), and the response shapes from `contracts/internal-accounts-api.md`.
+- [x] T004 Update `packages/contracts/src/ipc.ts`: add `capabilities` (effective list) to the signed-in branch of `authStateSchema`; add `settingsSnapshotSchema` = `appSettingsSchema` with `diagnosticsUrl` and `usageReporting` omitted-then-optional, and export `SettingsSnapshot`; add `dismissible: z.boolean()` to `notificationSchema`; re-export the new modules from `packages/contracts/src/index.ts`.
+- [x] T005 [P] Add migration `apps/web/src/main/storage/migrations/0013_account_capabilities.sql` (`ALTER TABLE accounts ADD COLUMN capabilities_json TEXT NOT NULL DEFAULT '[]'`) and import it in `apps/web/src/main/storage/migrations/index.ts` as version 13 (`?raw`).
+- [x] T006 [P] Document the new deployment variables in `.env.example` and `infra/.env.production.example`: `MAIA_INTERNAL_TOKEN` (unset disables `/internal/*`), `MAIA_OPERATOR_EMAILS` (bootstrap), `MAIA_WEB_INTERNAL_URL` (portal side); mark `MAIA_ADMIN_PASSWORD` as retired and ignored.
 
 ---
 
 ## Phase 2: Foundational (blocking)
 
-- [ ] T007 Add `effectiveCapabilities(stored: unknown): Capability[]` to `apps/web/src/main/services/accounts/capabilities.ts` — drops unknown entries, deduplicates, and adds `debug` whenever `operator` is present.
-- [ ] T008 Extend `apps/web/src/main/services/accounts/repository.ts` with `capabilitiesOf(accountId)`, `setCapabilities(accountId, capabilities)`, `countOperators()`, `grantCapability(accountId, capability)`, `revokeCapability(accountId, capability)` (the last two inside one transaction that re-reads the operator count and throws `409 last-operator` when the revoke would leave none), and `listAccounts({ query, limit, offset })` returning `accountSummarySchema` rows with an `activeSessions` count over sessions in `estimated|provisioning|ready|active|ending`.
-- [ ] T009 Grant `operator` at account creation and at sign-in when the address is listed in `MAIA_OPERATOR_EMAILS` (`apps/web/src/main/services/accounts/service.ts`), and grant it at boot for accounts that predate the column (`apps/web/src/web/host.ts`); an address already granted is left untouched.
-- [ ] T010 Report capabilities in `auth.state` from `apps/web/src/main/services/accounts/service.ts` (effective list) so `apps/web/src/web/public.ts` returns them unchanged.
-- [ ] T011 Add `dismissible?: boolean` to `NotificationInput` in `apps/web/src/main/services/notifications/center.ts`: default `true`, carried into the stored `Notification`, sorted non-dismissible first within a severity, and `dismiss(key)` returns the snapshot unchanged without writing when the entry is non-dismissible.
-- [ ] T012 Wire the header runtime in `apps/web/src/web/accounts.ts`: construct `NotificationCenter` (scoped `SettingsStore`) and `ProviderHealthMonitor` per account (sources: credential presence for both providers, balance through `VastAiClient`, threshold from settings), call `registerSystemHandlers` from `apps/web/src/main/ipc/system.ts`, and feed `deriveHealthNotifications` into the centre on every refresh.
-- [ ] T013 Write `apps/web/tests/contract/notifications-health.test.ts` first, then make it pass: `notifications.list` and `provider.health` answer on an account runtime; missing/invalid/ok map to the documented notices; `dismiss` is a no-op for `credential:*`/`balance:*` keys; a balance of `0` is `known`, an unreachable provider is `unknown`.
+- [x] T007 Add `effectiveCapabilities(stored: unknown): Capability[]` to `apps/web/src/main/services/accounts/capabilities.ts` — drops unknown entries, deduplicates, and adds `debug` whenever `operator` is present.
+- [x] T008 Extend `apps/web/src/main/services/accounts/repository.ts` with `capabilitiesOf(accountId)`, `setCapabilities(accountId, capabilities)`, `countOperators()`, `grantCapability(accountId, capability)`, `revokeCapability(accountId, capability)` (the last two inside one transaction that re-reads the operator count and throws `409 last-operator` when the revoke would leave none), and `listAccounts({ query, limit, offset })` returning `accountSummarySchema` rows with an `activeSessions` count over sessions in `estimated|provisioning|ready|active|ending`.
+- [x] T009 Grant `operator` at account creation and at sign-in when the address is listed in `MAIA_OPERATOR_EMAILS` (`apps/web/src/main/services/accounts/service.ts`), and grant it at boot for accounts that predate the column (`apps/web/src/web/host.ts`); an address already granted is left untouched.
+- [x] T010 Report capabilities in `auth.state` from `apps/web/src/main/services/accounts/service.ts` (effective list) so `apps/web/src/web/public.ts` returns them unchanged.
+- [x] T011 Add `dismissible?: boolean` to `NotificationInput` in `apps/web/src/main/services/notifications/center.ts`: default `true`, carried into the stored `Notification`, sorted non-dismissible first within a severity, and `dismiss(key)` returns the snapshot unchanged without writing when the entry is non-dismissible.
+- [x] T012 Wire the header runtime in `apps/web/src/web/accounts.ts`: construct `NotificationCenter` (scoped `SettingsStore`) and `ProviderHealthMonitor` per account (sources: credential presence for both providers, balance through `VastAiClient`, threshold from settings), call `registerSystemHandlers` from `apps/web/src/main/ipc/system.ts`, and feed `deriveHealthNotifications` into the centre on every refresh.
+- [x] T013 Write `apps/web/tests/contract/notifications-health.test.ts` first, then make it pass: `notifications.list` and `provider.health` answer on an account runtime; missing/invalid/ok map to the documented notices; `dismiss` is a no-op for `credential:*`/`balance:*` keys; a balance of `0` is `known`, an unreachable provider is `unknown`.
 
 ---
 
@@ -66,11 +66,11 @@ opens the right settings section and disappears once the key works.
 dismissed; clicking one opens that section; saving a valid key clears its notice
 within one poll.
 
-- [ ] T014 [US1] Point the health notices at sections in `apps/web/src/main/services/health/monitor.ts`: `credential:huggingface:*` → `/settings?section=huggingface`, `credential:vastai:*` and `balance:below-threshold` → `/settings?section=vastai`.
-- [ ] T015 [US1] Make the two provider notices non-dismissible and worded per state (missing vs rejected) where the centre is fed in `apps/web/src/web/accounts.ts`.
-- [ ] T016 [US1] Read `section` from the query in `apps/web/src/renderer/features/settings/SettingsPage.tsx` on mount, expand that section and scroll it into view; ignore unknown ids (`sections.ts`).
-- [ ] T017 [US1] Hide the dismiss control for entries with `dismissible === false` in `apps/web/src/renderer/features/notifications/NotificationBell.tsx`, keeping the action button and the run-failure entries unchanged.
-- [ ] T018 [P] [US1] Write `apps/web/tests/unit/setup-notices.test.ts`: derivation for every health state, non-dismissible keys survive `dismiss`, ordering ahead of transient notices, and the route strings.
+- [x] T014 [US1] Point the health notices at sections in `apps/web/src/main/services/health/monitor.ts`: `credential:huggingface:*` → `/settings?section=huggingface`, `credential:vastai:*` and `balance:below-threshold` → `/settings?section=vastai`.
+- [x] T015 [US1] Make the two provider notices non-dismissible and worded per state (missing vs rejected) where the centre is fed in `apps/web/src/web/accounts.ts`.
+- [x] T016 [US1] Read `section` from the query in `apps/web/src/renderer/features/settings/SettingsPage.tsx` on mount, expand that section and scroll it into view; ignore unknown ids (`sections.ts`).
+- [x] T017 [US1] Hide the dismiss control for entries with `dismissible === false` in `apps/web/src/renderer/features/notifications/NotificationBell.tsx`, keeping the action button and the run-failure entries unchanged.
+- [x] T018 [P] [US1] Write `apps/web/tests/unit/setup-notices.test.ts`: derivation for every health state, non-dismissible keys survive `dismiss`, ordering ahead of transient notices, and the route strings.
 
 ---
 
@@ -82,10 +82,10 @@ follows a replaced key, and is explicit when a reading is stale.
 **Independent test**: no key → unavailable; save a key → amount within ten seconds;
 replace the key → new amount; break the provider → last amount marked stale.
 
-- [ ] T019 [US2] Implement the balance source in `apps/web/src/web/accounts.ts`/`apps/web/src/main/services/health/monitor.ts` wiring: read with the account's vast.ai key through `VastAiClient`, return `null` when no key exists (never `0`), and use the mock provider's fixed balance in mock mode.
-- [ ] T020 [US2] Refresh immediately after a credential change: call the account's health refresh from `apps/web/src/main/ipc/settings.ts` after `settings.credentials.set` and `settings.credentials.clear` (create and test handlers), so the saved key updates the badge in the same interaction.
-- [ ] T021 [US2] Show a stale reading in `apps/web/src/renderer/features/notifications/BalanceBadge.tsx`: keep the last known amount, label it as not current with the time of the last successful reading, and never render an unknown balance as `0`.
-- [ ] T022 [P] [US2] Extend `apps/web/tests/contract/notifications-health.test.ts` with the wallet cases: unavailable without a key, amount after a save, changed amount after replacing the key, stale after a failed refresh, and warning styling below the threshold.
+- [x] T019 [US2] Implement the balance source in `apps/web/src/web/accounts.ts`/`apps/web/src/main/services/health/monitor.ts` wiring: read with the account's vast.ai key through `VastAiClient`, return `null` when no key exists (never `0`), and use the mock provider's fixed balance in mock mode.
+- [x] T020 [US2] Refresh immediately after a credential change: call the account's health refresh from `apps/web/src/main/ipc/settings.ts` after `settings.credentials.set` and `settings.credentials.clear` (create and test handlers), so the saved key updates the badge in the same interaction.
+- [x] T021 [US2] Show a stale reading in `apps/web/src/renderer/features/notifications/BalanceBadge.tsx`: keep the last known amount, label it as not current with the time of the last successful reading, and never render an unknown balance as `0`.
+- [x] T022 [P] [US2] Extend `apps/web/tests/contract/notifications-health.test.ts` with the wallet cases: unavailable without a key, amount after a save, changed amount after replacing the key, stale after a failed refresh, and warning styling below the threshold.
 
 ---
 
@@ -98,10 +98,10 @@ diagnostics host; `debug`/`operator` accounts can.
 `settings.get` or `config.export`; granting `debug` makes both appear; revoking
 hides them without changing stored values.
 
-- [ ] T023 [US3] Add `visibleSettings(settings, capabilities)` (returns `SettingsSnapshot`) in `apps/web/src/main/services/settings/visible.ts` and use it in `apps/web/src/main/ipc/settings.ts` for `settings.get`, and for the response of `settings.update`, ignoring `diagnosticsUrl`/`usageReporting` in the payload when the caller is ordinary.
-- [ ] T024 [US3] Build `config.get`/`config.export` in `apps/web/src/main/ipc/config.ts` from the caller's projection, and have `config.import` report those two keys as `skipped`/`unsupported` for an ordinary caller (`apps/web/src/main/services/config/document.ts`).
-- [ ] T025 [US3] Gate the two sections in `apps/web/src/renderer/features/settings/SettingsPage.tsx` and `sections.ts` on capabilities from `useAuth()`; keep their values out of the form state for ordinary accounts.
-- [ ] T026 [P] [US3] Write `apps/web/tests/contract/capability-projection.test.ts`: ordinary vs `debug` vs `operator` for `settings.get`, `settings.update` (ignored keys), `config.get`, `config.export` and `config.import`, asserting the stored values never change through a projection.
+- [x] T023 [US3] Add `visibleSettings(settings, capabilities)` (returns `SettingsSnapshot`) in `apps/web/src/main/services/settings/visible.ts` and use it in `apps/web/src/main/ipc/settings.ts` for `settings.get`, and for the response of `settings.update`, ignoring `diagnosticsUrl`/`usageReporting` in the payload when the caller is ordinary.
+- [x] T024 [US3] Build `config.get`/`config.export` in `apps/web/src/main/ipc/config.ts` from the caller's projection, and have `config.import` report those two keys as `skipped`/`unsupported` for an ordinary caller (`apps/web/src/main/services/config/document.ts`).
+- [x] T025 [US3] Gate the two sections in `apps/web/src/renderer/features/settings/SettingsPage.tsx` and `sections.ts` on capabilities from `useAuth()`; keep their values out of the form state for ordinary accounts.
+- [x] T026 [P] [US3] Write `apps/web/tests/contract/capability-projection.test.ts`: ordinary vs `debug` vs `operator` for `settings.get`, `settings.update` (ignored keys), `config.get`, `config.export` and `config.import`, asserting the stored values never change through a projection.
 
 ---
 
@@ -113,24 +113,24 @@ and manages capabilities through a token-authenticated internal API.
 **Independent test**: portal refuses a non-operator without disclosure; an operator
 lists accounts and grants `debug`; revoking the last operator is refused.
 
-- [ ] T027 [US4] Create `apps/web/src/web/internal.ts`: the five routes from `contracts/internal-accounts-api.md` behind `x-maia-internal` (compared with `timingSafeEqual`, `401` on mismatch), not registered at all when `MAIA_INTERNAL_TOKEN` is unset, and mounted in `apps/web/src/web/server.ts` before the static handler.
-- [ ] T028 [P] [US4] Write `apps/web/tests/contract/internal-api.test.ts` first: `401` without the token, `404` when unconfigured, schema validation, `409` on the last operator, idempotent grant, and a scan proving no settings, conversation text or key material appears in any response.
-- [ ] T029 [US4] Create `apps/portal/src/services/internal-client.ts` (typed `fetch` wrapper reading `MAIA_WEB_INTERNAL_URL` + `MAIA_INTERNAL_TOKEN`, with a timeout and mapped errors) and add both to `apps/portal/src/config.ts`.
-- [ ] T030 [US4] Rework `apps/portal/src/portal-auth-routes.ts` and `apps/portal/src/services/portal-auth.ts`: email → `request-code` → code → `verify-code`; issue the `maia_admin` session keyed by the product account id; refuse when `capabilities` lacks `operator`, with the same generic message as a wrong code; stop reading `MAIA_ADMIN_PASSWORD` and log a warning when it is still set.
-- [ ] T031 [US4] Add the accounts view to `apps/portal/src/admin-routes.ts`: `GET /admin-api/accounts` and `POST /admin-api/accounts/:id/capabilities`, both guarded by a session that re-checks `operator` through the internal client on every request.
-- [ ] T032 [US4] Build the portal UI in `apps/portal/ui/src`: replace the password form with the email → code screen, and add an accounts table with capability toggles, an active-run count and a confirmation before a revoke.
-- [ ] T033 [P] [US4] Write `apps/portal/tests/contract/operator-login.test.ts` and `apps/portal/tests/contract/accounts-view.test.ts` against a fake internal client: non-operator refused without disclosure, operator admitted, capability patch forwarded, revoked operator refused on the next request.
+- [x] T027 [US4] Create `apps/web/src/web/internal.ts`: the five routes from `contracts/internal-accounts-api.md` behind `x-maia-internal` (compared with `timingSafeEqual`, `401` on mismatch), not registered at all when `MAIA_INTERNAL_TOKEN` is unset, and mounted in `apps/web/src/web/server.ts` before the static handler.
+- [x] T028 [P] [US4] Write `apps/web/tests/contract/internal-api.test.ts` first: `401` without the token, `404` when unconfigured, schema validation, `409` on the last operator, idempotent grant, and a scan proving no settings, conversation text or key material appears in any response.
+- [x] T029 [US4] Create `apps/portal/src/services/internal-client.ts` (typed `fetch` wrapper reading `MAIA_WEB_INTERNAL_URL` + `MAIA_INTERNAL_TOKEN`, with a timeout and mapped errors) and add both to `apps/portal/src/config.ts`.
+- [x] T030 [US4] Rework `apps/portal/src/portal-auth-routes.ts` and `apps/portal/src/services/portal-auth.ts`: email → `request-code` → code → `verify-code`; issue the `maia_admin` session keyed by the product account id; refuse when `capabilities` lacks `operator`, with the same generic message as a wrong code; stop reading `MAIA_ADMIN_PASSWORD` and log a warning when it is still set.
+- [x] T031 [US4] Add the accounts view to `apps/portal/src/admin-routes.ts`: `GET /admin-api/accounts` and `POST /admin-api/accounts/:id/capabilities`, both guarded by a session that re-checks `operator` through the internal client on every request.
+- [x] T032 [US4] Build the portal UI in `apps/portal/ui/src`: replace the password form with the email → code screen, and add an accounts table with capability toggles, an active-run count and a confirmation before a revoke.
+- [x] T033 [P] [US4] Write `apps/portal/tests/contract/operator-login.test.ts` and `apps/portal/tests/contract/accounts-view.test.ts` against a fake internal client: non-operator refused without disclosure, operator admitted, capability patch forwarded, revoked operator refused on the next request.
 
 ---
 
 ## Phase 7: Polish and cross-cutting
 
-- [ ] T034 Update the privacy copy for the new default: the access page fine print in `apps/web/src/renderer/features/access/AccessPage.tsx`, the privileged Settings section, `docs/web-access.md`, and whichever assertion in `scripts/tests/privacy-promise.test.ts` states the old opt-in default.
-- [ ] T035 [P] Document the internal API and the capability model in `docs/portal.md` and `docs/data-storage.md` (new column, projections, bootstrap variable).
-- [ ] T036 [P] Confirm `apps/web/tests/contract/ipc-channels.test.ts` still passes (no new product channels; `notifications.*` and `provider.health` are now actually registered) and that `infra/nginx/` does not proxy `/internal/`.
-- [ ] T037 Run `npm run lint && npm run typecheck && npx vitest run apps packages && npm run build`, then the container smoke test in `quickstart.md` §8.
-- [ ] T038 Manual two-browser run of the `quickstart.md` §3–§6 tables, including the stale-balance and last-operator cases.
-- [ ] T039 Commit the wave, push, open the PR and merge it.
+- [x] T034 Update the privacy copy for the new default: the access page fine print in `apps/web/src/renderer/features/access/AccessPage.tsx`, the privileged Settings section, `docs/web-access.md`, and whichever assertion in `scripts/tests/privacy-promise.test.ts` states the old opt-in default.
+- [x] T035 [P] Document the internal API and the capability model in `docs/portal.md` and `docs/data-storage.md` (new column, projections, bootstrap variable).
+- [x] T036 [P] Confirm `apps/web/tests/contract/ipc-channels.test.ts` still passes (no new product channels; `notifications.*` and `provider.health` are now actually registered) and that `infra/nginx/` does not proxy `/internal/`.
+- [x] T037 Run `npm run lint && npm run typecheck && npx vitest run apps packages && npm run build`, then the container smoke test in `quickstart.md` §8.
+- [x] T038 Manual two-browser run of the `quickstart.md` §3–§6 tables, including the stale-balance and last-operator cases.
+- [x] T039 Commit the wave, push, open the PR and merge it.
 
 ---
 

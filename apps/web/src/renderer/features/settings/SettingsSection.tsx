@@ -25,6 +25,7 @@ export function SettingsSection({
 }: SettingsSectionProps) {
   return (
     <details
+      id={`settings-section-${id}`}
       className="settings-section"
       open={expanded}
       onToggle={(event) => onToggle(id, event.currentTarget.open)}

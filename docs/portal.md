@@ -13,7 +13,9 @@ once the surface is complete.
 | `MAIA_PORTAL_ACCESS_TTL_MINUTES` | `60` | Access-token lifetime (spec cap) |
 | `MAIA_PORTAL_REFRESH_TTL_DAYS` | `30` | Refresh-token lifetime (spec cap) |
 | `MAIA_ADMIN_SESSION_HOURS` | `12` | Backoffice session lifetime |
-| `MAIA_ADMIN_EMAIL` / `MAIA_ADMIN_PASSWORD` | unset | Bootstrap administrator, seeded on first boot only |
+| `MAIA_WEB_INTERNAL_URL` | `http://maia-web:5173` | Product base URL the portal calls for identities and capabilities |
+| `MAIA_INTERNAL_TOKEN` | unset | Shared secret for the product's `/internal/*` API; unset means nobody can sign in |
+| `MAIA_ADMIN_PASSWORD` | ignored | Retired with the password login; a stale value logs a warning |
 | `MAIA_REQUIRE_CLIENT_AUTH` | `false` | Enforce installation credentials on ingestion and configs routes |
 | `MAIA_PORTAL_HF_TOKEN` (or `HF_TOKEN`) | unset | Service credential used to build the catalogue snapshot |
 | `MAIA_CATALOGUE_REFRESH_HOURS` | `6` | Snapshot refresh interval |
@@ -28,8 +30,11 @@ itself ships: older clients post diagnostics without a token.
 | --- | --- | --- | --- |
 | POST | `/v1/installations` | none (rate limited by deployment) | Enroll an installation, issue an access/refresh pair |
 | POST | `/v1/installations/refresh` | refresh token | Rotate the pair; replay revokes the family |
-| POST | `/v1/admin/session` | admin credentials | Sign in, sets an HttpOnly `maia_admin` cookie |
-| GET/DELETE | `/v1/admin/session` | admin session | Current admin / sign out |
+| POST | `/v1/admin/code` | none | Ask the product to email a sign-in code |
+| POST | `/v1/admin/session` | email + code | Verify through the product, sets an HttpOnly `maia_admin` cookie |
+| GET/DELETE | `/v1/admin/session` | operator session | Current operator / sign out |
+| GET | `/admin-api/accounts` | operator session | Accounts with capabilities and active runs |
+| POST | `/admin-api/accounts/:id/capabilities` | operator session | Grant or revoke `debug` / `operator` |
 | GET | `/v1/admin/installations` | admin session | List installations and last contact |
 | DELETE | `/v1/admin/installations/:id` | admin session | Revoke an installation |
 | GET | `/v1/config/catalogue` | installation token | Whole snapshot with ETag/304 |
@@ -69,18 +74,55 @@ Tabs, in order:
 1. **Operations** — snapshot version, model/supported counts, age, a manual
    refresh button (a second click during a run reports `refresh_in_progress`),
    and the last refresh runs with their outcome.
-2. **Use cases** — the basic-mode cards: ordered list, editor, image upload,
+2. **Accounts** — every account with its capabilities, last contact and active
+   runs. Granting or revoking is a single confirmed action; revoking the last
+   `operator` is refused with `409 last-operator`.
+3. **Use cases** — the basic-mode cards: ordered list, editor, image upload,
    enable flag. Each referenced model shows `vllm`/`llamacpp` when the snapshot
    supports it, `unsupported` (with the stored reason available from the API) or
    `missing` when the id is no longer in the snapshot. Saves carry the row
    version, so a stale editor gets `409 conflict` instead of overwriting.
-3. **Installations** — every enrollment with app version, platform, last contact
+4. **Installations** — every enrollment with app version, platform, last contact
    and a revoke action.
-4. **Audit** — the append-only trail of admin actions.
+5. **Audit** — the append-only trail of operator actions.
 
-First boot seeds the administrator from `MAIA_ADMIN_EMAIL` / `MAIA_ADMIN_PASSWORD`;
-change the password by restarting with a new value and a fresh database, or by
-updating the seeded row directly until a password-change flow exists.
+### Operators and capabilities
+
+The portal has no identities and no passwords. Signing in is the product's own
+email-code flow: `POST /v1/admin/code` asks the product to send a code, and
+`POST /v1/admin/session` returns the account id plus its capabilities. Only an
+account holding `operator` gets a session, and a verified non-operator sees the
+same answer as a wrong code, so the login cannot be used to find out who is an
+operator.
+
+- `debug` reveals the two developer settings in the product (diagnostics host and
+  usage reporting) and the values in `settings.get` / `config.get`.
+- `operator` implies `debug` and grants the portal itself.
+- The capability is re-read from the product on **every** portal request; a
+  revoked operator is refused on the next click and their session is ended.
+
+Bootstrap on a fresh deployment: list the first operator in the product's
+`MAIA_OPERATOR_EMAILS`. That address receives `operator` on first sign-in (and at
+boot for an account that already exists); everybody else is granted from the
+Accounts tab.
+
+### Internal API (`/internal/*`)
+
+The product exposes a token-authenticated, server-to-server surface for the
+portal. It is not part of the RPC transport, never appears in nginx, and returns
+only identity, capabilities and a session count: no settings, conversations,
+images or key material.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| POST | `/internal/auth/request-code` | Send a code with the product's own throttles and mail transport |
+| POST | `/internal/auth/verify-code` | Verify a code; answers `accountId`, `email`, `capabilities` |
+| GET | `/internal/accounts` | Paged list (`query`, `limit` 1..200, `offset`) |
+| POST | `/internal/accounts/:id/capabilities` | One action per call: `{grant}` or `{revoke}` plus `confirm: true` |
+
+`x-maia-internal` is compared with `timingSafeEqual`. A missing or wrong header
+is `401`; when `MAIA_INTERNAL_TOKEN` is unset the routes are not registered at
+all, so every `/internal/*` path is a `404`.
 
 ## Desktop client
 

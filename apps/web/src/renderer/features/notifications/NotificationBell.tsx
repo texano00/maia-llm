@@ -46,7 +46,8 @@ export function NotificationBell() {
       severity: "error" as const,
       message: `${session.modelId} failed to start or stopped unexpectedly.`,
       action: { label: "View run", route: "/models" },
-      createdAt: session.endedAt ?? session.startedAt
+      createdAt: session.endedAt ?? session.startedAt,
+      dismissible: true
     }));
 
   const notifications = [...failures, ...(snapshot?.notifications ?? [])];
@@ -107,14 +108,16 @@ export function NotificationBell() {
                         {entry.action.label}
                       </button>
                     ) : null}
-                    <button
-                      type="button"
-                      className="icon-mini"
-                      aria-label="Dismiss notification"
-                      onClick={() => void dismiss(entry.key)}
-                    >
-                      ✕
-                    </button>
+                    {entry.dismissible ? (
+                      <button
+                        type="button"
+                        className="icon-mini"
+                        aria-label="Dismiss notification"
+                        onClick={() => void dismiss(entry.key)}
+                      >
+                        ✕
+                      </button>
+                    ) : null}
                   </div>
                 </li>
               ))}

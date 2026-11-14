@@ -30,8 +30,18 @@ describe("config API", () => {
       accountId
     );
     const registry = new IpcRegistry();
-    registerSettingsHandlers({ registry, store: settings, credentials });
-    registerConfigHandlers({ registry, settings, credentials });
+    registerSettingsHandlers({
+      registry,
+      store: settings,
+      credentials,
+      capabilities: () => ["debug", "operator"]
+    });
+    registerConfigHandlers({
+      registry,
+      settings,
+      credentials,
+      capabilities: () => ["debug", "operator"]
+    });
     return { registry, settings, credentials };
   }
 

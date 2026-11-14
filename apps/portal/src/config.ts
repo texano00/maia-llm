@@ -20,6 +20,18 @@ export interface ServerConfig {
   refreshTokenTtlMs: number;
   /** Backoffice session lifetime. */
   adminSessionTtlMs: number;
+  /** Product base URL for the internal accounts API (`http://maia-web:5173`). */
+  webInternalUrl: string;
+  /**
+   * Shared secret for `/internal/*`. Unset means the portal can admit nobody and
+   * shows no accounts: operators are product accounts, so there is no fallback.
+   */
+  internalToken: string | null;
+  /**
+   * `MAIA_ADMIN_PASSWORD` was retired with the password login. Kept only so the
+   * process can say so at boot instead of ignoring a stale deployment secret.
+   */
+  retiredAdminPasswordSet: boolean;
   /**
    * Enforce installation credentials on ingestion routes. Off until desktop
    * enrollment ships, so an older client does not lose its diagnostics.
@@ -27,7 +39,6 @@ export interface ServerConfig {
   requireClientAuth: boolean;
   /** Bootstrap administrator, seeded on first boot when both are set. */
   adminEmail: string | null;
-  adminPassword: string | null;
   /** Service credential used to build the catalogue snapshot. */
   hfToken: string | null;
   /** How often the snapshot is rebuilt. */
@@ -75,9 +86,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     accessTokenTtlMs: positive(env.MAIA_PORTAL_ACCESS_TTL_MINUTES, 60) * 60_000,
     refreshTokenTtlMs: positive(env.MAIA_PORTAL_REFRESH_TTL_DAYS, 30) * 24 * 60 * 60_000,
     adminSessionTtlMs: positive(env.MAIA_ADMIN_SESSION_HOURS, 12) * 60 * 60_000,
+    webInternalUrl: env.MAIA_WEB_INTERNAL_URL ?? "http://maia-web:5173",
+    internalToken: env.MAIA_INTERNAL_TOKEN?.trim() || null,
+    retiredAdminPasswordSet: Boolean(env.MAIA_ADMIN_PASSWORD),
     requireClientAuth: env.MAIA_REQUIRE_CLIENT_AUTH === "true",
     adminEmail: env.MAIA_ADMIN_EMAIL ?? null,
-    adminPassword: env.MAIA_ADMIN_PASSWORD ?? null,
     hfToken: env.MAIA_PORTAL_HF_TOKEN ?? env.HF_TOKEN ?? null,
     catalogueRefreshHours: positive(env.MAIA_CATALOGUE_REFRESH_HOURS, 6),
     catalogueLimit: positive(env.MAIA_CATALOGUE_LIMIT, 300),

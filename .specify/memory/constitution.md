@@ -9,9 +9,13 @@ model responses and model files MUST be stored server-side only to serve the
 person who created them, MUST be readable and exportable by that person at any
 time, and MUST NOT be used for analytics, profiling, advertising or training.
 The application MUST NOT sell, share or publish conversation content. Telemetry
-MUST be disabled by default, enabled only after explicit consent, and limited to
-allowlisted, content-free events; credentials, prompts, responses, API keys,
-absolute paths are prohibited from every telemetry payload. Network addresses MAY
+MUST be limited to allowlisted, content-free events; credentials, prompts,
+responses, API keys, absolute paths are prohibited from every telemetry payload.
+The single usage measurement (model, capability, token counts, timings, outcome,
+pseudonymous installation identifier, device facts and the server-observed
+address) is **enabled by default** so adoption is measurable without asking, and
+MUST be switchable off by the account owner at any time; adding any other data to
+it requires explicit consent. Network addresses MAY
 be retained in the telemetry store, in full and without expiry, only for
 installations that explicitly enabled usage reporting; addresses MUST never
 appear in application logs. User identity MUST be the email address used to
@@ -169,4 +173,13 @@ approved by a maintainer before merge. Unresolved violations block release. The
 constitution SHOULD be reviewed after any security incident, major provider
 change, or platform expansion, and at least annually.
 
-**Version**: 1.0.0 | **Ratified**: 2026-11-02 | **Last Amended**: 2026-11-02
+**Version**: 1.1.0 | **Ratified**: 2026-11-02 | **Last Amended**: 2026-11-14
+
+### Amendment log
+
+- **1.1.0 (2026-11-14)**: Principle I. The content-free usage sample moves from
+  opt-in to opt-out-by-default; the allowlist, scrubbing rules and the prohibition
+  on content are unchanged, and the owner can still turn reporting off. Motivation:
+  the product had no way to measure adoption without asking every visitor for
+  consent to send numbers that contain no content. Impact: privacy copy updated in
+  the product and the docs; no new data is collected.

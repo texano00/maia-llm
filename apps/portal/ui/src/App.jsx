@@ -1,14 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   catalogueStatus,
+  changeCapability,
   createUseCase,
   currentSession,
   deleteUseCase,
   forceRefresh,
+  listAccounts,
   listAudit,
   listInstallations,
   listUseCases,
   reorderUseCases,
+  requestSignInCode,
   revokeInstallation,
   signIn,
   signOut,
@@ -18,6 +21,7 @@ import {
 
 const TABS = [
   { id: "operations", label: "Operations" },
+  { id: "accounts", label: "Accounts" },
   { id: "use-cases", label: "Use cases" },
   { id: "installations", label: "Installations" },
   { id: "audit", label: "Audit" }
@@ -83,6 +87,7 @@ export default function App() {
       </nav>
 
       {tab === "operations" ? <Operations /> : null}
+      {tab === "accounts" ? <Accounts /> : null}
       {tab === "use-cases" ? <UseCases /> : null}
       {tab === "installations" ? <Installations /> : null}
       {tab === "audit" ? <Audit /> : null}
@@ -90,24 +95,54 @@ export default function App() {
   );
 }
 
+/**
+ * Two steps, no password: the product sends a code to the address and only then
+ * does the portal learn whether that account may operate it.
+ */
 function SignIn({ onSignedIn }) {
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [code, setCode] = useState("");
+  const [codeSent, setCodeSent] = useState(false);
   const [error, setError] = useState(null);
+  const [notice, setNotice] = useState(null);
   const [busy, setBusy] = useState(false);
+
+  async function sendCode() {
+    setBusy(true);
+    setError(null);
+    try {
+      await requestSignInCode(email);
+      setCodeSent(true);
+      setNotice("If that address belongs to an operator, a code is on its way.");
+    } catch (failure) {
+      setError(
+        failure.code === "throttled"
+          ? "Too many codes requested. Try again in a few minutes."
+          : failure.message
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <form
       className="card signin"
       onSubmit={async (event) => {
         event.preventDefault();
+        if (!codeSent) {
+          await sendCode();
+          return;
+        }
+
         setBusy(true);
         setError(null);
         try {
-          const session = await signIn(email, password);
-          onSignedIn(session);
-        } catch (failure) {
-          setError(failure.message);
+          onSignedIn(await signIn(email, code));
+        } catch {
+          // A non-operator gets the same answer as a wrong code: the login must not
+          // reveal who may operate the service.
+          setError("That code is not valid. Ask for a new one.");
         } finally {
           setBusy(false);
         }
@@ -115,6 +150,7 @@ function SignIn({ onSignedIn }) {
     >
       <h2>Sign in</h2>
       {error ? <div className="alert">{error}</div> : null}
+      {notice && !error ? <div className="muted">{notice}</div> : null}
       <label>
         Email
         <input
@@ -125,22 +161,166 @@ function SignIn({ onSignedIn }) {
           required
         />
       </label>
-      <label style={{ marginTop: "0.75rem" }}>
-        Password
-        <input
-          type="password"
-          autoComplete="current-password"
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-          required
-        />
-      </label>
+      {codeSent ? (
+        <label style={{ marginTop: "0.75rem" }}>
+          Code from your inbox
+          <input
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            value={code}
+            onChange={(event) => setCode(event.target.value)}
+            required
+          />
+        </label>
+      ) : null}
       <div className="row" style={{ marginTop: "1rem" }}>
         <button type="submit" disabled={busy}>
-          {busy ? "Signing in…" : "Sign in"}
+          {busy ? "Working…" : codeSent ? "Sign in" : "Email me a code"}
         </button>
+        {codeSent ? (
+          <button type="button" className="ghost" disabled={busy} onClick={sendCode}>
+            Send another code
+          </button>
+        ) : null}
       </div>
     </form>
+  );
+}
+
+/**
+ * Who is using the product, and what they may see. Capabilities are granted here
+ * and checked in the product, so a change applies on the next request.
+ */
+function Accounts() {
+  const [page, setPage] = useState(null);
+  const [search, setSearch] = useState("");
+  const [busyId, setBusyId] = useState(null);
+  const [error, setError] = useState(null);
+  const [notice, setNotice] = useState(null);
+
+  const load = useCallback(async (query) => {
+    setError(null);
+    try {
+      setPage(await listAccounts({ query }));
+    } catch (failure) {
+      setError(
+        failure.code === "unavailable"
+          ? "The product cannot be reached right now."
+          : failure.message
+      );
+    }
+  }, []);
+
+  useEffect(() => {
+    void load("");
+  }, [load]);
+
+  async function toggle(account, capability, has) {
+    if (has && capability === "operator") {
+      const confirmed = window.confirm(
+        `Revoke operator from ${account.email}? They lose the backoffice on their next click.`
+      );
+      if (!confirmed) {
+        return;
+      }
+    }
+
+    setBusyId(account.id);
+    setError(null);
+    setNotice(null);
+    try {
+      await changeCapability(account.id, has ? { revoke: capability } : { grant: capability });
+      setNotice(`${capability} ${has ? "revoked from" : "granted to"} ${account.email}.`);
+      await load(search);
+    } catch (failure) {
+      setError(
+        failure.code === "last-operator"
+          ? "That is the last operator. Grant somebody else first."
+          : failure.message
+      );
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <>
+      {error ? <div className="alert">{error}</div> : null}
+      {notice ? <div className="muted">{notice}</div> : null}
+
+      <section className="card">
+        <h2>Accounts</h2>
+        <div className="row">
+          <input
+            type="search"
+            placeholder="Search by address"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                void load(search);
+              }
+            }}
+          />
+          <button className="ghost" onClick={() => void load(search)}>
+            Search
+          </button>
+          <span className="muted">{page ? `${page.total} accounts` : ""}</span>
+        </div>
+
+        {page && page.accounts.length === 0 ? (
+          <p className="muted">No account matches that address.</p>
+        ) : null}
+
+        {page && page.accounts.length > 0 ? (
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Account</th>
+                <th>Last seen</th>
+                <th>Active runs</th>
+                <th>Debug</th>
+                <th>Operator</th>
+              </tr>
+            </thead>
+            <tbody>
+              {page.accounts.map((account) => {
+                const hasDebug = account.capabilities.includes("debug");
+                const hasOperator = account.capabilities.includes("operator");
+                return (
+                  <tr key={account.id}>
+                    <td>{account.email}</td>
+                    <td className="muted">
+                      {account.lastSeenAt ? new Date(account.lastSeenAt).toLocaleString() : "never"}
+                    </td>
+                    <td>{account.activeSessions}</td>
+                    <td>
+                      <button
+                        className="ghost"
+                        disabled={busyId === account.id}
+                        onClick={() => void toggle(account, "debug", hasDebug)}
+                      >
+                        {hasDebug ? "Revoke" : "Grant"}
+                      </button>
+                    </td>
+                    <td>
+                      <button
+                        className="ghost"
+                        disabled={busyId === account.id}
+                        onClick={() => void toggle(account, "operator", hasOperator)}
+                      >
+                        {hasOperator ? "Revoke" : "Grant"}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        ) : null}
+      </section>
+    </>
   );
 }
 

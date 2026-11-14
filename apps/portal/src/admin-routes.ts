@@ -1,10 +1,15 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
-import { adminSessionToken } from "./auth.js";
 import type { SqlDatabase } from "./db/database.js";
+import { createOperatorGuard } from "./operator-guard.js";
 import type { SnapshotService } from "./services/catalogue/snapshot-service.js";
 import { UseCaseError, type UseCaseAdminService } from "./services/catalogue/use-case-admin.js";
 import type { AdminAuthService } from "./services/portal-auth.js";
+import {
+  InternalApiError,
+  capabilitySchema,
+  type InternalAccountsApi
+} from "./services/internal-client.js";
 
 const useCaseSchema = z.object({
   title: z.string().min(3).max(120),
@@ -21,11 +26,23 @@ const assetSchema = z.object({
   base64: z.string().min(1).max(4_000_000)
 });
 
+const capabilityChangeSchema = z
+  .object({
+    grant: capabilitySchema.optional(),
+    revoke: capabilitySchema.optional(),
+    confirm: z.boolean().optional()
+  })
+  .refine((value) => (value.grant === undefined) !== (value.revoke === undefined), {
+    message: "Exactly one of grant or revoke is required"
+  });
+
 export interface AdminRouteOptions {
   admins: AdminAuthService;
   useCases: UseCaseAdminService;
   snapshot: SnapshotService;
   db: SqlDatabase;
+  /** The product's internal API: accounts and capabilities live there. */
+  internal: InternalAccountsApi;
   now?: () => number;
 }
 
@@ -38,18 +55,58 @@ export interface AdminRouteOptions {
  */
 export function registerAdminRoutes(app: FastifyInstance, options: AdminRouteOptions): void {
   const now = options.now ?? (() => Date.now());
+  const requireOperator = createOperatorGuard({ admins: options.admins, internal: options.internal });
 
-  const requireAdmin = async (request: FastifyRequest): Promise<string | null> => {
-    const token = adminSessionToken(request);
-    if (!token) {
-      return null;
-    }
-
-    const session = await options.admins.sessionFor(token);
-    return session?.adminId ?? null;
-  };
+  const requireAdmin = async (request: FastifyRequest): Promise<string | null> =>
+    (await requireOperator(request))?.accountId ?? null;
 
   const unauthorized = { error: "not_authenticated" } as const;
+
+  // Accounts and capabilities are read from the product on every request, so a
+  // revoked operator loses access on the next click rather than at restart.
+  app.get("/admin-api/accounts", async (request, reply) => {
+    if (!(await requireAdmin(request))) {
+      return reply.status(401).send(unauthorized);
+    }
+
+    const query = (request.query ?? {}) as Record<string, unknown>;
+    const limit = clampNumber(query.limit, 50, 1, 200);
+    const offset = clampNumber(query.offset, 0, 0, 100_000);
+    const search = typeof query.query === "string" ? query.query.slice(0, 254) : undefined;
+
+    try {
+      const page = await options.internal.listAccounts({ limit, offset, ...(search ? { search } : {}) });
+      return { ...page, configured: true, serverTime: new Date(now()).toISOString() };
+    } catch (error) {
+      const failure = describeInternalFailure(error);
+      return reply
+        .status(failure.status)
+        .send({ error: failure.error, configured: options.internal.configured });
+    }
+  });
+
+  app.post("/admin-api/accounts/:id/capabilities", async (request, reply) => {
+    if (!(await requireAdmin(request))) {
+      return reply.status(401).send(unauthorized);
+    }
+
+    const parsed = capabilityChangeSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.status(400).send({ error: "invalid_payload" });
+    }
+
+    const accountId = (request.params as { id?: string }).id ?? "";
+    try {
+      const updated = await options.internal.changeCapability(accountId, {
+        ...(parsed.data.grant ? { grant: parsed.data.grant } : {}),
+        ...(parsed.data.revoke ? { revoke: parsed.data.revoke } : {})
+      });
+      return { account: updated };
+    } catch (error) {
+      const failure = describeInternalFailure(error);
+      return reply.status(failure.status).send({ error: failure.error });
+    }
+  });
 
   const fail = (error: unknown, reply: FastifyReply) => {
     if (error instanceof UseCaseError) {
@@ -231,4 +288,26 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRouteOpt
       }))
     };
   });
+}
+
+function clampNumber(raw: unknown, fallback: number, min: number, max: number): number {
+  const value = Number(raw);
+  return Number.isFinite(value) ? Math.min(Math.max(Math.trunc(value), min), max) : fallback;
+}
+
+/** One translation for every internal failure the accounts view can hit. */
+function describeInternalFailure(error: unknown): { status: number; error: string } {
+  if (error instanceof InternalApiError) {
+    if (error.status === 409) {
+      return { status: 409, error: "last-operator" };
+    }
+
+    if (error.status === 404) {
+      return { status: 404, error: "not_found" };
+    }
+
+    return { status: 503, error: "unavailable" };
+  }
+
+  return { status: 503, error: "unavailable" };
 }

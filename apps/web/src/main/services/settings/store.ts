@@ -20,7 +20,7 @@ export const defaultAppSettings: AppSettings = {
   diagnosticsUrl: DEFAULT_DIAGNOSTICS_URL,
   gpuFilters: DEFAULT_GPU_FILTERS,
   gpuStartupRetries: DEFAULT_GPU_STARTUP_RETRIES,
-  usageReporting: false,
+  usageReporting: true,
   walletWarnThresholdMicroUsd: 2_000_000,
   onboardingCompleted: false,
   onboardingDismissedAt: null,

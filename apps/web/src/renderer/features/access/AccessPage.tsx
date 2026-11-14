@@ -227,7 +227,9 @@ export function AccessPage() {
 
         <p className="access-fineprint">
           The address identifies the conversations, images and provider keys you save. It is not a
-          profile, and deleting it removes all of it.
+          profile, and deleting it removes all of it. Each finished run sends one content-free usage
+          sample (model, tokens, timings, outcome, a pseudonymous installation id and device facts)
+          so the product can be measured; you can switch that off in Settings at any time.
         </p>
       </div>
     </div>

@@ -62,7 +62,9 @@ export function parseImportDocument(raw: unknown): ImportDocument {
  */
 export function planImport(
   current: AppSettings,
-  document: Pick<ImportDocument, "settings">
+  document: Pick<ImportDocument, "settings">,
+  /** Keys the caller may not change; they are reported, never applied. */
+  unsupportedKeys: readonly string[] = []
 ): ImportPlan {
   const shape = appSettingsSchema.shape as Record<string, { safeParse(value: unknown): { success: boolean; data?: unknown } }>;
   const patch: SettingsUpdate = {};
@@ -70,6 +72,11 @@ export function planImport(
   const skipped: ImportPlan["skipped"] = [];
 
   for (const [key, value] of Object.entries(document.settings)) {
+    if (unsupportedKeys.includes(key)) {
+      skipped.push({ path: `settings.${key}`, reason: "unsupported" });
+      continue;
+    }
+
     const field = shape[key];
     if (!field) {
       skipped.push({ path: `settings.${key}`, reason: "unknown" });

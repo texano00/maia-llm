@@ -1,5 +1,18 @@
 import { randomUUID } from "node:crypto";
+import type { AccountSummary, Capability } from "@maia/contracts";
 import type { DatabaseConnection } from "../../storage/db";
+import { effectiveCapabilities, storedCapabilities } from "./capabilities";
+
+/** Session states that mean "this account is using the product right now". */
+const ACTIVE_SESSION_STATES = ["estimated", "provisioning", "ready", "active", "ending"];
+
+/** Raised when a revocation would leave nobody able to grant it back. */
+export class LastOperatorError extends Error {
+  constructor() {
+    super("The last operator cannot revoke its own capability");
+    this.name = "LastOperatorError";
+  }
+}
 
 /** What happened, for the throttle windows and the audit trail. */
 export type AuthEventKind =
@@ -221,5 +234,171 @@ export class AccountRepository {
       .prepare("DELETE FROM access_codes WHERE issued_at < ? AND (consumed_at IS NOT NULL OR expires_at < ?)")
       .run(before.codes, before.codes);
     this.db.prepare("DELETE FROM auth_events WHERE created_at < ?").run(before.events);
+  }
+
+  /** Effective capabilities: what the product and the portal act on. */
+  capabilitiesOf(accountId: string): Capability[] {
+    return effectiveCapabilities(this.storedCapabilitiesOf(accountId));
+  }
+
+  /** The grant list exactly as written, without the `operator → debug` implication. */
+  storedCapabilitiesOf(accountId: string): Capability[] {
+    const row = this.db
+      .prepare("SELECT capabilities_json FROM accounts WHERE id = ?")
+      .get(accountId) as { capabilities_json: string | null } | undefined;
+    return storedCapabilities(parseCapabilitiesJson(row?.capabilities_json ?? null));
+  }
+
+  /** Stores the grant list as given; `operator` still implies `debug` on read. */
+  setCapabilities(accountId: string, capabilities: readonly Capability[]): void {
+    const stored = [...new Set(capabilities)];
+    this.db
+      .prepare("UPDATE accounts SET capabilities_json = ? WHERE id = ?")
+      .run(JSON.stringify(stored), accountId);
+  }
+
+  countOperators(): number {
+    const rows = this.db
+      .prepare("SELECT capabilities_json FROM accounts")
+      .all() as Array<{ capabilities_json: string | null }>;
+    return rows.filter((row) =>
+      effectiveCapabilities(parseCapabilitiesJson(row.capabilities_json)).includes("operator")
+    ).length;
+  }
+
+  /**
+   * Grants are additive and idempotent: signing in again must not fail because
+   * the capability is already there.
+   */
+  grantCapability(accountId: string, capability: Capability): Capability[] {
+    const current = this.storedCapabilitiesOf(accountId);
+    if (!current.includes(capability)) {
+      this.setCapabilities(accountId, [...current, capability]);
+    }
+    return this.capabilitiesOf(accountId);
+  }
+
+  /**
+   * Revoking the last operator would lock the portal out of itself, so the
+   * guard lives here, inside the transaction that also writes the row.
+   */
+  revokeCapability(accountId: string, capability: Capability): Capability[] {
+    const transaction = this.db.transaction(() => {
+      const current = this.storedCapabilitiesOf(accountId);
+      if (!current.includes(capability)) {
+        return this.capabilitiesOf(accountId);
+      }
+      if (capability === "operator" && this.countOperators() <= 1) {
+        throw new LastOperatorError();
+      }
+      // Only the named grant goes: an explicitly granted `debug` survives.
+      this.setCapabilities(
+        accountId,
+        current.filter((entry) => entry !== capability)
+      );
+      return this.capabilitiesOf(accountId);
+    });
+
+    return transaction();
+  }
+
+  /** One account's projection, for the answer to a capability change. */
+  accountSummary(accountId: string): AccountSummary | null {
+    const row = this.db
+      .prepare(
+        `SELECT a.id, a.email, a.created_at, a.last_seen_at, a.capabilities_json,
+                (SELECT COUNT(*) FROM sessions s
+                  WHERE s.account_id = a.id
+                    AND s.state IN (${ACTIVE_SESSION_STATES.map(() => "?").join(", ")}))
+                  AS active_sessions
+           FROM accounts a
+          WHERE a.id = ?`
+      )
+      .get(...ACTIVE_SESSION_STATES, accountId) as
+      | {
+          id: string;
+          email: string;
+          created_at: string;
+          last_seen_at: string | null;
+          capabilities_json: string | null;
+          active_sessions: number;
+        }
+      | undefined;
+
+    if (!row) {
+      return null;
+    }
+
+    return {
+      id: row.id,
+      email: row.email,
+      createdAt: row.created_at,
+      lastSeenAt: row.last_seen_at,
+      capabilities: effectiveCapabilities(parseCapabilitiesJson(row.capabilities_json)),
+      activeSessions: row.active_sessions
+    };
+  }
+
+  /** Portal listing: identity, capabilities and how busy the account is. */
+  listAccountSummaries(query: {
+    search?: string;
+    limit: number;
+    offset: number;
+  }): { total: number; accounts: AccountSummary[] } {
+    const where = query.search ? "WHERE lower(email) LIKE @like" : "";
+    const params: Record<string, string | number> = {
+      like: `%${(query.search ?? "").toLowerCase()}%`,
+      limit: query.limit,
+      offset: query.offset
+    };
+
+    const totalRow = this.db
+      .prepare(`SELECT COUNT(*) AS total FROM accounts ${where}`)
+      .get(params) as { total: number } | undefined;
+
+    const rows = this.db
+      .prepare(
+        `SELECT a.id, a.email, a.created_at, a.last_seen_at, a.capabilities_json,
+                (SELECT COUNT(*) FROM sessions s
+                  WHERE s.account_id = a.id
+                    AND s.state IN (${ACTIVE_SESSION_STATES.map(() => "?").join(", ")}))
+                  AS active_sessions
+           FROM accounts a
+           ${where}
+          ORDER BY a.created_at DESC
+          LIMIT @limit OFFSET @offset`
+      )
+      .all(...ACTIVE_SESSION_STATES, params) as Array<{
+      id: string;
+      email: string;
+      created_at: string;
+      last_seen_at: string | null;
+      capabilities_json: string | null;
+      active_sessions: number;
+    }>;
+
+    return {
+      total: totalRow?.total ?? 0,
+      accounts: rows.map((row) => ({
+        id: row.id,
+        email: row.email,
+        createdAt: row.created_at,
+        lastSeenAt: row.last_seen_at,
+        capabilities: effectiveCapabilities(parseCapabilitiesJson(row.capabilities_json)),
+        activeSessions: row.active_sessions
+      }))
+    };
+  }
+}
+
+/** A row written before migration 0013, or by hand, must not break a sign-in. */
+function parseCapabilitiesJson(raw: string | null): unknown {
+  if (!raw) {
+    return [];
+  }
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch {
+    return [];
   }
 }

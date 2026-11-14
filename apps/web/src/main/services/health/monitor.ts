@@ -10,6 +10,11 @@ export interface ProviderHealthSources {
   /** Null when the balance cannot be read (offline, outage, missing key). */
   getBalanceMicroUsd: () => Promise<number | null>;
   getThresholdMicroUsd: () => number;
+  /**
+   * The header polls every few seconds; this bounds how often the sources (and
+   * therefore the providers) are actually asked. `0` checks on every refresh.
+   */
+  minIntervalMs?: number;
   now?: () => Date;
 }
 
@@ -20,10 +25,16 @@ export interface ProviderHealthSources {
  */
 export class ProviderHealthMonitor {
   private readonly now: () => Date;
+  private readonly minIntervalMs: number;
   private value: ProviderHealth;
+  private lastCheckedAt = 0;
+  /** Bumped by `invalidate`, so a slower in-flight check cannot overwrite a newer one. */
+  private generation = 0;
+  private inFlight: { generation: number; promise: Promise<ProviderHealth> } | null = null;
 
   constructor(private readonly sources: ProviderHealthSources) {
     this.now = sources.now ?? (() => new Date());
+    this.minIntervalMs = sources.minIntervalMs ?? 0;
     this.value = this.unknownSnapshot();
   }
 
@@ -31,7 +42,38 @@ export class ProviderHealthMonitor {
     return this.value;
   }
 
+  /** Called after a credential change so the next read is not cached. */
+  invalidate(): void {
+    this.lastCheckedAt = 0;
+    this.generation += 1;
+  }
+
   async refresh(): Promise<ProviderHealth> {
+    // Concurrent callers share one check: the header polls, and a credential save
+    // triggers a read of its own.
+    if (this.inFlight && this.inFlight.generation === this.generation) {
+      return this.inFlight.promise;
+    }
+
+    const startedAt = this.now().getTime();
+    if (this.minIntervalMs > 0 && this.lastCheckedAt > 0 && startedAt - this.lastCheckedAt < this.minIntervalMs) {
+      return this.value;
+    }
+
+    const generation = this.generation;
+    this.lastCheckedAt = startedAt;
+    const promise = this.check(generation);
+    this.inFlight = { generation, promise };
+    try {
+      return await promise;
+    } finally {
+      if (this.inFlight?.promise === promise) {
+        this.inFlight = null;
+      }
+    }
+  }
+
+  private async check(generation: number): Promise<ProviderHealth> {
     const checkedAt = this.now().toISOString();
     const [huggingface, vastai, balance] = await Promise.all([
       this.checkCredential(this.sources.hasHuggingFace, this.sources.verifyHuggingFace, checkedAt),
@@ -39,12 +81,18 @@ export class ProviderHealthMonitor {
       this.readBalance(checkedAt)
     ]);
 
-    this.value = {
+    const next: ProviderHealth = {
       huggingface,
       vastai,
       balance,
       thresholdMicroUsd: this.sources.getThresholdMicroUsd()
     };
+
+    // A check that started before an `invalidate` is stale by definition: the key
+    // it read may have been replaced while it ran.
+    if (generation === this.generation) {
+      this.value = next;
+    }
 
     return this.value;
   }
@@ -104,8 +152,8 @@ export function deriveHealthNotifications(health: ProviderHealth): NotificationI
   const entries: NotificationInput[] = [];
 
   for (const [provider, label, route] of [
-    ["huggingface", "Hugging Face", "/settings"],
-    ["vastai", "vast.ai", "/settings"]
+    ["huggingface", "Hugging Face", "/settings?section=huggingface"],
+    ["vastai", "vast.ai", "/settings?section=vastai"]
   ] as const) {
     const check = health[provider];
     if (check.state === "missing") {
@@ -113,14 +161,16 @@ export function deriveHealthNotifications(health: ProviderHealth): NotificationI
         key: `credential:${provider}:missing`,
         severity: "warning",
         message: `Add your ${label} API key to download and run models.`,
-        action: { label: "Open settings", route }
+        action: { label: "Open settings", route },
+        dismissible: false
       });
     } else if (check.state === "invalid") {
       entries.push({
         key: `credential:${provider}:invalid`,
         severity: "error",
         message: `Your ${label} API key was rejected. Update it before starting another run.`,
-        action: { label: "Open settings", route }
+        action: { label: "Open settings", route },
+        dismissible: false
       });
     }
   }
@@ -132,7 +182,7 @@ export function deriveHealthNotifications(health: ProviderHealth): NotificationI
       key: "balance:below-threshold",
       severity: "warning",
       message: `Prepaid GPU balance is $${remaining}, below your $${threshold} warning threshold.`,
-      action: { label: "Top up", route: "/settings" }
+      action: { label: "Top up", route: "/settings?section=vastai" }
     });
   }
 
