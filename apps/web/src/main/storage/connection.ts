@@ -10,8 +10,8 @@ export interface Migration {
 
 /**
  * Opens and migrates a SQLite file from a caller-supplied migration list, so the
- * same schema can be created by the Electron main process (raw SQL bundled by
- * Vite) and by the Node web host (SQL read from disk).
+ * same schema is created whether the SQL arrives bundled (`?raw` imports, used by
+ * the tests and the web host) or read from disk.
  */
 export function createConnection(filename: string, migrations: Migration[]): DatabaseConnection {
   const db = new Database(filename);

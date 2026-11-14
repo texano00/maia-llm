@@ -1,9 +1,8 @@
 # MaiaLLM portal (in progress)
 
 The portal is the server side of `specs/002-maiallm-portal`: the telemetry
-ingestion API, the configs API the desktop catalogue reads, and the backoffice.
-It currently lives in `apps/portal` and will be renamed to `apps/portal`
-once the surface is complete.
+ingestion API, the configs API the catalogue client reads, and the backoffice.
+It lives in `apps/portal`.
 
 ## Configuration
 
@@ -21,8 +20,8 @@ once the surface is complete.
 | `MAIA_CATALOGUE_REFRESH_HOURS` | `6` | Snapshot refresh interval |
 | `MAIA_CATALOGUE_LIMIT` | `300` | Models per snapshot pass (top downloads first) |
 
-`MAIA_REQUIRE_CLIENT_AUTH` stays `false` until the desktop release that enrolls
-itself ships: older clients post diagnostics without a token.
+`MAIA_REQUIRE_CLIENT_AUTH` stays `false` until every installation in the field has
+enrolled: a client that never enrolled posts diagnostics without a token.
 
 ## Endpoints
 
@@ -49,7 +48,7 @@ itself ships: older clients post diagnostics without a token.
 - Snapshots are immutable and versioned; the last 30 are retained.
 - `supported` = engine derivable (GGUF → llama.cpp, safetensors → vLLM) **and**
   repository loadable **and** chat template present. The reason is stored with
-  the record so the desktop can label unsupported rows.
+  the record so the catalogue can label unsupported rows.
 - A GGUF counts wherever it sits: `llama-server` is pointed at one file, so a
   quant in `Q4_K_M/` is servable. Community GGUF mirrors ship exactly that way,
   and judging only the repository root wrongly marked them empty. Safetensors
@@ -177,23 +176,23 @@ travels through it.
 is `401`; when `MAIA_INTERNAL_TOKEN` is unset the routes are not registered at
 all, so every `/internal/*` path is a `404`.
 
-## Desktop client
+## The catalogue client
 
-With `MAIA_PORTAL_URL` set, the desktop reads `GET /v1/config/catalogue`
-instead of listing the Hub:
+With `MAIA_PORTAL_URL` set, the product reads `GET /v1/config/catalogue` instead of
+listing the Hub:
 
-- The first read enrolls silently (`POST /v1/installations`) and stores the
-  credential pair in `<userData>/portal.json` (mode `0600`).
-- A 401 rotates the access token once; a revoked refresh token re-enrolls, which
-  the backend honours by reactivating the same installation.
-- `304 Not Modified` keeps the previous payload, so a poll costs no bandwidth.
+- The snapshot is cached by ETag; `304 Not Modified` keeps the previous payload, so
+  a poll costs no bandwidth.
 - `503 no_snapshot` is reported as such: an unbuilt snapshot is not an outage.
-- `GET /v1/config/use-cases` powers basic mode; the desktop picks the first
-  curated entry the snapshot marks supported and explains a card when none is.
+- `GET /v1/config/use-cases` powers basic mode. The product picks the first curated
+  entry the snapshot marks supported and explains a card when none is, so a
+  curator's intent survives a catalogue that cannot serve it yet.
+- Installations still enroll (`POST /v1/installations`) to obtain a diagnostics
+  credential; a revoked refresh token re-enrolls, and the backend reactivates the
+  same installation.
 
-The variable defaults to the hosted backend, `https://api.maiallm.com`, so a
-shipped build reads the shared snapshot out of the box; `MAIA_PORTAL_URL=`
-(empty) falls back to the Hub listing and
-`MAIA_PORTAL_URL=http://127.0.0.1:8791` points a dev build at a local portal.
+The variable defaults to the hosted backend, `https://api.maiallm.com`;
+`MAIA_PORTAL_URL=` (empty) falls back to the Hub listing and
+`MAIA_PORTAL_URL=http://127.0.0.1:8787` points a dev build at a local portal.
 Telemetry and GPU reputation default to the same host, and their overrides
 (`MAIA_DIAGNOSTIC_LOG_URL`, `MAIA_REPUTATION_URL`) outrank the stored setting.

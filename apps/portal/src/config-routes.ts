@@ -10,7 +10,7 @@ export interface ConfigRouteOptions {
 }
 
 /**
- * The configs API the desktop catalogue reads.
+ * The configs API a catalogue client reads.
  *
  * One conditional GET carries the whole catalogue (model facts, artifacts,
  * engine and supported verdict) so the client never calls the model provider and

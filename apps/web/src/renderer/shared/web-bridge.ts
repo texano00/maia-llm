@@ -16,8 +16,8 @@ interface FeedEvent {
 }
 
 /**
- * Browser fallback for the Electron preload bridge. The web host exposes the same
- * channels over HTTP (`/rpc`) and streams chat/update events through `/events`.
+ * The bridge behind `window.maia`. The web host exposes the channels over HTTP
+ * (`/rpc`) and streams chat events through `/events`.
  *
  * Events are polled rather than received over SSE: proxied and forwarded ports
  * buffer event streams, which silently drops token-by-token updates.

@@ -1,6 +1,6 @@
 {
   "name": "@maia/web",
-  "version": "0.11.0",
+  "version": "0.11.1",
   "private": true,
   "description": "Maia LLM web app and server",
   "author": {
@@ -10,14 +10,13 @@
   "type": "module",
   "scripts": {
     "dev": "npm run build && tsx src/web/server.ts",
-    "build": "vite build && esbuild src/web/server.ts --bundle --platform=node --target=node22 --format=esm --outfile=out/server.js --external:better-sqlite3 --external:pino --external:nodemailer",
+    "build": "vite build && esbuild src/web/server.ts --bundle --platform=node --target=node22 --format=esm --outfile=out/server.js --external:better-sqlite3 --external:nodemailer",
     "start": "tsx src/web/server.ts",
     "watch": "vite build --watch"
   },
   "dependencies": {
     "better-sqlite3": "13.0.3",
     "nodemailer": "^7.0.13",
-    "pino": "10.4.0",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "react-router-dom": "7.18.5",

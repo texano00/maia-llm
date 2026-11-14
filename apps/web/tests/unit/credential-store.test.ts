@@ -3,7 +3,7 @@ import { closeDatabase, openDatabase, type DatabaseConnection } from "../../src/
 import { seedAccount } from "../helpers/accounts";
 import { CredentialStore } from "../../src/main/services/credentials/store";
 
-/** Stand-in for the Electron safeStorage-backed vault. */
+/** Stand-in for the AES-GCM vault, so the store is tested without a keyring. */
 class FakeVault {
   readonly secrets = new Map<string, string>();
   private counter = 0;

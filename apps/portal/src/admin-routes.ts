@@ -53,7 +53,7 @@ export interface AdminRouteOptions {
  *
  * Everything here is administrator-only: use-case curation, the forced catalogue
  * refresh, run history and the audit trail. The one public route is the uploaded
- * use-case image, which the desktop fetches to render a scenario card.
+ * use-case image, which a client fetches to render a scenario card.
  */
 export function registerAdminRoutes(app: FastifyInstance, options: AdminRouteOptions): void {
   const now = options.now ?? (() => Date.now());
@@ -264,7 +264,7 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRouteOpt
     }
   });
 
-  // Public: scenario cards load their image from the desktop catalogue.
+  // Public: scenario cards load their image from the product.
   app.get("/assets/:name", async (request, reply) => {
     const name = (request.params as { name?: string }).name ?? "";
     const asset = await options.useCases.readAsset(name);

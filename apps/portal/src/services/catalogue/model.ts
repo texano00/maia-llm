@@ -1,7 +1,7 @@
 /**
  * The model record the portal publishes.
  *
- * It is the superset the desktop catalogue needs: everything the app used to
+ * It is the superset the catalogue client needs: everything the app used to
  * derive from live Hub calls, plus the two MaiaLLM-owned verdicts (engine and
  * supported) that only the backend computes. The shape is returned as-is by the
  * configs API and cached verbatim by clients.

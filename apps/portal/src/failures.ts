@@ -12,7 +12,7 @@ function clampLimit(raw: unknown, fallback: number): number {
 /**
  * Ingest and read-back of client start-up failures.
  *
- * The desktop app posts here when a session cannot start, so the root cause of
+ * An installation posts here when a session cannot start, so the root cause of
  * an engine crash survives the instance that produced it. Authentication is
  * added by the portal work; until then the route is as open as its siblings.
  */

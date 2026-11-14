@@ -10,7 +10,7 @@ import {
 export type { DatabaseConnection, Migration };
 export { closeDatabase };
 
-/** Electron entry point: raw SQL is bundled by Vite via the `?raw` imports. */
+/** Bundled entry point: raw SQL arrives through Vite's `?raw` imports. */
 export function openDatabase(filename: string): DatabaseConnection {
   return createConnection(filename, migrations);
 }

@@ -11,7 +11,7 @@ named volume, so there is nothing else to install.
 | Landing page   | `infra/landing/` (static HTML + logo)                                       | the server         |
 | Reverse proxy  | your nginx (port 80, four hostnames) behind a Cloudflare Tunnel             | the server     |
 | Auto-update    | Watchtower, polling `ghcr.io` every N seconds                               | the server         |
-| Desktop client | reads this deployment when `MAIA_PORTAL_URL` is set                         | the user's machine |
+| Web product    | reads the catalogue, use cases and reputation from this deployment via `MAIA_PORTAL_URL` | the `web` container |
 
 The server needs no Node install and no build step: Docker, the `infra/`
 directory from this repository, and network access to GHCR are enough.
@@ -360,9 +360,9 @@ The image is `nickfedor/watchtower`, the maintained fork. The original
 | `MAIA_REQUIRE_CLIENT_AUTH`                 | `false`                     | Require installation tokens on ingestion routes                                   |
 | `MAIA_TRUST_PROXY`                         | `true`                      | Believe `X-Forwarded-For` from the proxy; set `false` if 8787 is exposed directly |
 
-Keep `MAIA_REQUIRE_CLIENT_AUTH` off until every desktop build in the field
-enrolls itself: older clients post diagnostics without a token and would be
-rejected otherwise.
+Keep `MAIA_REQUIRE_CLIENT_AUTH` off until every installation in the field has
+enrolled: a client that never enrolled posts diagnostics without a token and would
+be rejected otherwise.
 
 ## First boot
 
@@ -371,13 +371,11 @@ rejected otherwise.
    bootstrap credentials.
 3. **Operations → Force refresh** builds the first model catalogue snapshot. Until
    it succeeds, `GET /v1/config/catalogue` returns `503 no_snapshot`.
-4. In **Use cases**, create the basic-mode cards in the order the desktop should
+4. In **Use cases**, create the basic-mode cards in the order the product should
    prefer them.
-5. A released desktop build already points at `https://api.maiallm.com`
-   (catalogue, telemetry and GPU reputation), so it is enough to check that
-   **Operations → Installations** lists the new row; `MAIA_PORTAL_URL`,
-   `MAIA_DIAGNOSTIC_LOG_URL` and `MAIA_REPUTATION_URL` exist only to override
-   that when testing against a local stack.
+5. `MAIA_PORTAL_URL` on the `web` service points at `http://maia-portal:8787` by
+   default; `MAIA_DIAGNOSTIC_LOG_URL` and `MAIA_REPUTATION_URL` exist only to
+   override that when testing against a local stack.
 
 ## The web application container
 

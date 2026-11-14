@@ -64,7 +64,7 @@ interface UseCaseRow {
  *
  * A use case always keeps its full ordered model list: entries that the current
  * snapshot marks unsupported are reported as warnings, never silently dropped, so
- * the maintainer sees what the desktop will skip. Saves are versioned, so two
+ * the maintainer sees what a client will skip. Saves are versioned, so two
  * administrators editing the same use case cannot overwrite each other.
  */
 export class UseCaseAdminService {
