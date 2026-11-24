@@ -719,8 +719,9 @@ describe("vast.ai offer picking", () => {
       }) as unknown as typeof fetch,
       readyTimeoutMs: 40 * 60_000,
       reminderIntervalMs: 30 * 60_000,
-      // Keep the quiet window out of the way: this test is about the ceiling.
+      // Keep the quiet windows out of the way: this test is about the ceiling.
       quietWindowMs: 3 * 60 * 60_000,
+      runningQuietWindowMs: 3 * 60 * 60_000,
       pollIntervalMs: 5_000,
       now: () => clock,
       // The test stops the loop itself: the product never releases on a clock,

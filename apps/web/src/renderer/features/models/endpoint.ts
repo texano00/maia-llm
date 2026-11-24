@@ -75,6 +75,7 @@ const RELEASE_COPY: Record<string, string> = {
   ceiling_reached: "This run passed its boot ceiling.",
   cap_reached: "The run reached the spending cap you set.",
   person_stopped: "Stopped by you.",
+  app_exit: "The app closed and released the machine.",
   start_failed: "The machine could not start the container."
 };
 

@@ -146,6 +146,11 @@ export async function createAccountRuntime(
         ...(options.bootQuietMinutes !== undefined
           ? { quietWindowMs: options.bootQuietMinutes * 60_000 }
           : {}),
+        // A running container may download in silence far longer than a host
+        // that never started one (llama.cpp buffers its progress bar).
+        ...(options.bootQuietMinutes !== undefined
+          ? { runningQuietWindowMs: Math.max(options.bootQuietMinutes * 60_000 * 3, 30 * 60_000) }
+          : {}),
         ...(options.bootReminderMinutes !== undefined
           ? { reminderIntervalMs: options.bootReminderMinutes * 60_000 }
           : {}),
@@ -250,6 +255,14 @@ export async function createAccountRuntime(
     },
     capabilityFor: (modelId) =>
       capabilityForPipelineTag(options.catalogueRepository.get(modelId)?.pipelineTag ?? null),
+    // The run card names the engine that will actually serve the model, not a
+    // hard-coded default: a GGUF run is llama.cpp, not vLLM.
+    runtimeFor: (modelId) =>
+      resolveEngine(
+        modelId,
+        options.catalogue.supportFor(modelId)?.engine,
+        options.catalogueRepository.getArtifacts(modelId)
+      ) ?? "vllm",
     reportFailure,
     logger
   });
