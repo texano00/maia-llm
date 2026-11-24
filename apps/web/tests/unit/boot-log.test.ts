@@ -53,6 +53,14 @@ describe("classifyFatal", () => {
       "image_pull_failed"
     );
   });
+
+  it("treats a model server that exited as fatal, not as patience", () => {
+    // The launch wrapper runs the server behind the host's SSH entrypoint, so a
+    // crashed engine leaves the container alive; only this line says so.
+    expect(
+      classifyFatal("error: the model server exited with status 1", null)
+    ).toEqual({ reason: "engine_crashed", detail: "The engine stopped while starting." });
+  });
 });
 
 describe("boot progress", () => {

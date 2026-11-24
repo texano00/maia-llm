@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { formatUsd } from "../../shared/format";
+import { serverNow } from "../../shared/clock";
 import { DEFAULT_STATUS_FILTER, filterRuns, emptyStateFor, STATUS_FILTERS, type StatusFilter } from "./filter";
 import { describeRun } from "./run-details";
 import { isChatEligible, isStoppable, type VisibleStatus } from "./status";
@@ -34,7 +35,7 @@ export function ModelsPage() {
   const { reloadSessions } = useWorkspace();
   const { acknowledgedFailureIds } = useUiPreferences();
   const [filter, setFilter] = useState<StatusFilter>(DEFAULT_STATUS_FILTER);
-  const [now, setNow] = useState(() => Date.now());
+  const [now, setNow] = useState(() => serverNow());
   // One panel at a time: two live logs side by side would poll the provider twice
   // for no benefit.
   const [logsOpen, setLogsOpen] = useState<string | null>(null);
@@ -82,7 +83,7 @@ export function ModelsPage() {
   // The elapsed/cost meter only matters while a run is in flight; a one-second
   // tick mirrors the chat meter without touching the history query.
   useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1_000);
+    const timer = setInterval(() => setNow(serverNow()), 1_000);
     return () => clearInterval(timer);
   }, []);
 

@@ -1,4 +1,5 @@
 import type { Session } from "@maia/contracts";
+import { serverNow } from "../../shared/clock";
 import { accruedMicroUsd, formatElapsed, formatUsd } from "../../shared/format";
 import { toVisibleStatus, type VisibleStatus } from "./status";
 
@@ -42,7 +43,7 @@ export interface RunDetails {
  * cost do not keep growing after teardown.
  */
 export function describeRun(session: Session, options: { now?: number } = {}): RunDetails {
-  const now = options.now ?? Date.now();
+  const now = options.now ?? serverNow();
   const visibleStatus = toVisibleStatus(session.state);
   const startMs = Date.parse(session.startedAt);
   const endMs = session.endedAt ? Date.parse(session.endedAt) : null;

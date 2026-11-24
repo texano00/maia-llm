@@ -1,5 +1,6 @@
 import type { ModelArtifact } from "@maia/contracts";
 import { isGgufRepositoryName } from "@maia/contracts";
+import { buildWeightWatchScript } from "./download-watch";
 import {
   baseModelCandidate,
   bytesPerParameter,
@@ -24,6 +25,9 @@ export type LaunchEngine = "vllm" | "llamacpp";
 
 export const VLLM_IMAGE = "vllm/vllm-openai:latest";
 export const LLAMACPP_IMAGE = "ghcr.io/ggml-org/llama.cpp:server-cuda";
+/** Where the server image keeps its binary, and where the weights are cached. */
+const LLAMACPP_SERVER_PATH = "/app/llama-server";
+const LLAMACPP_CACHE_DIR = "/models";
 
 /** What the container needs to start, independent of the host it runs on. */
 export interface LaunchPlan {
@@ -38,6 +42,12 @@ export interface LaunchPlan {
    * plugin needs this; the instance is then created with the SSH runtype.
    */
   onstart?: string;
+  /**
+   * The container's whole command, for an engine whose download must be
+   * narrated. When present it replaces `onstart` + the image entrypoint, so the
+   * script is the only thing that starts the server.
+   */
+  launch?: string;
   gguf: boolean;
   quantization?: string;
   limits?: LaunchLimits;
@@ -115,7 +125,16 @@ export function planLaunch(input: PlanLaunchInput): LaunchPlan {
   });
 
   if (engine === "llamacpp") {
-    return planLlamaCpp({ ...input, quantization, limits, weightsGb });
+    const weightsFile = weightFileFor(ggufArtifact, input.artifacts);
+    return planLlamaCpp({
+      ...input,
+      quantization,
+      limits,
+      // A named file is a measured file: the disk request and the download meter
+      // both use its real size instead of a bytes-per-parameter guess.
+      weightsGb: weightsFile ? weightsFile.bytes / 1e9 : weightsGb,
+      weightsFile
+    });
   }
 
   const vllm = planVllmModel({
@@ -160,48 +179,64 @@ export function planLaunch(input: PlanLaunchInput): LaunchPlan {
 /**
  * llama.cpp reads the quantised file straight from the Hub.
  *
- * `-hf repo:QUANT` downloads only the shards of that quantisation, `--jinja`
- * makes it apply the model's own chat template (without it every chat request
- * is rejected), and `--alias` is what `/v1/models` reports — it has to be the
- * catalogue id for the chat client to find the model it just started.
+ * `-hf repo:QUANT` downloads only the shards of that quantisation, `-hff FILE`
+ * names the exact file so nothing is guessed, `--jinja` makes it apply the
+ * model's own chat template (without it every chat request is rejected), and
+ * `--alias` is what `/v1/models` reports — it has to be the catalogue id for the
+ * chat client to find the model it just started.
  */
 function planLlamaCpp(input: PlanLaunchInput & {
   quantization: string | null;
   limits: LaunchLimits | null;
   weightsGb: number;
+  weightsFile: { path: string; bytes: number } | null;
 }): LaunchPlan {
   const reference = input.quantization
     ? `${input.modelId}:${input.quantization}`
     : input.modelId;
   const context = input.limits?.maxModelLen ?? DEFAULT_CONTEXT;
+  const args = [
+    "-hf",
+    reference,
+    // Without it a repository holding a hundred GGUFs is resolved by llama.cpp's
+    // own default (Q4_K_M, then Q8_0); naming the file makes the download the
+    // one we priced and the one the progress meter measures.
+    ...(input.weightsFile ? ["-hff", input.weightsFile.path] : []),
+    "--host",
+    "0.0.0.0",
+    "--port",
+    "8000",
+    "--alias",
+    input.modelId,
+    "-c",
+    String(context),
+    "-ngl",
+    LLAMACPP_GPU_LAYERS,
+    // One slot: `-c` is the context budget the planner sized against VRAM,
+    // and llama.cpp splits it across slots (default 4 × 32k ≈ 4× the cache).
+    "--parallel",
+    "1",
+    // `-hf` also fetches the sibling `mmproj-*.gguf` vision projector, which
+    // Maia's text chat never uses but which costs VRAM and load time.
+    "--no-mmproj",
+    "--jinja",
+    ...(input.apiKey ? ["--api-key", input.apiKey] : [])
+  ];
 
   return {
     engine: "llamacpp",
     image: LLAMACPP_IMAGE,
-    args: [
-      "-hf",
-      reference,
-      "--host",
-      "0.0.0.0",
-      "--port",
-      "8000",
-      "--alias",
-      input.modelId,
-      "-c",
-      String(context),
-      "-ngl",
-      LLAMACPP_GPU_LAYERS,
-      // One slot: `-c` is the context budget the planner sized against VRAM,
-      // and llama.cpp splits it across slots (default 4 × 32k ≈ 4× the cache).
-      "--parallel",
-      "1",
-      // `-hf` also fetches the sibling `mmproj-*.gguf` vision projector, which
-      // Maia's text chat never uses but which costs VRAM and load time.
-      "--no-mmproj",
-      "--jinja",
-      ...(input.apiKey ? ["--api-key", input.apiKey] : [])
-    ],
-    env: {},
+    args,
+    env: { LLAMA_CACHE: LLAMACPP_CACHE_DIR },
+    // The engine's own progress bar is carriage-return only, so Docker shows
+    // nothing for the whole download; the wrapper turns the cache size into a
+    // percentage the run card can read.
+    launch: buildWeightWatchScript({
+      serverPath: LLAMACPP_SERVER_PATH,
+      args,
+      expectedBytes: input.weightsFile?.bytes ?? null,
+      cacheDir: LLAMACPP_CACHE_DIR
+    }),
     gguf: true,
     ...(input.quantization ? { quantization: input.quantization } : {}),
     ...(input.limits ? { limits: input.limits } : {}),
@@ -220,6 +255,33 @@ function estimateWeightsGb(input: {
 
   // Without a parameter count, half the card is the only honest guess.
   return (input.vramGb ?? 24) * 0.5;
+}
+
+/** `…-00001-of-00002.gguf` → the prefix every shard of that quantisation shares. */
+const SPLIT_SUFFIX = /-\d{5}-of-\d{5}\.gguf$/i;
+
+/**
+ * The file(s) the engine will download, with the total byte count.
+ *
+ * A sharded quantisation is several files that llama.cpp fetches together, so the
+ * meter has to measure all of them or it stops at 50% of a two-shard model.
+ */
+function weightFileFor(
+  artifact: ModelArtifact | null,
+  artifacts: readonly ModelArtifact[]
+): { path: string; bytes: number } | null {
+  if (!artifact) {
+    return null;
+  }
+
+  if (!SPLIT_SUFFIX.test(artifact.path)) {
+    return { path: artifact.path, bytes: artifact.sizeBytes };
+  }
+
+  const prefix = artifact.path.replace(SPLIT_SUFFIX, "");
+  const shards = artifacts.filter((candidate) => candidate.path.startsWith(prefix));
+  const bytes = shards.reduce((total, shard) => total + shard.sizeBytes, 0);
+  return { path: artifact.path, bytes: bytes > 0 ? bytes : artifact.sizeBytes };
 }
 
 export { GGUF_PLUGIN_INSTALL, baseModelCandidate };

@@ -29,7 +29,8 @@ export function createPublicRegistry(
     arch: process.arch,
     channel: "stable" as const,
     packaged: false,
-    providerMode: options.providerMode
+    providerMode: options.providerMode,
+    now: new Date().toISOString()
   }));
 
   registry.register("auth.config", z.unknown(), () => access.config());

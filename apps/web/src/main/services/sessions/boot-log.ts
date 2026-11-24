@@ -193,6 +193,13 @@ const FATAL_PATTERNS: ReadonlyArray<FatalPattern> = [
     describe: "The engine could not load this model."
   },
   {
+    // Written by the launch wrapper when the server it started exits: behind the
+    // SSH entrypoint a dead server leaves the container alive and billing.
+    pattern: /the model server exited with status/i,
+    reason: "engine_crashed",
+    describe: "The engine stopped while starting."
+  },
+  {
     pattern: /pull access denied|manifest unknown|failed to pull image|Error response from daemon/i,
     reason: "image_pull_failed",
     describe: "The container image could not be pulled."

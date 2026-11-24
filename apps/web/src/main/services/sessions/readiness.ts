@@ -22,7 +22,13 @@ export interface InferenceProbeOptions {
 
 export type InferenceProbeResult =
   | { kind: "serving"; models: string[] }
-  | { kind: "waiting" }
+  /**
+   * `answered` separates "the port replied and the engine is busy" from "nothing
+   * is listening yet": llama.cpp answers 503 "Loading model" for as long as the
+   * weights take to arrive, which is the only evidence a buffered log never gives.
+   * `detail` is the engine's own sentence, when it wrote one.
+   */
+  | { kind: "waiting"; answered?: boolean; detail?: string }
   /** The route exists but the engine rejected the request for a model reason. */
   | { kind: "failed"; reason: ReleaseReason; detail: string };
 
@@ -78,10 +84,10 @@ export async function probeInference(options: InferenceProbeOptions): Promise<In
           detail: "The server does not answer chat or completion requests for this model."
         };
       }
-      return { kind: "waiting" };
+      return completion;
     }
 
-    return { kind: "waiting" };
+    return answer;
   }
 
   const completion = await post(
@@ -98,7 +104,7 @@ export async function probeInference(options: InferenceProbeOptions): Promise<In
 
   return completion.kind === "not-found"
     ? { kind: "failed", reason: "model_load_failed", detail: "The model is not served by this endpoint." }
-    : { kind: "waiting" };
+    : completion;
 }
 
 /**
@@ -113,7 +119,7 @@ async function post(
   body: Record<string, unknown>,
   headers: Record<string, string>,
   timeoutMs: number
-): Promise<{ kind: "ok" } | { kind: "not-found" } | { kind: "waiting" }> {
+): Promise<{ kind: "ok" } | { kind: "not-found" } | { kind: "waiting"; answered: boolean; detail?: string }> {
   try {
     const response = await fetchImpl(url, {
       method: "POST",
@@ -127,7 +133,12 @@ async function post(
     }
 
     if (!response.ok) {
-      return { kind: "waiting" };
+      // A non-OK answer is still an answer: the engine is up and has something
+      // to say about why it cannot serve yet.
+      const detail = engineMessage(await readBody(response));
+      return detail === undefined
+        ? { kind: "waiting", answered: true }
+        : { kind: "waiting", answered: true, detail };
     }
 
     const payload = (await response.json()) as {
@@ -135,14 +146,56 @@ async function post(
     };
     const choice = payload.choices?.[0];
     if (!choice || (choice.message === undefined && choice.text === undefined)) {
-      return { kind: "waiting" };
+      return { kind: "waiting", answered: true };
     }
 
     return { kind: "ok" };
   } catch {
     // Connection refused, DNS, timeout: the server is not answering yet.
-    return { kind: "waiting" };
+    return { kind: "waiting", answered: false };
   }
+}
+
+/** Reads a small error body without letting a large one stall the probe. */
+async function readBody(response: Response): Promise<string> {
+  try {
+    return (await response.text()).slice(0, 400);
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * The engine's own words, short enough to sit on a run card: llama.cpp answers
+ * `{"error":{"message":"Loading model"}}` while it loads, vLLM writes a longer
+ * sentence about the engine core. Anything unreadable degrades to nothing.
+ */
+function engineMessage(body: string): string | undefined {
+  const text = body.trim();
+  if (text.length === 0) {
+    return undefined;
+  }
+
+  let message = text;
+  try {
+    const parsed = JSON.parse(text) as { error?: { message?: unknown } | string; message?: unknown };
+    if (typeof parsed.error === "object" && parsed.error !== null && typeof parsed.error.message === "string") {
+      message = parsed.error.message;
+    } else if (typeof parsed.error === "string") {
+      message = parsed.error;
+    } else if (typeof parsed.message === "string") {
+      message = parsed.message;
+    }
+  } catch {
+    // Plain text is fine: keep it as it is.
+  }
+
+  const clean = message.replace(/\s+/g, " ").trim();
+  if (clean.length === 0) {
+    return undefined;
+  }
+
+  return clean.length > 120 ? `${clean.slice(0, 117)}…` : clean;
 }
 
 /**

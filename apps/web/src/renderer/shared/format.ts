@@ -1,3 +1,5 @@
+import { serverNow } from "./clock";
+
 /** Shared renderer helpers for sizes, parameters, and money. */
 export function formatParameters(count: number): string {
   if (count >= 1_000_000_000) {
@@ -22,14 +24,18 @@ export function formatUsd(microUsd: number): string {
   return `$${(microUsd / 1_000_000).toFixed(2)}`;
 }
 
-export function formatElapsed(startedAt: string, now = Date.now()): string {
+export function formatElapsed(startedAt: string, now = serverNow()): string {
   const seconds = Math.max(0, Math.floor((now - new Date(startedAt).getTime()) / 1000));
   const minutes = Math.floor(seconds / 60);
   const rest = seconds % 60;
   return `${minutes}m ${String(rest).padStart(2, "0")}s`;
 }
 
-export function accruedMicroUsd(hourlyRateMicroUsd: number, startedAt: string, now = Date.now()): number {
+export function accruedMicroUsd(
+  hourlyRateMicroUsd: number,
+  startedAt: string,
+  now = serverNow()
+): number {
   const elapsedMs = Math.max(0, now - new Date(startedAt).getTime());
   return Math.round((hourlyRateMicroUsd * elapsedMs) / 3_600_000);
 }

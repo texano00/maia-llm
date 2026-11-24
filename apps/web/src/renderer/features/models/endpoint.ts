@@ -1,4 +1,5 @@
 import type { Session } from "@maia/contracts";
+import { serverNow } from "../../shared/clock";
 
 /**
  * How the address of a run is presented (feature 011, FR-011/FR-012).
@@ -45,7 +46,7 @@ export function copyPayload(endpoint: { host: string; port: number }): string {
  */
 export function bootLine(
   boot: Session["boot"],
-  now: number = Date.now()
+  now: number = serverNow()
 ): { text: string; stale: boolean } | null {
   if (!boot) {
     return null;

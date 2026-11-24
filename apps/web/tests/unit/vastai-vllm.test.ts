@@ -398,7 +398,10 @@ describe("vast.ai offer picking", () => {
         engine: "llamacpp" as const,
         image: "ghcr.io/ggml-org/llama.cpp:server-cuda",
         args: ["-hf", "org/model-GGUF:Q4_K_M", "--host", "0.0.0.0", "--port", "8000", "--alias", "org/model-GGUF", "-c", "16384", "-ngl", "999", "--jinja"],
-        env: {},
+        env: { LLAMA_CACHE: "/models" },
+        // What the real planner emits: the server plus a watcher that narrates
+        // the download, because the engine's own bar never reaches Docker.
+        launch: "/app/llama-server -hf org/model-GGUF:Q4_K_M &\npid=$!\necho downloading the model",
         gguf: true,
         quantization: "Q4_K_M",
         weightsGb: 16
@@ -425,15 +428,56 @@ describe("vast.ai offer picking", () => {
       onstart?: string;
     };
 
-    // llama.cpp needs no startup script: it is the image's own server.
+    // The plan owns the whole process, so its script is the container command and
+    // no `exec` is appended (that would start a second server on the same port).
     expect(input.image).toBe("ghcr.io/ggml-org/llama.cpp:server-cuda");
-    expect(input.runtype).toBe("args");
-    expect(input.onstart).toBeUndefined();
-    expect(input.args?.slice(0, 2)).toEqual(["-hf", "org/model-GGUF:Q4_K_M"]);
-    expect(input.args).toContain("--jinja");
+    expect(input.runtype).toBe("ssh_direct");
+    expect(input.args).toBeUndefined();
+    expect(input.onstart).toContain("/app/llama-server");
+    expect(input.onstart).not.toContain("exec python3");
+    expect(input.env.LLAMA_CACHE).toBe("/models");
     // llama.cpp's downloader reads HF_TOKEN; vLLM images read the long name.
     expect(input.env.HF_TOKEN).toBe("hf_secret");
     expect(input.env.HUGGING_FACE_HUB_TOKEN).toBe("hf_secret");
+  });
+
+  it("still hands a scriptless llama.cpp plan to the image entrypoint", async () => {
+    let captured: { runtype?: string; args?: string[] } | null = null;
+    const fake = {
+      async createInstance(input: { runtype?: string; args?: string[] }) {
+        captured = input;
+        return 9101;
+      }
+    } as unknown as VastAiClient;
+
+    const provider = createVastComputeProvider({
+      getApiKey: async () => "key",
+      getParameterCount: async () => 7e9,
+      clientFactory: () => fake,
+      getModelPlan: async () => ({
+        engine: "llamacpp" as const,
+        image: "ghcr.io/ggml-org/llama.cpp:server-cuda",
+        args: ["-hf", "org/model-GGUF:Q4_K_M"],
+        env: {},
+        gguf: true,
+        weightsGb: 4
+      })
+    });
+
+    await provider.createInstance(
+      {
+        offerId: 3,
+        gpuName: "RTX 4090",
+        gpuRamGb: 24,
+        hourlyRateMicroUsd: 200_000,
+        expectedWaitMinutes: 2,
+        simulated: false
+      },
+      { label: "maia:test", modelId: "org/model-GGUF" }
+    );
+
+    expect(captured!.runtype).toBe("args");
+    expect(captured!.args?.[0]).toBe("-hf");
   });
 
   it("sends the port mapping as a Docker flag, where vast.ai expects it", async () => {

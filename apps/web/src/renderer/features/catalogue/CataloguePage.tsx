@@ -15,6 +15,7 @@ import { requestNotificationPermission } from "../../shared/notify";
 import { hasVerdicts, hiddenCount, readinessFor } from "./readiness";
 import { PowerPicker } from "./PowerPicker";
 import { formatParameters, formatContext, formatBytes, formatUsd } from "../../shared/format";
+import { serverNow } from "../../shared/clock";
 export function CataloguePage() {
   const { health } = useProviderHealth();
   const {
@@ -767,7 +768,7 @@ function formatSnapshotAge(refreshedAt: string): string {
     return "age unknown";
   }
 
-  const minutes = Math.max(0, Math.round((Date.now() - then) / 60_000));
+  const minutes = Math.max(0, Math.round((serverNow() - then) / 60_000));
   if (minutes < 1) {
     return "just refreshed";
   }
@@ -795,7 +796,7 @@ function formatRelative(iso: string): string {
     return "unknown";
   }
 
-  const days = Math.floor((Date.now() - then) / 86_400_000);
+  const days = Math.floor((serverNow() - then) / 86_400_000);
   if (days <= 0) {
     return "today";
   }

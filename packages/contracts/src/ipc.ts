@@ -84,7 +84,13 @@ export const appInfoSchema = z.object({
    */
   providerMode: z.enum(["live", "mock"]),
   channel: releaseChannelSchema,
-  packaged: z.boolean()
+  packaged: z.boolean(),
+  /**
+   * The server's clock. A host whose clock drifts would otherwise make every
+   * elapsed-time, accrued-cost, and "is this reading current" comparison wrong
+   * by the drift, so the renderer measures the difference once and applies it.
+   */
+  now: z.string()
 });
 
 /**
