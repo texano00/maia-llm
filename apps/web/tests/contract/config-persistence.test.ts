@@ -30,6 +30,8 @@ const FULL_UPDATE: Partial<AppSettings> = {
   onboardingCompleted: true,
   onboardingDismissedAt: NOW,
   dismissedNotificationKeys: ["wallet-low"],
+  announcedNotificationKeys: ["run:ready:abc"],
+  sessionCapMicroUsd: 7_500_000,
   installationId: "2f1f0b4e-6d0a-4a83-9a12-3e3a1f8c9b11",
   appearance: "dark",
   catalogueMode: "advanced",

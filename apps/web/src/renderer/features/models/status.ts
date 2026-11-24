@@ -1,18 +1,22 @@
 import type { SessionState } from "@maia/contracts";
 
 /**
- * The Models view may only ever show these three statuses (FR-003). Internal
+ * The Models view may only ever show these statuses (FR-003). Internal
  * lifecycle states are richer, so the renderer projects them here instead of
  * exposing `session.state` directly.
+ *
+ * `stopping` exists because a release that could not be confirmed is neither
+ * running nor terminated: the machine may still be billing, so saying
+ * "terminated" would be the one lie this product cannot tell.
  */
-export type VisibleStatus = "initializing" | "running" | "terminated";
+export type VisibleStatus = "initializing" | "running" | "stopping" | "terminated";
 
 const VISIBLE_BY_STATE: Record<SessionState, VisibleStatus> = {
   estimated: "initializing",
   provisioning: "initializing",
   ready: "initializing",
   active: "running",
-  ending: "terminated",
+  ending: "stopping",
   ended: "terminated",
   cancelled: "terminated",
   failed: "terminated"
@@ -32,14 +36,16 @@ export function isChatEligible(state: SessionState): boolean {
 
 /**
  * A run that can still be stopped: anything holding a machine, including one that is
- * still initializing. A boot that never finishes is exactly when somebody wants the
- * Stop button.
+ * is still initializing and one whose release was not yet confirmed. A boot that
+ * never finishes, or a teardown the provider did not acknowledge, is exactly when
+ * somebody wants the Stop button.
  */
 export function isStoppable(state: SessionState): boolean {
   return (
     state === "estimated" ||
     state === "provisioning" ||
     state === "ready" ||
-    state === "active"
+    state === "active" ||
+    state === "ending"
   );
 }

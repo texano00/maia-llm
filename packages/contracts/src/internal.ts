@@ -38,5 +38,32 @@ export const internalErrorSchema = z.object({
   error: z.string()
 });
 
+/**
+ * Releases by day and reason, for the operator. Counts only: no account, no
+ * machine, no model, no address, no content (feature 011, FR-036).
+ */
+export const provisioningSummaryQuerySchema = z.object({
+  days: z.coerce.number().int().min(1).max(365).default(30)
+});
+
+export const provisioningSummarySchema = z.object({
+  windowDays: z.number().int().positive(),
+  generatedAt: z.string(),
+  total: z.number().int().nonnegative(),
+  days: z.array(
+    z.object({
+      day: z.string(),
+      total: z.number().int().nonnegative(),
+      reasons: z.array(
+        z.object({
+          reason: z.string().min(1),
+          count: z.number().int().nonnegative()
+        })
+      )
+    })
+  )
+});
+
 export type InternalAccountQuery = z.infer<typeof internalAccountQuerySchema>;
 export type InternalAccountList = z.infer<typeof internalAccountListSchema>;
+export type ProvisioningSummary = z.infer<typeof provisioningSummarySchema>;

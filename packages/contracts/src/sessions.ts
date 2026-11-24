@@ -1,5 +1,11 @@
 import { z } from "zod";
-import { inferenceRuntimeSchema, modelCapabilitySchema, powerTierSchema, sessionStateSchema } from "./domain";
+import {
+  inferenceRuntimeSchema,
+  modelCapabilitySchema,
+  powerTierSchema,
+  releaseReasonSchema,
+  sessionStateSchema
+} from "./domain";
 
 export const CURRENCY = "USD" as const;
 
@@ -36,6 +42,32 @@ export const sessionEventSchema = z.object({
   message: z.string()
 });
 
+/**
+ * What a booting run is doing, in plain words, plus when we last saw it move.
+ * A phase older than a minute is never presented as current.
+ */
+export const bootPhaseSchema = z.object({
+  text: z.string().min(1).max(200),
+  percent: z.number().int().min(0).max(100).nullable(),
+  observedAt: z.string(),
+  source: z.enum(["container", "provider", "app"])
+});
+
+/** Where the model server answers, once the host has published a port. */
+export const sessionBootEndpointSchema = z.object({
+  host: z.string().min(1),
+  port: z.number().int().positive(),
+  /** True only after an inference request has been answered (FR-001). */
+  serving: z.boolean()
+});
+
+/** Why a run was released, and how far it got. */
+export const sessionReleaseSchema = z.object({
+  reason: releaseReasonSchema,
+  phase: z.string().max(200).nullable(),
+  elapsedMs: z.number().int().nonnegative()
+});
+
 export const sessionSchema = z.object({
   id: z.string().min(1),
   modelId: z.string().min(1),
@@ -59,7 +91,13 @@ export const sessionSchema = z.object({
   capability: modelCapabilitySchema.default("text"),
   simulated: z.boolean(),
   /** Provisioning / lifecycle log shown in the app, oldest first. */
-  events: z.array(sessionEventSchema)
+  events: z.array(sessionEventSchema),
+  /** Current boot phase while starting; null once the run is active or ended. */
+  boot: bootPhaseSchema.nullable().default(null),
+  /** Mapped address, present from the moment the provider publishes a port. */
+  endpoint: sessionBootEndpointSchema.nullable().default(null),
+  /** Set on every terminal path (FR-007). Absent on runs from before 0.12.0. */
+  release: sessionReleaseSchema.nullable().default(null)
 });
 
 export const sessionStartSchema = z.object({
@@ -229,7 +267,9 @@ export const sessionEndpointSchema = z.object({
   /** Model identifier to send in requests. */
   modelId: z.string().min(1),
   /** Bearer key the server requires. */
-  apiKey: z.string().min(1)
+  apiKey: z.string().min(1),
+  /** Always true: the channel answers null for a run that is not serving. */
+  serving: z.literal(true)
 });
 
 export type SessionEndpoint = z.infer<typeof sessionEndpointSchema>;

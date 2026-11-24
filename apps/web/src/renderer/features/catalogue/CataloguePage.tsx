@@ -624,6 +624,24 @@ const ModelRow = memo(function ModelRow({
               <span className="pill pill-warning">unsupported</span>
             </span>
           ) : null}
+          {typeof model.supported !== "boolean" ? (
+            // No verdict: the row came from the public model index, not from the
+            // published catalogue. Saying so is the difference between "we checked"
+            // and "we guessed".
+            <span
+              className="tooltip-source"
+              aria-label="The catalogue has no verdict for this repository yet: it is listed from the public model index, and starting it is a test rather than a promise."
+              onMouseEnter={(event) =>
+                showTip(
+                  "The catalogue has no verdict for this repository yet: it is listed from the public model index, and starting it is a test rather than a promise.",
+                  event.currentTarget
+                )
+              }
+              onMouseLeave={() => setTip(null)}
+            >
+              <span className="pill pill-warning">unverified</span>
+            </span>
+          ) : null}
           {model.engine ? (
             <span className="pill">{describeEngine(model.engine)}</span>
           ) : null}

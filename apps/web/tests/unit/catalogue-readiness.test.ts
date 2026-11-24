@@ -39,6 +39,19 @@ describe("catalogue readiness", () => {
     expect(readinessFor({ supported: false, gated: "none" }, both).reason).toBeTruthy();
   });
 
+  it("keeps repositories that cannot chat out of the runnable set", () => {
+    // A Hub row carries no verdict, so the filter used to let an embedding or a
+    // diffusion pack through: it downloads, it boots, and it can never answer.
+    const embedding = { supported: undefined, gated: "none" as const, pipelineTag: "feature-extraction" };
+    const chat = { supported: undefined, gated: "none" as const, pipelineTag: "text-generation" };
+
+    expect(readyFor(embedding, both, { verdictsAvailable: false })).toBe(false);
+    expect(readinessFor(embedding, both, { verdictsAvailable: false }).reason).toMatch(/not a text-generation/i);
+    expect(readyFor(chat, both, { verdictsAvailable: false })).toBe(true);
+    // A row that does not say what it is keeps the old behaviour rather than vanishing.
+    expect(readyFor({ supported: undefined, gated: "none" }, both, { verdictsAvailable: false })).toBe(true);
+  });
+
   it("needs a vast.ai key, because nothing can be started without a GPU", () => {
     const withoutGpu = { huggingface: true, vastai: false };
 

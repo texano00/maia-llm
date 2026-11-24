@@ -1,4 +1,11 @@
-import type { ModelCapability, PowerTier, Session, SessionEvent, SessionState } from "@maia/contracts";
+import type {
+  ModelCapability,
+  PowerTier,
+  ReleaseReason,
+  Session,
+  SessionEvent,
+  SessionState
+} from "@maia/contracts";
 import { randomUUID } from "node:crypto";
 import type { DatabaseConnection } from "../../storage/db";
 
@@ -19,6 +26,15 @@ interface SessionRow {
   instance_id: number | null;
   power_tier: PowerTier;
   capability: ModelCapability;
+  boot_phase: string | null;
+  boot_percent: number | null;
+  boot_progress_at: string | null;
+  boot_ceiling_at: string | null;
+  endpoint_host: string | null;
+  endpoint_port: number | null;
+  release_reason: ReleaseReason | null;
+  release_phase: string | null;
+  release_elapsed_ms: number | null;
 }
 
 /** Persistence for the session lifecycle; the schema enforces one active row. */
@@ -74,6 +90,89 @@ export class SessionStore {
     this.database
       .prepare("UPDATE sessions SET instance_id = ?, offer_id = ? WHERE id = ?")
       .run(instanceId, offerId, sessionId);
+  }
+
+  /**
+   * What the boot is doing right now. Throttled by the caller: the column is for
+   * the person watching, not an audit trail.
+   */
+  recordBoot(
+    sessionId: string,
+    input: {
+      phase: string;
+      percent: number | null;
+      progressAt: string;
+      ceilingAt: string | null;
+    }
+  ): void {
+    this.database
+      .prepare(
+        `UPDATE sessions
+            SET boot_phase = @phase,
+                boot_percent = @percent,
+                boot_progress_at = @progressAt,
+                boot_ceiling_at = COALESCE(@ceilingAt, boot_ceiling_at)
+          WHERE id = @id AND account_id = @accountId`
+      )
+      .run({
+        id: sessionId,
+        accountId: this.accountId,
+        phase: input.phase,
+        percent: input.percent,
+        progressAt: input.progressAt,
+        ceilingAt: input.ceilingAt
+      });
+  }
+
+  /** The address the host published, kept until the run is released. */
+  recordEndpoint(sessionId: string, host: string, port: number): void {
+    this.database
+      .prepare(
+        "UPDATE sessions SET endpoint_host = ?, endpoint_port = ? WHERE id = ? AND account_id = ?"
+      )
+      .run(host, port, sessionId, this.accountId);
+  }
+
+  /** Clears the boot phase once the run serves (or stops). */
+  clearBoot(sessionId: string): void {
+    this.database
+      .prepare(
+        "UPDATE sessions SET boot_phase = NULL, boot_percent = NULL WHERE id = ? AND account_id = ?"
+      )
+      .run(sessionId, this.accountId);
+  }
+
+  /** Clears the address when the machine goes away, so no dead link survives. */
+  clearEndpoint(sessionId: string): void {
+    this.database
+      .prepare(
+        "UPDATE sessions SET endpoint_host = NULL, endpoint_port = NULL WHERE id = ? AND account_id = ?"
+      )
+      .run(sessionId, this.accountId);
+  }
+
+  /** Why a run ended, and how far the boot got. Required on every terminal path. */
+  recordRelease(
+    sessionId: string,
+    input: { reason: ReleaseReason; phase: string | null; elapsedMs: number }
+  ): void {
+    this.database
+      .prepare(
+        `UPDATE sessions
+            SET release_reason = @reason,
+                release_phase = @phase,
+                release_elapsed_ms = @elapsedMs,
+                boot_phase = NULL,
+                boot_percent = NULL
+          WHERE id = @id AND account_id = @accountId`
+      )
+      .run({
+        id: sessionId,
+        accountId: this.accountId,
+        reason: input.reason,
+        phase: input.phase,
+        elapsedMs: Math.max(0, Math.round(input.elapsedMs))
+      });
   }
 
   transition(
@@ -260,6 +359,27 @@ function toSession(row: SessionRow, events: SessionEvent[] = []): Session {
     powerTier: row.power_tier,
     capability: row.capability,
     simulated: row.label.startsWith("maia:mock:"),
-    events
+    events,
+    boot:
+      row.boot_phase === null
+        ? null
+        : {
+            text: row.boot_phase,
+            percent: row.boot_percent,
+            observedAt: row.boot_progress_at ?? row.started_at,
+            source: "container" as const
+          },
+    endpoint:
+      row.endpoint_host === null || row.endpoint_port === null
+        ? null
+        : { host: row.endpoint_host, port: row.endpoint_port, serving: false },
+    release:
+      row.release_reason === null
+        ? null
+        : {
+            reason: row.release_reason,
+            phase: row.release_phase,
+            elapsedMs: row.release_elapsed_ms ?? 0
+          }
   };
 }

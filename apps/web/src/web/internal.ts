@@ -4,11 +4,13 @@ import {
   accountDetailQuerySchema,
   capabilityChangeSchema,
   internalAccountQuerySchema,
+  provisioningSummaryQuerySchema,
   type InternalAccountList
 } from "@maia/contracts";
 import { AccountRepository, LastOperatorError } from "../main/services/accounts/repository";
 import { SettingsStore } from "../main/services/settings/store";
 import { createAccountDetail } from "../main/services/accounts/detail";
+import { provisioningSummary } from "../main/services/sessions/tally";
 import type { WebPlatform } from "./host";
 
 /** Header the portal presents; compared without leaking length through timing. */
@@ -88,6 +90,19 @@ export function createInternalRoutes(options: InternalRouteOptions): InternalRou
           offset: query.data.offset
         });
         send(response, 200, page);
+        return true;
+      }
+
+      if (url.pathname === "/internal/provisioning/summary" && request.method === "GET") {
+        const parsed = provisioningSummaryQuerySchema.safeParse({
+          days: url.searchParams.get("days") ?? undefined
+        });
+        if (!parsed.success) {
+          send(response, 400, { error: "invalid_request" });
+          return true;
+        }
+
+        send(response, 200, provisioningSummary(options.platform.database, parsed.data.days));
         return true;
       }
 

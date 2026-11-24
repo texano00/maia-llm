@@ -3088,13 +3088,147 @@ body {
   }
 }
 
+/* ---------------------------------------------------------------------------
+   Run address, boot phase and the top-right notices (specs/011)
+   --------------------------------------------------------------------------- */
+
+.run-endpoint {
+  margin-top: 0.75rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  background: var(--layer-1);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.run-endpoint-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.run-endpoint-label {
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.run-endpoint-link {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.run-endpoint-pending {
+  overflow-wrap: anywhere;
+  color: var(--text-muted);
+}
+
+.run-endpoint-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.toast-stack {
+  position: fixed;
+  top: 4.25rem;
+  right: 1rem;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: min(22.5rem, calc(100vw - 2rem));
+  pointer-events: none;
+}
+
+.toast {
+  pointer-events: auto;
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 0.7rem 0.8rem;
+  border-radius: 0.65rem;
+  border: 1px solid var(--border-strong);
+  background: var(--panel);
+  box-shadow: 0 12px 30px var(--shadow);
+  font-size: 0.92rem;
+}
+
+.toast-success {
+  border-color: var(--success-line);
+  background: var(--success-soft);
+}
+
+.toast-error {
+  border-color: var(--danger-line);
+  background: var(--danger-soft);
+}
+
+.toast-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.toast-message {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.toast-link {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+}
+
+.toast-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+@media (max-width: 640px) {
+  /* A phone gets a sheet under the header rather than a corner card: a thumb
+     cannot reach the top-right, and the notice must never cover the composer. */
+  .toast-stack {
+    top: auto;
+    right: 0.5rem;
+    left: 0.5rem;
+    bottom: calc(0.5rem + env(safe-area-inset-bottom));
+    width: auto;
+  }
+
+  .toast {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .toast-actions {
+    justify-content: flex-start;
+  }
+
+  .run-endpoint-actions .ghost-button {
+    flex: 1 1 auto;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .chat-history,
   .info-panel,
   .account-panel,
   .balance-panel,
   .notifications-popover,
-  .models-nav-indicator {
+  .models-nav-indicator,
+  .toast {
     transition: none;
     animation: none;
   }

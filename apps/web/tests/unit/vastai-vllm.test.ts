@@ -490,6 +490,36 @@ describe("vast.ai offer picking", () => {
     expect(body!.args).toBeUndefined();
   });
 
+  it("reads a single instance through the wrapper the API actually returns", async () => {
+    // `GET /api/v0/instances/{id}/` answers `{"instances": {…}}`. Treating the
+    // wrapper as the instance left every field undefined, so a machine that was
+    // already serving looked like it had never reported in — and was released
+    // while vast.ai kept billing for it.
+    const http = {
+      async request() {
+        return new Response(
+          JSON.stringify({
+            instances: {
+              id: 42,
+              actual_status: null,
+              cur_state: "running",
+              public_ipaddr: "203.0.113.9",
+              ports: { "8000/tcp": [{ HostIp: "203.0.113.9", HostPort: "41000" }] }
+            }
+          }),
+          { status: 200 }
+        );
+      }
+    };
+
+    const client = new VastAiClientImpl("key", { client: http as never });
+    const instance = await client.getInstance(42);
+
+    expect(instance.id).toBe(42);
+    expect(instance.cur_state).toBe("running");
+    expect(readMappedPort(instance)).toBe(41000);
+  });
+
   it("fetches instance logs through the signed result URL", async () => {
     const requests: Array<{ path: string; body: unknown }> = [];
     const http = {
@@ -622,6 +652,12 @@ describe("vast.ai offer picking", () => {
           public_ipaddr: "203.0.113.11",
           ports: { "8000/tcp": [{ HostIp: "0.0.0.0", HostPort: "40200" }] }
         };
+      },
+      // The tail moves while the weights download; that is the progress signal
+      // a provider status line cannot give (FR-003).
+      async getInstanceLogs() {
+        const percent = Math.min(99, Math.floor((clock / (26 * 60_000)) * 100));
+        return `llama_model_loader: downloading model… ${percent}%`;
       }
     } as unknown as VastAiClient;
 
@@ -631,11 +667,13 @@ describe("vast.ai offer picking", () => {
         throw new Error("ECONNREFUSED");
       }
 
-      return url.endsWith("/health")
-        ? new Response("ok", { status: 200 })
-        : new Response(JSON.stringify({ data: [{ id: "Qwen/Qwen2.5-7B-Instruct" }] }), {
-            status: 200
-          });
+      // One token is the proof of readiness, not a health page.
+      return url.endsWith("/v1/chat/completions")
+        ? new Response(
+            JSON.stringify({ choices: [{ message: { role: "assistant", content: "" } }] }),
+            { status: 200 }
+          )
+        : new Response("ok", { status: 200 });
     });
 
     const provider = createVastComputeProvider({
@@ -659,7 +697,7 @@ describe("vast.ai offer picking", () => {
     expect(clock).toBeLessThanOrEqual(40 * 60_000);
   });
 
-  it("still gives up at the hard cap when the model never serves", async () => {
+  it("reports the ceiling instead of releasing a model that never serves", async () => {
     let clock = 0;
     const fake = {
       async getInstance() {
@@ -680,15 +718,30 @@ describe("vast.ai offer picking", () => {
         throw new Error("ECONNREFUSED");
       }) as unknown as typeof fetch,
       readyTimeoutMs: 40 * 60_000,
+      reminderIntervalMs: 30 * 60_000,
+      // Keep the quiet window out of the way: this test is about the ceiling.
+      quietWindowMs: 3 * 60 * 60_000,
       pollIntervalMs: 5_000,
       now: () => clock,
+      // The test stops the loop itself: the product never releases on a clock,
+      // so there is no rejection to assert on (FR-037).
       pause: async (ms: number) => {
         clock += ms;
+        if (clock > 100 * 60_000) {
+          throw new Error("test-stop");
+        }
       }
     });
 
-    await expect(provider.waitUntilReady(10, 40 * 60_000)).rejects.toThrow(/did not become ready/);
-    expect(clock).toBeGreaterThanOrEqual(40 * 60_000);
+    const statuses: string[] = [];
+    await expect(
+      provider.waitUntilReady(10, 40 * 60_000, (update) => statuses.push(update.status))
+    ).rejects.toThrow(/test-stop/);
+
+    // Reported at the ceiling and again on the reminder cadence, and the loop
+    // kept running in between — nothing was released.
+    expect(statuses.filter((status) => status === "ceiling").length).toBeGreaterThanOrEqual(2);
+    expect(clock).toBeGreaterThan(40 * 60_000);
   });
 
   it("reports progress while a quiet boot loads its weights", async () => {
@@ -710,12 +763,17 @@ describe("vast.ai offer picking", () => {
       getApiKey: async () => "key",
       getParameterCount: async () => 27e9,
       clientFactory: () => fake,
-      fetchImpl: (async () => {
+      fetchImpl: (async (url: string) => {
         if (clock < 6 * 60_000) {
           throw new Error("ECONNREFUSED");
         }
 
-        return new Response(JSON.stringify({ data: [{ id: "m" }] }), { status: 200 });
+        return String(url).endsWith("/v1/chat/completions")
+          ? new Response(
+              JSON.stringify({ choices: [{ message: { role: "assistant", content: "" } }] }),
+              { status: 200 }
+            )
+          : new Response("ok", { status: 200 });
       }) as unknown as typeof fetch,
       readyTimeoutMs: 40 * 60_000,
       pollIntervalMs: 5_000,
@@ -807,13 +865,12 @@ describe("vast.ai offer picking", () => {
     } as unknown as VastAiClient;
 
     const fetchImpl = vi.fn(async (url: string) => {
-      if (url.endsWith("/health")) {
-        return new Response("ok", { status: 200 });
-      }
-
-      return new Response(JSON.stringify({ data: [{ id: "Qwen/Qwen2.5-0.5B-Instruct" }] }), {
-        status: 200
-      });
+      // Readiness is one produced token; the health page is not asked any more.
+      void url;
+      return new Response(
+        JSON.stringify({ choices: [{ message: { role: "assistant", content: "" } }] }),
+        { status: 200 }
+      );
     });
 
     const provider = createVastComputeProvider({
@@ -830,7 +887,7 @@ describe("vast.ai offer picking", () => {
     expect(statuses).toContain("serving");
     expect(provider.resolveEndpoint(8)).toEqual({ host: "203.0.113.10", port: 40123 });
     expect(fetchImpl).toHaveBeenCalledWith(
-      "http://203.0.113.10:40123/v1/models",
+      "http://203.0.113.10:40123/v1/chat/completions",
       expect.anything()
     );
   });

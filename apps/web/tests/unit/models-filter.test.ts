@@ -59,8 +59,16 @@ describe("status filter", () => {
     ]);
   });
 
-  it("treats every teardown state as terminated", () => {
-    for (const state of ["ending", "ended", "cancelled", "failed"] as SessionState[]) {
+  it("keeps a run whose release is unconfirmed out of the terminated view", () => {
+    // The machine may still be billing, so this run is not history yet.
+    expect(filterRuns([run("run", "ending", "2026-11-11T10:00:00.000Z")], "terminated")).toHaveLength(
+      0
+    );
+    expect(filterRuns([run("run", "ending", "2026-11-11T10:00:00.000Z")], "stopping")).toHaveLength(
+      1
+    );
+
+    for (const state of ["ended", "cancelled", "failed"] as SessionState[]) {
       expect(filterRuns([run("run", state, "2026-11-11T10:00:00.000Z")], "terminated")).toHaveLength(1);
     }
   });
@@ -96,12 +104,13 @@ describe("mergeRuns", () => {
 describe("stopping a run", () => {
   it("lets a machine be stopped from every state that holds one", () => {
     // Including a boot that never finishes: that is the case the Stop button exists
-    // for, and the one the report could not act on.
+    // for, and the one the report could not act on. `ending` is included because a
+    // release the provider has not confirmed is still a machine that may be billed.
     expect(isStoppable("estimated")).toBe(true);
     expect(isStoppable("provisioning")).toBe(true);
     expect(isStoppable("ready")).toBe(true);
     expect(isStoppable("active")).toBe(true);
-    expect(isStoppable("ending")).toBe(false);
+    expect(isStoppable("ending")).toBe(true);
     expect(isStoppable("ended")).toBe(false);
     expect(isStoppable("failed")).toBe(false);
     expect(isStoppable("cancelled")).toBe(false);

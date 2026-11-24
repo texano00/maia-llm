@@ -15,14 +15,16 @@ import {
   signOut,
   versionInfo,
   updateUseCase,
-  uploadImage
+  uploadImage,
+  provisioningSummary
 } from "./api.js";
 
 const TABS = [
   { id: "operations", label: "Operations" },
   { id: "accounts", label: "Accounts" },
   { id: "use-cases", label: "Use cases" },
-  { id: "audit", label: "Audit" }
+  { id: "audit", label: "Audit" },
+  { id: "provisioning", label: "Provisioning" }
 ];
 
 export default function App() {
@@ -139,6 +141,7 @@ export default function App() {
       {!detailRoute && tab === "accounts" ? <Accounts /> : null}
       {!detailRoute && tab === "use-cases" ? <UseCases /> : null}
       {!detailRoute && tab === "audit" ? <Audit /> : null}
+      {!detailRoute && tab === "provisioning" ? <Provisioning /> : null}
     </div>
   );
 }
@@ -1093,6 +1096,86 @@ function Audit() {
           ))}
         </tbody>
       </table>
+    </section>
+  );
+}
+
+/**
+ * Releases by day and reason (feature 011).
+ *
+ * Counts only: the product's projection contains no account, machine, model or
+ * address, so this view cannot leak one. Every cell carries `data-label` so the
+ * phone tier stacks it like every other table here.
+ */
+function Provisioning() {
+  const [days, setDays] = useState(30);
+  const [data, setData] = useState(null);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setError(null);
+    provisioningSummary(days)
+      .then((result) => {
+        if (!cancelled) {
+          setData(result?.summary ?? null);
+        }
+      })
+      .catch((failure) => {
+        if (!cancelled) {
+          setError(failure.message);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [days]);
+
+  return (
+    <section className="panel">
+      <h2>Provisioning</h2>
+      <p className="muted">
+        How many runs were released, and why. Counts only — no account, machine or model is named.
+      </p>
+
+      <label className="inline-field">
+        <span>Window</span>
+        <select value={days} onChange={(event) => setDays(Number(event.target.value))}>
+          <option value={7}>7 days</option>
+          <option value={30}>30 days</option>
+          <option value={90}>90 days</option>
+        </select>
+      </label>
+
+      {error ? <div className="alert">{error}</div> : null}
+
+      {data && data.total === 0 ? <p className="muted">No releases in this window.</p> : null}
+
+      {data && data.total > 0 ? (
+        <table>
+          <thead>
+            <tr>
+              <th>Day</th>
+              <th>Releases</th>
+              <th>Reasons</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.days.map((day) => (
+              <tr key={day.day}>
+                <td data-label="Day">{day.day}</td>
+                <td data-label="Releases">{day.total}</td>
+                <td data-label="Reasons">
+                  {day.reasons
+                    .map((entry) => `${entry.reason.replace(/_/g, " ")} ×${entry.count}`)
+                    .join(" · ")}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : null}
     </section>
   );
 }

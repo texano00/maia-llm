@@ -26,6 +26,8 @@ export const defaultAppSettings: AppSettings = {
   onboardingCompleted: false,
   onboardingDismissedAt: null,
   dismissedNotificationKeys: [],
+  announcedNotificationKeys: [],
+  sessionCapMicroUsd: 10_000_000,
   installationId: null,
   appearance: "light",
   catalogueMode: "basic",
@@ -52,6 +54,7 @@ const SCOPE_FIELDS: Record<
     "onboardingCompleted",
     "onboardingDismissedAt",
     "dismissedNotificationKeys",
+    "announcedNotificationKeys",
     "acknowledgedFailureIds"
   ]
 };

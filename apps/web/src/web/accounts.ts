@@ -69,6 +69,12 @@ export interface AccountRuntimeOptions {
   credentialKey: Buffer;
   access: AccessService;
   readinessTimeoutMinutes?: number;
+  /** The per-attempt report point; 60 by default (feature 011). */
+  bootCeilingMinutes?: number;
+  /** No progress for this long ends an attempt; 15 by default. */
+  bootQuietMinutes?: number;
+  /** Reminder cadence past the ceiling; 10 by default. */
+  bootReminderMinutes?: number;
   idleTimeoutMinutes?: number;
   logger: WebLogger;
   onEvent: (accountId: string, channel: string, payload: unknown) => void;
@@ -81,6 +87,8 @@ export interface AccountRuntime {
   images: ConversationImageStore;
   /** Stops timers only; running sessions survive a cache eviction. */
   suspend(): void;
+  /** True while this account owns a billing machine (feature 011, R5). */
+  hasLiveSessions(): boolean;
   /** Releases remote GPUs; used when the account is deleted or the process exits. */
   endSessions(reason: "app_exit" | "user"): Promise<void>;
 }
@@ -134,7 +142,13 @@ export async function createAccountRuntime(
               options.catalogueRepository.getArtifacts(modelId)
             )
         }),
-        readyTimeoutMs: (options.readinessTimeoutMinutes ?? 20) * 60_000,
+        readyTimeoutMs: (options.bootCeilingMinutes ?? options.readinessTimeoutMinutes ?? 60) * 60_000,
+        ...(options.bootQuietMinutes !== undefined
+          ? { quietWindowMs: options.bootQuietMinutes * 60_000 }
+          : {}),
+        ...(options.bootReminderMinutes !== undefined
+          ? { reminderIntervalMs: options.bootReminderMinutes * 60_000 }
+          : {}),
         logger
       }),
       inference: createVllmRuntime({
@@ -219,7 +233,16 @@ export async function createAccountRuntime(
     compute,
     inference,
     idleTimeoutMinutes: options.idleTimeoutMinutes ?? 10,
-    readinessTimeoutMs: (options.readinessTimeoutMinutes ?? 20) * 60_000,
+    readinessTimeoutMs: (options.bootCeilingMinutes ?? options.readinessTimeoutMinutes ?? 60) * 60_000,
+    bootCeilingMs: (options.bootCeilingMinutes ?? options.readinessTimeoutMinutes ?? 60) * 60_000,
+    ...(options.bootQuietMinutes !== undefined
+      ? { bootQuietWindowMs: options.bootQuietMinutes * 60_000 }
+      : {}),
+    ...(options.bootReminderMinutes !== undefined
+      ? { bootReminderMs: options.bootReminderMinutes * 60_000 }
+      : {}),
+    capMicroUsd: () => settings.get().sessionCapMicroUsd,
+    notifications,
     filters: () => settings.get().gpuFilters,
     startupRetries: () => settings.get().gpuStartupRetries,
     assertRunnable: async (modelId) => {
@@ -438,7 +461,11 @@ export async function createAccountRuntime(
     return result;
   });
 
-  const idleTimer = setInterval(() => void sessions.reapIdle(), 30_000);
+  const idleTimer = setInterval(() => {
+    void sessions.reapIdle();
+    // The cap is the bound that does not need anyone watching (FR-039).
+    void sessions.enforceCap();
+  }, 30_000);
   idleTimer.unref?.();
 
   return {
@@ -448,6 +475,11 @@ export async function createAccountRuntime(
     images: conversationImages,
     suspend() {
       clearInterval(idleTimer);
+    },
+    hasLiveSessions() {
+      return sessions
+        .listSessions()
+        .some((session) => ["estimated", "provisioning", "ready", "active"].includes(session.state));
     },
     async endSessions(reason) {
       clearInterval(idleTimer);

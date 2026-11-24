@@ -10,6 +10,8 @@ import { useUiPreferences } from "../shared/preferences/useUiPreferences";
 import { useProviderHealth } from "../shared/health/useProviderHealth";
 import { BalanceBadge } from "../features/notifications/BalanceBadge";
 import { NotificationBell } from "../features/notifications/NotificationBell";
+import { NotificationProvider } from "../features/notifications/NotificationProvider";
+import { ToastStack } from "../features/notifications/ToastStack";
 import { modelsIndicator } from "../features/models/indicator";
 
 const navigation = [
@@ -34,7 +36,8 @@ export function Layout({ children }: { children: ReactNode }) {
   const indicator = modelsIndicator(sessions, acknowledgedFailureIds);
 
   return (
-    <div className="app-shell">
+    <NotificationProvider>
+      <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">
           <img className="brand-logo" src={logoMark} alt="" aria-hidden="true" />
@@ -79,8 +82,10 @@ export function Layout({ children }: { children: ReactNode }) {
             <AccountMenu />
           </div>
         </header>
+        <ToastStack />
         <main className="page">{children}</main>
       </div>
-    </div>
+      </div>
+    </NotificationProvider>
   );
 }

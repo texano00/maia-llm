@@ -26,6 +26,9 @@ export interface WebPlatformOptions {
   databasePath: string;
   providerMode: "live" | "mock";
   readinessTimeoutMinutes?: number;
+  bootCeilingMinutes?: number;
+  bootQuietMinutes?: number;
+  bootReminderMinutes?: number;
   idleTimeoutMinutes?: number;
   /** Shared event sink; the account id is part of every record. */
   onEvent?: ((accountId: string, channel: string, payload: unknown) => void) | undefined;
@@ -103,6 +106,14 @@ export class AccountRuntimes {
         continue;
       }
 
+      // A runtime that owns a rented machine is never evicted: its endpoint map
+      // and run key are what make the address work, and rebuilding the graph
+      // would leave a serving model unreachable (feature 011, R5).
+      if (entry.runtime.hasLiveSessions()) {
+        entry.lastUsedAt = now;
+        continue;
+      }
+
       entry.runtime.suspend();
       this.entries.delete(accountId);
       evicted += 1;
@@ -130,10 +141,24 @@ export async function createWebPlatform(options: WebPlatformOptions): Promise<We
   const version = resolveVersion(env);
   /** `MAIA_PORTAL_URL`: the deployed portal, when there is one. */
   const portalUrl = env.MAIA_PORTAL_URL?.trim() || null;
+  // The context is the diagnosis. A teardown warning without its session id and
+  // error text is a line an operator cannot act on, so it is serialised here
+  // rather than dropped.
+  const line = (message: string, context?: Record<string, unknown>): string => {
+    if (context === undefined || Object.keys(context).length === 0) {
+      return `[web] ${message}`;
+    }
+    try {
+      return `[web] ${message} ${JSON.stringify(context)}`;
+    } catch {
+      return `[web] ${message} (context could not be serialised)`;
+    }
+  };
+
   const logger: WebLogger = options.logger ?? {
-    info: (message: string) => console.log(`[web] ${message}`),
-    warn: (message: string) => console.warn(`[web] ${message}`),
-    error: (message: string) => console.error(`[web] ${message}`)
+    info: (message: string, context?: Record<string, unknown>) => console.log(line(message, context)),
+    warn: (message: string, context?: Record<string, unknown>) => console.warn(line(message, context)),
+    error: (message: string, context?: Record<string, unknown>) => console.error(line(message, context))
   };
 
   const database = createConnection(options.databasePath, loadMigrations());
@@ -203,6 +228,15 @@ export async function createWebPlatform(options: WebPlatformOptions): Promise<We
       access,
       ...(options.readinessTimeoutMinutes !== undefined
         ? { readinessTimeoutMinutes: options.readinessTimeoutMinutes }
+        : {}),
+      ...(options.bootCeilingMinutes !== undefined
+        ? { bootCeilingMinutes: options.bootCeilingMinutes }
+        : {}),
+      ...(options.bootQuietMinutes !== undefined
+        ? { bootQuietMinutes: options.bootQuietMinutes }
+        : {}),
+      ...(options.bootReminderMinutes !== undefined
+        ? { bootReminderMinutes: options.bootReminderMinutes }
         : {}),
       ...(options.idleTimeoutMinutes !== undefined
         ? { idleTimeoutMinutes: options.idleTimeoutMinutes }

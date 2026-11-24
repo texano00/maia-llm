@@ -30,6 +30,10 @@ export const signIn = (email, password) =>
 
 export const signOut = () => api("/v1/admin/session", { method: "DELETE" });
 
+/** Releases by day and reason (feature 011). Read-only counts. */
+export const provisioningSummary = (days = 30) =>
+  api(`/admin-api/provisioning?days=${encodeURIComponent(String(days))}`);
+
 export const currentSession = () =>
   api("/v1/admin/session").catch((error) => (error.status === 401 ? null : Promise.reject(error)));
 

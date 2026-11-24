@@ -9,6 +9,7 @@ export const DEFAULT_STATUS_FILTER: StatusFilter = "all";
 export const STATUS_FILTERS: ReadonlyArray<{ value: StatusFilter; label: string }> = [
   { value: "initializing", label: "Initializing" },
   { value: "running", label: "Running" },
+  { value: "stopping", label: "Stopping" },
   { value: "terminated", label: "Terminated" },
   { value: "all", label: "All" }
 ];
@@ -39,6 +40,12 @@ export function emptyStateFor(filter: StatusFilter): EmptyState {
       return {
         title: "No models are initializing",
         detail: "Runs appear here while their GPU is booting; switch to Running or Terminated to see more."
+      };
+    case "stopping":
+      return {
+        title: "Nothing is stopping right now",
+        detail:
+          "A run stays here until the provider confirms the machine is gone, so nothing is ever reported as ended while it may still be billed."
       };
     case "terminated":
       return {

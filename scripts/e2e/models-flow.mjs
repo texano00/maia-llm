@@ -25,7 +25,7 @@
  */
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { createWriteStream, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -37,6 +37,8 @@ const READY_TIMEOUT_MS = Number(process.env.MAIA_E2E_READY_TIMEOUT_MS ?? 25 * 60
 const WANT_BROWSER = process.argv.includes("--browser");
 
 let failures = 0;
+/** Set by a signal so the walk stops early and still releases what it booked. */
+let interrupted = null;
 const log = (message) => console.log(`[e2e] ${message}`);
 const fail = (message) => {
   failures += 1;
@@ -49,15 +51,30 @@ const MODELS =
     ? process.argv[modelArgIndex + 1].split(",").map((id) => id.trim())
     : ["Qwen/Qwen2.5-7B-Instruct", "mistralai/Mistral-7B-Instruct-v0.3"];
 
-function runProcess(command, argv, env, cwd) {
+/**
+ * One child service.
+ *
+ * Output is kept in memory (for sign-in codes and diagnostics) *and* written to
+ * `run.log`, because a live rental can take twenty minutes to boot and a crash
+ * halfway through is otherwise invisible.
+ */
+function runProcess(command, argv, env, cwd, logFile) {
   const child = spawn(command, argv, {
     env: { ...process.env, ...env },
     cwd,
-    stdio: ["ignore", "pipe", "pipe"]
+    stdio: ["ignore", "pipe", "pipe"],
+    // Own process group: `npx tsx` spawns grandchildren whose pipes would
+    // otherwise keep this script alive after the work is done.
+    detached: true
   });
   const output = [];
-  child.stdout.on("data", (data) => output.push(String(data)));
-  child.stderr.on("data", (data) => output.push(String(data)));
+  const record = (stream) => (data) => {
+    const text = String(data);
+    output.push(text);
+    logFile?.write(`[${command} ${stream}] ${text}`);
+  };
+  child.stdout.on("data", record("out"));
+  child.stderr.on("data", record("err"));
   return { child, output, text: () => output.join("") };
 }
 
@@ -142,15 +159,33 @@ async function liveInstances(apiKey) {
   return list.filter((instance) => String(instance.label ?? "").startsWith("maia:"));
 }
 
+async function destroyLiveInstance(apiKey, instanceId) {
+  const response = await fetch(`https://console.vast.ai/api/v0/instances/${instanceId}/`, {
+    method: "DELETE",
+    headers: { authorization: `Bearer ${apiKey}` }
+  });
+  return response.ok;
+}
+
 async function waitForReady(rpc, sessionId) {
   const deadline = Date.now() + READY_TIMEOUT_MS;
+  const started = Date.now();
   let lastState = "";
+  let lastNote = "";
   while (Date.now() < deadline) {
+    if (interrupted) {
+      return { ok: false, state: `interrupted (${lastState})` };
+    }
     const sessions = await rpc("session.list");
     const run = sessions.find((session) => session.id === sessionId);
     lastState = run?.state ?? "gone";
     if (lastState === "active" || lastState === "ready") {
       return { ok: true, state: lastState };
+    }
+    const note = [lastState, run?.statusDetail ?? run?.detail ?? ""].filter(Boolean).join(" — ");
+    if (note !== lastNote) {
+      lastNote = note;
+      log(`  … ${Math.round((Date.now() - started) / 1000)}s ${note}`);
     }
     if (["ended", "failed", "cancelled"].includes(lastState)) {
       return { ok: false, state: lastState };
@@ -162,6 +197,9 @@ async function waitForReady(rpc, sessionId) {
 
 async function main() {
   const directory = mkdtempSync(join(tmpdir(), "maia-e2e-"));
+  const logsDir = join(process.cwd(), "var", "e2e");
+  mkdirSync(logsDir, { recursive: true });
+  const logFile = createWriteStream(join(logsDir, `models-flow-${new Date().toISOString().replace(/[:.]/g, "-")}.log`));
   // A fresh 32-byte AES key per run: the vault rejects anything else.
   const credentialKey = randomBytes(32).toString("base64");
   const portalEnv = {
@@ -187,19 +225,23 @@ async function main() {
     ...(process.env.HF_TOKEN ? { HF_TOKEN: process.env.HF_TOKEN } : {})
   };
 
-  const portal = runProcess("npx", ["tsx", "src/server.ts"], portalEnv, "apps/portal");
+  const portal = runProcess("npx", ["tsx", "src/server.ts"], portalEnv, "apps/portal", logFile);
   // The product serves out/renderer relative to its own working directory.
-  const product = runProcess("node", ["out/server.js"], webEnv, "apps/web");
+  const product = runProcess("node", ["out/server.js"], webEnv, "apps/web", logFile);
   const baseUrl = `http://127.0.0.1:${WEB_PORT}`;
 
   let browser;
+  let rpc = null;
+  const openRuns = new Set();
+  /** Every session this run created; cleanup only touches machines from these. */
+  const ownSessions = new Set();
   try {
     log(`portal :${PORTAL_PORT}, product :${WEB_PORT} (${LIVE ? "live" : "mock"})`);
     if (!(await waitForHttp(`${baseUrl}/health`))) {
       throw new Error(`the product did not start:\n${product.text().slice(-2000)}`);
     }
 
-    const rpc = rpcFactory(baseUrl);
+    rpc = rpcFactory(baseUrl);
 
     // ── Sign in, the way a person does ───────────────────────────────────────
     await rpc("auth.requestCode", { email: EMAIL });
@@ -220,6 +262,9 @@ async function main() {
     }
 
     for (const modelId of MODELS) {
+      if (interrupted) {
+        break;
+      }
       log(`── ${modelId}`);
 
       // Catalogue: the model must be listed, and runnable, before anything is booked.
@@ -237,6 +282,8 @@ async function main() {
       // Price, then book.
       const estimate = await rpc("estimate.create", { modelId, expectedMinutes: 30 });
       const session = await rpc("session.start", { estimateId: estimate.id, confirmEstimate: true });
+      openRuns.add(session.id);
+      ownSessions.add(session.id);
       log(`  booked (${session.state})`);
 
       const ready = await waitForReady(rpc, session.id);
@@ -264,6 +311,7 @@ async function main() {
 
       // Always release, whatever happened above.
       const ended = await rpc("session.end", { sessionId: session.id, reason: "user" });
+      openRuns.delete(session.id);
       if (ended?.state !== "ended") {
         fail(`${modelId}: the run did not end (${ended?.state})`);
       } else {
@@ -271,7 +319,9 @@ async function main() {
       }
 
       if (LIVE && process.env.VAST_API_KEY) {
-        const left = await liveInstances(process.env.VAST_API_KEY);
+        const left = await liveInstances(process.env.VAST_API_KEY).then((instances) =>
+          instances.filter((instance) => ownSessions.has(String(instance.label ?? "").split(":").pop() ?? ""))
+        );
         if (left.length > 0) {
           fail(`after ${modelId}: ${left.length} instance(s) still running on vast.ai`);
         }
@@ -282,6 +332,15 @@ async function main() {
       log("--browser requested: React-level walk is documented in scripts/e2e/README.md");
     }
   } finally {
+    // An interrupted run is still a billed run: release whatever is still open
+    // before the services go away.
+    for (const sessionId of openRuns) {
+      const stopped = await rpc?.("session.end", { sessionId, reason: "user" }).catch(() => null);
+      if (stopped) {
+        log(`  released ${sessionId} (${stopped.state})`);
+      }
+    }
+
     await browser?.close();
     portal.child.kill();
     product.child.kill();
@@ -294,16 +353,50 @@ async function main() {
         fail(
           `instances still running: ${remaining.map((instance) => `${instance.id} (${instance.label})`).join(", ")}`
         );
+        // Report *and* clean, but only what this run booked: another deployment on
+        // the same vast.ai account is not ours to destroy.
+        for (const instance of remaining) {
+          const owner = String(instance.label ?? "").split(":").pop() ?? "";
+          if (!ownSessions.has(owner)) {
+            log(`  ${instance.id} belongs to another run (${instance.label}); left alone`);
+            continue;
+          }
+          const destroyed = await destroyLiveInstance(process.env.VAST_API_KEY, instance.id).catch(
+            () => false
+          );
+          log(`  destroyed ${instance.id}: ${destroyed ? "ok" : "FAILED — destroy it by hand"}`);
+        }
       } else {
         log("no instance left running on vast.ai");
       }
     }
 
+    logFile.end();
+    for (const service of [portal, product]) {
+      try {
+        process.kill(-service.child.pid, "SIGKILL");
+      } catch {
+        service.child.kill("SIGKILL");
+      }
+    }
     rmSync(directory, { recursive: true, force: true });
   }
 
   log(failures === 0 ? "PASS" : `FAILED (${failures})`);
-  process.exitCode = failures === 0 ? 0 : 1;
+  // The services are gone; do not linger on stray handles.
+  process.exit(failures === 0 ? 0 : 1);
+}
+
+// A signal must not skip the cleanup: record it and let the walk unwind, so the
+// machines this run booked are released instead of being orphaned.
+for (const signal of ["SIGINT", "SIGTERM"]) {
+  process.on(signal, () => {
+    if (interrupted) {
+      return;
+    }
+    interrupted = signal;
+    fail(`interrupted by ${signal}; releasing what was booked`);
+  });
 }
 
 main().catch((error) => {
