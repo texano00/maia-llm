@@ -11,6 +11,7 @@ import usageSql from "./0010_usage.sql?raw";
 import accountsSql from "./0011_accounts.sql?raw";
 import accountScopeSql from "./0012_account_scope.sql?raw";
 import accountCapabilitiesSql from "./0013_account_capabilities.sql?raw";
+import bootReadinessSql from "./0014_boot_readiness.sql?raw";
 
 export interface Migration {
   version: number;
@@ -31,5 +32,6 @@ export const migrations: Migration[] = [
   { version: 10, name: "usage_metrics", sql: usageSql },
   { version: 11, name: "accounts", sql: accountsSql },
   { version: 12, name: "account_scope", sql: accountScopeSql },
-  { version: 13, name: "account_capabilities", sql: accountCapabilitiesSql }
+  { version: 13, name: "account_capabilities", sql: accountCapabilitiesSql },
+  { version: 14, name: "boot_readiness", sql: bootReadinessSql }
 ];

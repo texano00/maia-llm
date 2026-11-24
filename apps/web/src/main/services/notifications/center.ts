@@ -3,9 +3,18 @@ import type { SettingsStore } from "../settings/store";
 
 export interface NotificationInput {
   key: string;
-  severity: "warning" | "error";
+  severity: "success" | "warning" | "error";
   message: string;
   action?: { label: string; route: string };
+  /** The serving address, when this entry announces a ready run. */
+  endpoint?: {
+    baseUrl: string;
+    host: string;
+    port: number;
+    modelId: string;
+  };
+  /** Where the entry belongs in the product. */
+  route?: string;
   /**
    * Setup requirements default to `false`: hiding "add your key" would leave the
    * account unable to act on it. Transient conditions, such as a low balance, are
@@ -46,6 +55,29 @@ export class NotificationCenter {
     if (dismissed.includes(key)) {
       this.settings.update({ dismissedNotificationKeys: dismissed.filter((entry) => entry !== key) });
     }
+
+    // Forget that it was shown, so the next run of the same model is announced
+    // instead of being swallowed by an old claim.
+    const announced = this.settings.get().announcedNotificationKeys;
+    if (announced.includes(key)) {
+      this.settings.update({ announcedNotificationKeys: announced.filter((entry) => entry !== key) });
+    }
+  }
+
+  /**
+   * Claims an entry for the toast surface.
+   *
+   * Answers `true` exactly once per account, so the same readiness is not
+   * announced again in a second tab, after a reload, or on another device.
+   */
+  claim(key: string): boolean {
+    const announced = this.settings.get().announcedNotificationKeys;
+    if (announced.includes(key) || !this.entries.has(key)) {
+      return false;
+    }
+
+    this.settings.update({ announcedNotificationKeys: [...announced, key].slice(-200) });
+    return true;
   }
 
   dismiss(key: string): NotificationSnapshot {
@@ -82,7 +114,7 @@ export class NotificationCenter {
 
     const indicator = notifications.some((entry) => entry.severity === "error")
       ? "error"
-      : notifications.length > 0
+      : notifications.some((entry) => entry.severity === "warning")
         ? "warning"
         : "none";
 

@@ -5,6 +5,8 @@ import { DEFAULT_STATUS_FILTER, filterRuns, emptyStateFor, STATUS_FILTERS, type 
 import { describeRun } from "./run-details";
 import { isChatEligible, isStoppable, type VisibleStatus } from "./status";
 import { ExternalAccessPanel } from "./ExternalAccessPanel";
+import { RunEndpoint } from "./RunEndpoint";
+import { bootLine, releaseSentence } from "./endpoint";
 import { RunLogs } from "./RunLogs";
 import { mergeAcknowledged, failedRunIds } from "./indicator";
 import { useUiPreferences } from "../../shared/preferences/useUiPreferences";
@@ -17,6 +19,7 @@ import { openOnboarding } from "../onboarding/open";
 const STATUS_LABELS: Record<VisibleStatus, string> = {
   initializing: "Initializing",
   running: "Running",
+  stopping: "Stopping",
   terminated: "Terminated"
 };
 
@@ -146,7 +149,6 @@ export function ModelsPage() {
         <ul className="model-run-list">
           {visibleRuns.map((run) => {
             const details = describeRun(run, { now });
-            const latestEvent = run.events.length > 0 ? run.events[run.events.length - 1] : null;
             const latestError = [...run.events].reverse().find((event) => event.level === "error") ?? null;
 
             return (
@@ -225,16 +227,20 @@ export function ModelsPage() {
                   <p className="small">Last error: {latestError.message}</p>
                 ) : null}
 
+                {details.visibleStatus === "terminated" && run.release ? (
+                  <p className="small">{releaseSentence(run.release)}</p>
+                ) : null}
+
                 {details.visibleStatus === "initializing" ? (
                   <div className="model-run-progress">
                     <p className="small">
-                      Startup progress:{" "}
-                      {latestEvent
-                        ? `${latestEvent.message} (${new Date(latestEvent.at).toLocaleTimeString()})`
-                        : "waiting for the first lifecycle event"}
+                      {(() => {
+                        const line = bootLine(run.boot, now);
+                        return line ? line.text : "Waiting for the machine to report progress";
+                      })()}
                     </p>
                     <p className="muted small">
-                      Runtime and cost details are pending until the model reports ready.
+                      The GPU is rented and billed while this runs. Stop releases it immediately.
                     </p>
                   </div>
                 ) : null}
@@ -242,6 +248,8 @@ export function ModelsPage() {
                 {details.accruedMicroUsd !== null ? <p className="muted small">{details.note}</p> : null}
 
                 {run.state === "active" ? <ExternalAccessPanel sessionId={run.id} /> : null}
+
+                <RunEndpoint run={run} />
 
   {/* Every run can be diagnosed, including the ones that never started: that is
       exactly when the log is the only way to find out why. */}

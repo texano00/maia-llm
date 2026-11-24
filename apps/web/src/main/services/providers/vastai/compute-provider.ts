@@ -2,6 +2,18 @@ import type { GpuFilters } from "@maia/contracts";
 import type { ComputeOffer, ComputeProvider } from "../../sessions/orchestrator";
 import { VLLM_IMAGE, type LaunchPlan } from "../../inference/launch-plan";
 import {
+  bootPercent,
+  classifyFatal,
+  progressSignature,
+  stripAnsi,
+  summarizeBootLog
+} from "../../sessions/boot-log";
+import {
+  describeCeiling,
+  isGoneStatus,
+  probeInference
+} from "../../sessions/readiness";
+import {
   buildSearchQuery,
   classifyOffer,
   estimateDiskGb,
@@ -11,9 +23,10 @@ import {
   readMappedPort,
   readPublicHost,
   toComputeOffer,
-  VastAiClient
+  VastAiClient,
+  type VastAiInstancePayload
 } from "./client";
-import type { GpuOutcome, GpuReputation } from "@maia/contracts";
+import type { GpuOutcome, GpuReputation, ReleaseReason } from "@maia/contracts";
 
 export interface VastComputeProviderOptions {
   getApiKey: () => Promise<string | undefined>;
@@ -44,11 +57,16 @@ export interface VastComputeProviderOptions {
     apiKey?: string
   ) => Promise<LaunchPlan>;
   /**
-   * Hard cap on the whole boot. Generous on purpose: pulling a multi-GB image
-   * and then 10-25 GB of weights legitimately takes half an hour on a slow
-   * host, and the old 20-minute cap released healthy instances mid-download.
+   * The per-attempt ceiling in minutes, used for the *report* that says a boot
+   * is taking longer than disclosed. It never releases the machine (FR-037).
    */
   readyTimeoutMs?: number;
+  /** How often the person is reminded while a run sits past the ceiling. */
+  reminderIntervalMs?: number;
+  /** No progress for this long ends the attempt with `no_progress`. */
+  quietWindowMs?: number;
+  /** How often the container tail is read for progress, phase and fatal errors. */
+  logIntervalMs?: number;
   /**
    * How long a host may sit on the request without ever starting the container
    * before it is treated as stuck. Ignored once the container has started:
@@ -70,6 +88,15 @@ export interface VastComputeProviderOptions {
   aliveCheckIntervalMs?: number;
   /** How long a running container may stay portless before it is reported as broken. */
   missingPortTimeoutMs?: number;
+  /**
+   * How long a fresh instance may report no status at all.
+   *
+   * `actual_status` is null until the host checks in, and on a busy host that can
+   * take several minutes — the image is multi-gigabyte. Treating two minutes of
+   * silence as "never became visible" released healthy machines mid-pull, and each
+   * retry rented another GPU for the same wait.
+   */
+  unknownStatusTimeoutMs?: number;
   fetchImpl?: typeof fetch;
   /** Injectable clock and pause, so timeout behaviour can be tested. */
   now?: () => number;
@@ -94,7 +121,11 @@ export interface ProvisioningProgress {
 
 /** The container can never start on this host; another machine must be booked. */
 export class InstanceStartError extends Error {
-  constructor(message: string, public readonly instanceId: number) {
+  constructor(
+    message: string,
+    public readonly instanceId: number,
+    public readonly releaseReason: ReleaseReason = "start_failed"
+  ) {
     super(message);
     this.name = "InstanceStartError";
   }
@@ -106,7 +137,11 @@ export class InstanceStartError extends Error {
  * unlike `InstanceStartError` this does not blacklist the host for everyone.
  */
 export class InstanceStartTimeoutError extends Error {
-  constructor(message: string, public readonly instanceId: number) {
+  constructor(
+    message: string,
+    public readonly instanceId: number,
+    public readonly releaseReason: ReleaseReason = "no_progress"
+  ) {
     super(message);
     this.name = "InstanceStartTimeoutError";
   }
@@ -121,6 +156,8 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
   listLabelledInstances(prefix: string): Promise<Array<{ instanceId: number; label: string }>>;
 } {
   const endpoints = new Map<number, InstanceEndpoint>();
+  /** What a probe needs that only `createInstance` knows. */
+  const bootContext = new Map<number, { modelId: string; apiKey: string }>();
 
   async function client(): Promise<VastAiClient> {
     const key = await options.getApiKey();
@@ -292,6 +329,7 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
         contextLength: plan.limits?.maxModelLen ?? null,
         weightsGb: Math.round(plan.weightsGb * 10) / 10
       });
+      bootContext.set(instanceId, { modelId: context.modelId, apiKey: context.apiKey ?? "" });
       return { instanceId };
     },
 
@@ -306,31 +344,75 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
       const pause = options.pause ?? sleep;
       const pollInterval = options.pollIntervalMs ?? 5_000;
       const startedAt = now();
-      const deadline = startedAt + (options.readyTimeoutMs ?? timeoutMs);
-      const stallTimeoutMs = options.stallTimeoutMs ?? 15 * 60_000;
-      const missingPortTimeoutMs = options.missingPortTimeoutMs ?? 90_000;
+      /** A report point, never a release trigger (FR-037). */
+      const ceiling = options.readyTimeoutMs ?? timeoutMs;
+      const reminderIntervalMs = options.reminderIntervalMs ?? 10 * 60_000;
       const progressIntervalMs = options.progressIntervalMs ?? 60_000;
+      const quietWindowMs = options.quietWindowMs ?? 15 * 60_000;
+      const logIntervalMs = options.logIntervalMs ?? 20_000;
+      const aliveCheckIntervalMs = options.aliveCheckIntervalMs ?? 15_000;
+      const missingPortTimeoutMs = options.missingPortTimeoutMs ?? 90_000;
+      const unknownStatusTimeoutMs = options.unknownStatusTimeoutMs ?? 12 * 60_000;
+      const context = bootContext.get(instanceId) ?? { modelId: "", apiKey: "" };
 
       let lastStatus = "";
       let lastMessage = "";
       let lastProgressAt = startedAt;
       let lastReportAt = startedAt;
+      let lastLogAt = -logIntervalMs;
+      let lastAliveCheckAt = -aliveCheckIntervalMs;
+      let lastSignature = "";
+      let phase: string | null = null;
+      let lastPercent: number | null = null;
+
+      /** Human sentence for the phase, percent included when the log has one. */
+      const describePhase = (): string => {
+        const base = phase ?? "waiting for the machine";
+        return lastPercent === null ? base : `${base} (${lastPercent}%)`;
+      };
+      let ceilingReportedAt: number | null = null;
       let unknownSince: number | null = null;
       let runningWithoutPortSince: number | null = null;
       // Once the container is up the host is doing real work: pulling the image,
-      // then downloading weights. That phase gets the full deadline instead of
-      // being cancelled for "looking quiet".
+      // then downloading weights. That phase gets the full quiet window instead
+      // of being cancelled for "looking quiet".
       let containerStarted = false;
-      // While the model server is "loading", the instance is not polled again:
-      // a crashed engine core closes the port and every probe is swallowed as
-      // "not ready yet". Re-checking the instance is what turns a 40-minute
-      // stall into a 15-second failure with a readable cause.
-      const aliveCheckIntervalMs = options.aliveCheckIntervalMs ?? 15_000;
-      let lastAliveCheckAt = -aliveCheckIntervalMs;
+
+      /**
+       * Reads the tail on its own cadence. The provider's status line says
+       * "running" for the whole download, so this is the signal that actually
+       * moves — and the only place a fatal error is written down.
+       */
+      const inspectLog = (log: string | null): void => {
+        if (!log) {
+          return;
+        }
+
+        const signature = progressSignature(log);
+        if (signature !== lastSignature) {
+          lastSignature = signature;
+          lastProgressAt = now();
+        }
+
+        const summarised = summarizeBootLog(log);
+        if (summarised) {
+          phase = summarised;
+        }
+
+        const percent = bootPercent(log);
+        if (percent !== null) {
+          lastPercent = percent;
+        }
+
+        const fatal = classifyFatal(log, null);
+        if (fatal) {
+          throw new InstanceStartError(fatal.detail, instanceId, fatal.reason);
+        }
+      };
 
       for (;;) {
         const instance = await api.getInstance(instanceId);
-        const status = instance.actual_status ?? "unknown";
+        const status = instanceStatus(instance);
         const message = instance.status_msg ?? "";
 
         // A host that cannot attach the GPU never recovers: stop waiting for it.
@@ -365,13 +447,18 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
         }
 
         // A freshly created instance reports `unknown` until the host reports
-        // back, so only a persistent unknown/offline is fatal.
+        // back, so only a persistent unknown/offline is fatal — and "persistent"
+        // has to outlast a slow image pull, or the retry loop rents GPU after GPU
+        // for the same wait.
         if (status === "unknown" || status === "offline") {
           unknownSince ??= now();
-          if (now() - unknownSince > 120_000) {
+          if (now() - unknownSince > unknownStatusTimeoutMs) {
             throw new InstanceStartTimeoutError(
-              `The GPU instance never became visible (${status}).`,
-              instanceId
+              `The GPU instance never became visible (${status}) after ${Math.round(
+                (now() - startedAt) / 60_000
+              )} minutes.`,
+              instanceId,
+              "instance_gone"
             );
           }
         } else {
@@ -381,7 +468,8 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
         if (["exited", "error", "destroyed"].includes(status)) {
           throw new InstanceStartTimeoutError(
             `The GPU instance stopped while starting up (${status}).`,
-            instanceId
+            instanceId,
+            "instance_gone"
           );
         }
 
@@ -393,65 +481,112 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
             endpoints.set(instanceId, { host, port });
             const endpoint = `http://${host}:${port}`;
             onProgress?.({ status: "starting", message: endpoint, elapsedMs: now() - startedAt });
-            const served = await waitForServing(
-              endpoint,
-              deadline,
-              options.fetchImpl,
-              { now, pause },
-              (elapsedMs) => {
-                // The port opens only after the weights are downloaded and
-                // loaded, so this is the longest silent phase of a boot. Read
-                // the container log and say what it is doing instead of
-                // repeating the URL for twenty minutes.
-                lastReportAt = now();
-                void readBootPhase(api, instanceId).then((phase) => {
-                  onProgress?.({
-                    status: "starting",
-                    message: phase ? `${endpoint} — ${phase}` : endpoint,
-                    elapsedMs
-                  });
-                });
-              },
-              progressIntervalMs,
-              async (elapsedMs) => {
-                if (elapsedMs - lastAliveCheckAt < aliveCheckIntervalMs) {
-                  return;
-                }
-                lastAliveCheckAt = elapsedMs;
 
+            // The port opens long before the model serves, so the loop below is
+            // the wait: probe inference, read the tail for progress and fatal
+            // errors, and never decide anything from elapsed time alone.
+            for (;;) {
+              const elapsedMs = now() - startedAt;
+
+              if (elapsedMs - lastLogAt >= logIntervalMs) {
+                lastLogAt = elapsedMs;
+                const log = api.getInstanceLogs
+                  ? await api
+                      .getInstanceLogs(instanceId, { tail: 80 })
+                      .catch(() => null)
+                  : null;
+                inspectLog(log);
+              }
+
+              const probe = await probeInference({
+                baseUrl: endpoint,
+                modelId: context.modelId,
+                apiKey: context.apiKey,
+                ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {})
+              });
+
+              if (probe.kind === "serving") {
+                options.logger?.info("Model server is serving", {
+                  instanceId,
+                  port,
+                  models: probe.models
+                });
+                onProgress?.({
+                  status: "serving",
+                  message: `${endpoint} (${probe.models.join(", ")})`,
+                  elapsedMs: now() - startedAt
+                });
+                return;
+              }
+
+              if (probe.kind === "failed") {
+                throw new InstanceStartError(probe.detail, instanceId, probe.reason);
+              }
+
+              // A crashed engine core closes the port, so the instance is asked
+              // directly; one report is never enough to end the attempt.
+              if (elapsedMs - lastAliveCheckAt >= aliveCheckIntervalMs) {
+                lastAliveCheckAt = elapsedMs;
                 const current = await api.getInstance(instanceId).catch(() => null);
                 if (!current) {
                   throw new InstanceStartTimeoutError(
                     "The GPU instance disappeared while the model was loading. The GPU was released.",
-                    instanceId
+                    instanceId,
+                    "instance_gone"
                   );
                 }
 
-                const state = current.actual_status ?? "unknown";
-                if (["exited", "error", "destroyed", "offline"].includes(state)) {
+                const state = instanceStatus(current);
+                if (isGoneStatus(state)) {
                   throw new InstanceStartTimeoutError(
                     `The model container stopped while loading the model (vast.ai reported "${state}"${
                       current.status_msg ? `: ${current.status_msg}` : ""
-                    }). The GPU was released before the deadline.`,
-                    instanceId
+                    }). The GPU was released.`,
+                    instanceId,
+                    "instance_gone"
                   );
                 }
               }
-            );
-            if (served === null) {
-              throw new InstanceStartTimeoutError(
-                await describeSilentServer(api, instanceId, endpoint),
-                instanceId
-              );
-            }
 
-            options.logger?.info("Model server is serving", { instanceId, endpoint, models: served });
-            onProgress?.({
-              status: "serving",
-              message: `${endpoint} (${served.join(", ")})`,
-              elapsedMs: now() - startedAt
-            });
-            return;
+              if (now() - lastProgressAt > quietWindowMs) {
+                throw new InstanceStartTimeoutError(
+                  `The machine made no progress for ${Math.round(quietWindowMs / 60_000)} min${
+                    phase ? ` (last: ${phase})` : ""
+                  }. The GPU was released.`,
+                  instanceId,
+                  "no_progress"
+                );
+              }
+
+              // The ceiling is reported, never acted on: the person decides
+              // whether the wait is still worth its cost (FR-037).
+              const pastCeiling = now() - startedAt >= ceiling;
+              const reminderDue =
+                ceilingReportedAt !== null && now() - ceilingReportedAt >= reminderIntervalMs;
+              if ((pastCeiling && ceilingReportedAt === null) || reminderDue) {
+                ceilingReportedAt = now();
+                onProgress?.({
+                  status: "ceiling",
+                  message: describeCeiling({
+                    elapsedMs: now() - startedAt,
+                    ceilingMs: ceiling,
+                    phase: describePhase()
+                  }),
+                  elapsedMs: now() - startedAt
+                });
+              }
+
+              if (now() - lastReportAt >= progressIntervalMs) {
+                lastReportAt = now();
+                onProgress?.({
+                  status: "starting",
+                  message: describePhase(),
+                  elapsedMs: now() - startedAt
+                });
+              }
+
+              await pause(pollInterval);
+            }
           }
 
           // Running with no port means the Docker mapping never applied — the
@@ -460,32 +595,24 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
           if (now() - runningWithoutPortSince > missingPortTimeoutMs) {
             throw new InstanceStartTimeoutError(
               "The container is running but vast.ai published no port for 8000, so the model cannot be reached. The Docker port mapping did not apply to this instance.",
-              instanceId
+              instanceId,
+              "port_not_published"
             );
           }
         } else {
           runningWithoutPortSince = null;
 
           // A host that never even starts the container is not slow, it is
-          // stuck: fail there instead of burning the whole boot budget.
-          if (!containerStarted && now() - lastProgressAt > stallTimeoutMs) {
+          // stuck: say so instead of waiting out the quiet window in silence.
+          if (!containerStarted && now() - lastProgressAt > quietWindowMs) {
             throw new InstanceStartTimeoutError(
               `The GPU host did not start the container within ${Math.round(
-                stallTimeoutMs / 60_000
+                quietWindowMs / 60_000
               )} min and reported no progress (last status: "${lastStatus}"). The GPU was released.`,
-              instanceId
+              instanceId,
+              "no_progress"
             );
           }
-        }
-
-        // vast.ai documents that `exited`, `unknown` and `offline` never recover.
-        if (now() > deadline) {
-          throw new InstanceStartTimeoutError(
-            `Timed out waiting for the GPU instance to start (${Math.round(
-              (now() - startedAt) / 60_000
-            )} min). The GPU was released.`,
-            instanceId
-          );
         }
 
         await pause(pollInterval);
@@ -509,8 +636,7 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
     },
 
     async destroyInstance(instanceId) {
-      endpoints.delete(instanceId);
-      const api = await client();
+      endpoints.delete(instanceId);      bootContext.delete(instanceId);      const api = await client();
       await api.destroyInstance(instanceId);
     },
 
@@ -527,127 +653,11 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
 }
 
 /**
- * Waits until the OpenAI surface answers and lists at least one model, which is
- * the only proof that the GPU is actually serving rather than merely running.
- * Returns the served model ids, or null on timeout.
+ * Re-exported so existing callers (and tests) keep importing the summariser from
+ * the adapter. The implementation lives in `sessions/boot-log.ts` because the
+ * orchestrator and the tally need it too.
  */
-async function waitForServing(
-  baseUrl: string,
-  deadline: number,
-  fetchImpl: typeof fetch = fetch,
-  clock: { now: () => number; pause: (ms: number) => Promise<void> } = {
-    now: () => Date.now(),
-    pause: sleep
-  },
-  onWait?: (elapsedMs: number) => void,
-  reportIntervalMs = 60_000,
-  onPoll?: (elapsedMs: number) => Promise<void>
-): Promise<string[] | null> {
-  const startedAt = clock.now();
-  let lastReportAt = startedAt;
-
-  for (;;) {
-    // The caller checks that the container is still alive here; a throw is the
-    // whole point, so it is not swallowed like a failed health probe.
-    if (onPoll) {
-      await onPoll(clock.now() - startedAt);
-    }
-
-    try {
-      const health = await fetchImpl(`${baseUrl}/health`, { signal: AbortSignal.timeout(5_000) });
-      if (health.ok) {
-        const models = await fetchImpl(`${baseUrl}/v1/models`, { signal: AbortSignal.timeout(5_000) });
-        if (models.ok) {
-          const payload = (await models.json()) as { data?: Array<{ id?: string }> };
-          const ids = (payload.data ?? []).map((entry) => entry.id ?? "").filter(Boolean);
-          if (ids.length > 0) {
-            return ids;
-          }
-        }
-      }
-    } catch {
-      // Model servers reject connections until vLLM finished loading weights.
-    }
-
-    if (clock.now() > deadline) {
-      return null;
-    }
-
-    if (onWait && clock.now() - lastReportAt >= reportIntervalMs) {
-      lastReportAt = clock.now();
-      onWait(clock.now() - startedAt);
-    }
-
-    await clock.pause(5_000);
-  }
-}
-
-/**
- * What the container is doing right now, in one short sentence.
- *
- * Both engines are quiet while they work — llama.cpp downloads the GGUF and then
- * loads it, vLLM does the same with safetensors — and the app used to show
- * nothing but the endpoint for the whole boot. Reading the tail is cheap and
- * turns "waiting" into "downloading the model (43%)".
- */
-export function summarizeBootLog(logs: string | null | undefined): string | null {
-  if (!logs) {
-    return null;
-  }
-
-  const lines = logs
-    .split("\n")
-    .map((line) => stripAnsi(line).trim())
-    .filter((line) => line.length > 0);
-
-  const MATCHERS: ReadonlyArray<{
-    pattern: RegExp;
-    describe: (match: RegExpExecArray, line: string) => string;
-  }> = [
-    { pattern: /listening on https?:\/\//i, describe: () => "the server is listening now" },
-    {
-      pattern: /server_run_i: model loaded|Application startup complete|Uvicorn running on/i,
-      describe: () => "model loaded, the server is starting"
-    },
-    {
-      pattern: /load_tensors|Loading safetensors|llm_load_tensors/i,
-      describe: () => "moving the weights onto the GPU"
-    },
-    {
-      pattern: /load_model: loading model|Started server process|loading weights/i,
-      describe: () => "downloading the model and reading it"
-    },
-    {
-      pattern: /(\d{1,3}(?:\.\d+)?)\s*%/,
-      describe: (match) => `downloading the model (${match[1]}%)`
-    },
-    {
-      pattern: /Engine core initialization failed|llama_model_load: error|out of memory/i,
-      describe: (_match, line) => `container error: ${line.slice(0, 120)}`
-    }
-  ];
-
-  for (let index = lines.length - 1; index >= 0; index -= 1) {
-    const line = lines[index] ?? "";
-    for (const matcher of MATCHERS) {
-      const match = matcher.pattern.exec(line);
-      if (match) {
-        return matcher.describe(match, line);
-      }
-    }
-  }
-
-  return null;
-}
-
-async function readBootPhase(api: VastAiClient, instanceId: number): Promise<string | null> {
-  try {
-    return summarizeBootLog(await api.getInstanceLogs(instanceId, { tail: 80 }));
-  } catch {
-    // The log is a nicety; never let it break the wait.
-    return null;
-  }
-}
+export { stripAnsi, summarizeBootLog } from "../../sessions/boot-log";
 
 /**
  * Why the endpoint never answered, told apart by the container's own log.
@@ -677,22 +687,22 @@ export async function describeSilentServer(
   return "The model server did not become ready in time. The GPU was released — a cold start can take several minutes when the host is slow.";
 }
 
-/** Container logs arrive with SGR colour codes; they break every pattern. */
-function stripAnsi(value: string): string {
-  const escape = String.fromCharCode(27);
-  let result = value;
-
-  while (result.includes(escape)) {
-    const start = result.indexOf(escape);
-    const end = result.indexOf("m", start);
-    result = end === -1 ? result.slice(0, start) : result.slice(0, start) + result.slice(end + 1);
-  }
-
-  return result;
-}
-
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * The status of an instance, from whichever field the host actually filled in.
+ *
+ * `actual_status` is the container's state and `cur_state` is the lifecycle
+ * state vast.ai tracks; some hosts leave the first null for the whole boot
+ * (observed on machine 78466, where `cur_state` said `running` while
+ * `actual_status` stayed null). Reading only the first field made a working
+ * container look like it had never reported in, which released it and rented
+ * another GPU to repeat the same wait.
+ */
+function instanceStatus(instance: VastAiInstancePayload): string {
+  return instance.actual_status ?? instance.cur_state ?? "unknown";
 }
 
 /** Used when no plan resolver is wired (tests, or a very old composition root). */

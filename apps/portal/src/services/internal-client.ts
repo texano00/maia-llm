@@ -143,6 +143,8 @@ export interface InternalAccountsApi {
     accountId: string,
     query?: { windowDays?: number; limit?: number; offset?: number }
   ): Promise<AccountDetail>;
+  /** Releases by day and reason, for the Provisioning view. */
+  provisioningSummary(days: number): Promise<unknown>;
 }
 
 export class InternalClient implements InternalAccountsApi {
@@ -264,6 +266,13 @@ export class InternalClient implements InternalAccountsApi {
     }
 
     return parsed.data;
+  }
+
+  /** Releases by day and reason. Counts only — the product does the narrowing. */
+  async provisioningSummary(days: number): Promise<unknown> {
+    return this.request(`/internal/provisioning/summary?days=${encodeURIComponent(String(days))}`, {
+      method: "GET"
+    });
   }
 
   private post(path: string, body: unknown): Promise<unknown> {

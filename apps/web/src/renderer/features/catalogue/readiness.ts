@@ -8,6 +8,8 @@
  * drift apart.
  */
 
+import { isChatCapableModel } from "@maia/contracts";
+
 export interface ReadinessModel {
   /**
    * The backend's verdict, which must be a positive "yes".
@@ -19,6 +21,15 @@ export interface ReadinessModel {
    */
   supported?: boolean | null | undefined;
   gated?: "none" | "auto" | "manual" | null | undefined;
+  /**
+   * The repository's task, when the list knows it.
+   *
+   * Nothing but a text-generation model can answer a chat request, so an
+   * embedding or diffusion repository is never "runnable" here even when it
+   * downloads and boots. Live Hub rows carry no verdict at all, which is exactly
+   * where this check earns its place.
+   */
+  pipelineTag?: string | null | undefined;
 }
 
 export interface CredentialStatus {
@@ -62,6 +73,14 @@ export function readinessFor(
     return {
       ready: false,
       reason: "no engine can serve this repository",
+      section: null
+    };
+  }
+
+  if (model.pipelineTag !== undefined && !isChatCapableModel({ pipelineTag: model.pipelineTag })) {
+    return {
+      ready: false,
+      reason: "this repository is not a text-generation model, so it cannot answer chat requests",
       section: null
     };
   }

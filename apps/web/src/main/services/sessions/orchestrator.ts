@@ -7,6 +7,7 @@ import {
   type GpuFilters,
   type ModelCapability,
   type PowerTier,
+  type ReleaseReason,
   type Session,
   type SessionEndpoint,
   type SessionStart
@@ -154,6 +155,34 @@ export interface SessionOrchestratorOptions {
   logger?: { info(message: string, context?: Record<string, unknown>): void; warn(message: string, context?: Record<string, unknown>): void } | undefined;
   readinessTimeoutMs?: number;
   /**
+   * What a booting run reports against: a *report point*, never a release
+   * trigger. Defaults to the readiness value so one deployment number governs
+   * both the adapter and the Run card copy.
+   */
+  bootCeilingMs?: number;
+  /** No progress for this long ends the attempt (adapter default: 15 min). */
+  bootQuietWindowMs?: number;
+  /** How often the person is reminded while past the ceiling. */
+  bootReminderMs?: number;
+  /** Fine-grained control for tests; production reads the settings store. */
+  capMicroUsd?: () => number;
+  /**
+   * Header notifications published from the lifecycle: a ready entry, a failed
+   * entry, and the withdrawal that follows a run that stops serving.
+   */
+  notifications?: {
+    set(input: {
+      key: string;
+      severity: "success" | "warning" | "error";
+      message: string;
+      action?: { label: string; route: string };
+      endpoint?: { baseUrl: string; host: string; port: number; modelId: string };
+      route?: string;
+      dismissible?: boolean;
+    }): void;
+    clear(key: string): void;
+  };
+  /**
    * Extra machines to try when a boot fails on the current one (settings:
    * `gpuStartupRetries`). The total number of GPUs tried is this value + 1.
    */
@@ -212,6 +241,46 @@ const MAX_OFFER_ATTEMPTS = 6;
 /** States in which a session can serve chat (now or once it finishes booting). */
 function isServing(state: Session["state"]): boolean {
   return state === "provisioning" || state === "ready" || state === "active";
+}
+
+/**
+ * The reason a failed attempt is recorded under.
+ *
+ * The adapter already classifies most failures and carries the verdict on the
+ * error; this only fills in what a provider-level failure cannot know.
+ */
+function releaseReasonFrom(error: unknown, modelCaused: boolean): ReleaseReason {
+  const explicit = (error as { releaseReason?: ReleaseReason } | null)?.releaseReason;
+  if (explicit) {
+    return explicit;
+  }
+
+  const message = error instanceof Error ? error.message : String(error);
+  if (/out of memory/i.test(message)) {
+    return "out_of_memory";
+  }
+  if (/compute capability|not supported|no kernel image/i.test(message)) {
+    return "gpu_unsupported";
+  }
+  if (/gated|repository|401|403/i.test(message)) {
+    return "repository_missing";
+  }
+
+  return modelCaused ? "model_load_failed" : "start_failed";
+}
+
+/** Maps a deliberate end to the release vocabulary the history and tally use. */
+function releaseReasonForEnd(reason: NonNullable<Session["endReason"]>): ReleaseReason {
+  switch (reason) {
+    case "cap":
+      return "cap_reached";
+    case "failure":
+      return "start_failed";
+    case "reconciled":
+      return "instance_gone";
+    default:
+      return "person_stopped";
+  }
 }
 
 /**
@@ -636,24 +705,55 @@ export class SessionOrchestrator {
 
       try {
         append("info", `Booting ${current.offer.gpuName} and downloading the model…`);
+        let lastPhase = "";
+        let lastBootWriteAt = 0;
         await this.options.compute.waitUntilReady(
           current.instanceId,
-          this.options.readinessTimeoutMs ?? DEFAULT_READINESS_TIMEOUT_MS,
+          this.options.bootCeilingMs ?? this.options.readinessTimeoutMs ?? DEFAULT_READINESS_TIMEOUT_MS,
           (update) => {
-            // Each provider status change is one line, so a slow boot shows
-            // progress instead of silence.
-            const detail = update.message ? ` — ${update.message}` : "";
-            const line = `${describeStatus(update.status)}${detail} (${formatDuration(update.elapsedMs)})`;
-            append("info", line);
+            const startedMs = Date.now();
+            const isCeiling = update.status === "ceiling";
+            const phase = update.message ?? "";
 
-            // Mirror it into the diagnostics stream: the UI log is local to the
-            // machine, so a boot that stalls in the field is invisible otherwise.
+            // The ceiling is a report, not an ending: one line, then a reminder
+            // on the orchestrator's own cadence (FR-037).
+            if (isCeiling) {
+              append("warn", phase);
+              return;
+            }
+
+            // Persist the phase for the Run card, throttled: the column exists
+            // so the person can see progress, not so every status is a write.
+            if (phase.length > 0 && (phase !== lastPhase || startedMs - lastBootWriteAt >= 10_000)) {
+              lastPhase = phase;
+              lastBootWriteAt = startedMs;
+              const percentMatch = /(\d{1,3})%/.exec(phase);
+              const percent = percentMatch ? Math.min(100, Number(percentMatch[1])) : null;
+              this.options.store.recordBoot(sessionId, {
+                phase: phase.slice(0, 200),
+                percent: Number.isFinite(percent ?? NaN) ? percent : null,
+                progressAt: new Date(this.now()).toISOString(),
+                ceilingAt: new Date(
+                  this.now() +
+                    (this.options.bootCeilingMs ?? this.options.readinessTimeoutMs ?? DEFAULT_READINESS_TIMEOUT_MS)
+                ).toISOString()
+              });
+            }
+
+            // One line per meaningful change, not per poll.
+            if (update.status !== "starting" || phase !== lastPhase) {
+              const detail = phase ? ` — ${phase}` : "";
+              const line = `${describeStatus(update.status)}${detail} (${formatDuration(update.elapsedMs)})`;
+              append("info", line);
+            }
+
+            // Mirror it into the diagnostics stream without the address: a host
+            // name or IP never belongs in operational logs (Principle I).
             this.options.logger?.info("Provisioning progress", {
               sessionId,
               instanceId: current.instanceId,
               modelId: estimate.modelId,
               status: update.status,
-              message: update.message,
               elapsedMs: update.elapsedMs
             });
           }
@@ -677,7 +777,28 @@ export class SessionOrchestrator {
           readyAt: new Date(this.now()).toISOString()
         });
         this.options.store.transition(sessionId, "active");
+        this.options.store.clearBoot(sessionId);
         append("info", "Session active. You can chat now.");
+
+        // The address, the model and the key are the point of the run, so they
+        // are announced once, as a state the header can re-read at any time.
+        const mapped = this.options.compute.resolveEndpoint?.(current.instanceId);
+        if (mapped) {
+          this.options.store.recordEndpoint(sessionId, mapped.host, mapped.port);
+          this.options.notifications?.set({
+            key: `run:ready:${sessionId}`,
+            severity: "success",
+            message: `${estimate.modelId} is ready to serve.`,
+            endpoint: {
+              baseUrl: `http://${mapped.host}:${mapped.port}/v1`,
+              host: mapped.host,
+              port: mapped.port,
+              modelId: estimate.modelId
+            },
+            route: `/models?run=${sessionId}`,
+            dismissible: true
+          });
+        }
 
         const active = this.options.store.get(sessionId);
         const runtime = this.runtimes.get(sessionId);
@@ -877,6 +998,7 @@ export class SessionOrchestrator {
                     : ` Raise "GPU startup retries" in Settings to try more hosts.`
                 }`
               : diagnosis;
+          const phaseAtFailure = this.options.store.get(sessionId)?.boot?.text ?? null;
           this.options.store.appendEvent(sessionId, "error", reason, new Date(this.now()));
           this.options.reportFailure?.({
             stage: "startup",
@@ -898,6 +1020,22 @@ export class SessionOrchestrator {
             endedAt: new Date(this.now()).toISOString(),
             endReason: "failure",
             failureCode: "PROVIDER_UNAVAILABLE"
+          });
+          this.options.store.recordRelease(sessionId, {
+            reason: releaseReasonFrom(error, modelFailure !== null),
+            phase: phaseAtFailure,
+            elapsedMs: Date.now() - bootStartedAt
+          });
+          this.options.notifications?.set({
+            key: `run:failed:${sessionId}`,
+            severity: "error",
+            message: `${estimate.modelId} could not start: ${reason.slice(0, 160)}`,
+            action: {
+              label: "Try again",
+              route: `/catalogue?model=${encodeURIComponent(estimate.modelId)}`
+            },
+            route: `/models?run=${sessionId}`,
+            dismissible: true
           });
 
           // Keep the failed session visible: its log is the only explanation for
@@ -1019,7 +1157,8 @@ export class SessionOrchestrator {
     return {
       baseUrl: `http://${mapped.host}:${mapped.port}/v1`,
       modelId: runtime.session.modelId,
-      apiKey: runtime.apiKey
+      apiKey: runtime.apiKey,
+      serving: true
     };
   }
 
@@ -1105,8 +1244,7 @@ export class SessionOrchestrator {
   }
 
   /** Releases GPUs whose sessions have been idle past the configured window. */
-  async reapIdle(): Promise<Session[]> {
-    const idleMs = this.options.idleTimeoutMinutes * 60_000;
+  async reapIdle(): Promise<Session[]> {    const idleMs = this.options.idleTimeoutMinutes * 60_000;
     const expired = [...this.runtimes.entries()].filter(
       ([, runtime]) =>
         runtime.session.state === "active" && this.now() - runtime.lastActivityAt >= idleMs
@@ -1123,6 +1261,57 @@ export class SessionOrchestrator {
     return released;
   }
 
+  /**
+   * Stops any run whose accrued cost has reached the person's per-session cap.
+   *
+   * This is the one bound that does not depend on somebody watching the screen:
+   * the meter already exists, so the cap is a comparison, not a new mechanism
+   * (FR-039). `0` means the person explicitly chose no cap.
+   */
+  async enforceCap(): Promise<Session[]> {
+    const capMicroUsd = this.options.capMicroUsd?.() ?? 0;
+    if (capMicroUsd <= 0) {
+      return [];
+    }
+
+    const stopped: Session[] = [];
+
+    for (const sessionId of [...this.runtimes.keys()]) {
+      const runtime = this.runtimes.get(sessionId);
+      if (!runtime || !["provisioning", "ready", "active"].includes(runtime.session.state)) {
+        continue;
+      }
+
+      const startedMs = Date.parse(runtime.session.startedAt);
+      const elapsedHours = Math.max(0, this.now() - startedMs) / 3_600_000;
+      const accrued = Math.round(elapsedHours * runtime.session.hourlyRateMicroUsd);
+      if (accrued < capMicroUsd) {
+        continue;
+      }
+
+      this.options.store.appendEvent(
+        sessionId,
+        "warn",
+        `Reached the ${(capMicroUsd / 1_000_000).toFixed(2)} USD spending cap. Releasing the GPU.`,
+        new Date(this.now())
+      );
+
+      const ended = await this.end(sessionId, "cap").catch((error: unknown) => {
+        this.options.logger?.warn("Could not stop a run at its cap", {
+          sessionId,
+          message: error instanceof Error ? error.message : String(error)
+        });
+        return null;
+      });
+
+      if (ended) {
+        stopped.push(ended);
+      }
+    }
+
+    return stopped;
+  }
+
   async end(sessionId: string, reason: NonNullable<Session["endReason"]>): Promise<Session | null> {
     const runtime = this.runtimes.get(sessionId);
     if (!runtime) {
@@ -1134,6 +1323,7 @@ export class SessionOrchestrator {
 
     this.options.store.transition(sessionId, "ending");
     runtime.abort?.abort();
+    const beforeEnd = this.options.store.get(sessionId);
     this.options.store.appendEvent(
       sessionId,
       "info",
@@ -1160,6 +1350,16 @@ export class SessionOrchestrator {
     this.options.store.transition(sessionId, reason === "failure" ? "failed" : "ended", {
       endedAt: new Date(this.now()).toISOString(),
       endReason: reason
+    });
+
+    // The address, the readiness notice and the release record all die with the
+    // run: a link that no longer works is worse than no link (FR-013/FR-017).
+    this.options.notifications?.clear(`run:ready:${sessionId}`);
+    this.options.store.clearEndpoint(sessionId);
+    this.options.store.recordRelease(sessionId, {
+      reason: releaseReasonForEnd(reason),
+      phase: beforeEnd?.boot?.text ?? null,
+      elapsedMs: Math.max(0, this.now() - Date.parse(runtime.session.startedAt))
     });
 
     const ended = this.options.store.get(sessionId);

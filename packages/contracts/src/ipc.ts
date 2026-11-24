@@ -24,6 +24,8 @@ export const errorCodeSchema = z.enum([
   "CREDENTIAL_MISSING",
   /** The provider rejected the credential that is saved. */
   "CREDENTIAL_INVALID",
+  /** The run stopped serving while a caller was reading it. */
+  "BOOT_FINISHED",
   "INTERNAL"
 ]);
 
@@ -166,6 +168,7 @@ export const ipcChannels = [
   "chat.abort",
   "notifications.list",
   "notifications.dismiss",
+  "notifications.claim",
   "provider.health",
   "update.status",
   "update.check",
@@ -235,6 +238,17 @@ export const appSettingsSchema = z.object({
   onboardingDismissedAt: z.string().nullable().default(null),
   /** Notification condition keys the user has acknowledged. */
   dismissedNotificationKeys: z.array(z.string().min(1)).max(100).default([]),
+  /**
+   * Notification keys already shown as a toast on this account. Claiming a key
+   * once is what makes "the model is ready" appear one time across every tab
+   * and device instead of once per open page.
+   */
+  announcedNotificationKeys: z.array(z.string().min(1)).max(200).default([]),
+  /**
+   * Hard spending limit for one run, in micro-USD. Reaching it stops the run and
+   * releases the GPU (FR-039). `0` means the person explicitly chose no cap.
+   */
+  sessionCapMicroUsd: z.number().int().min(0).max(1_000_000_000).default(10_000_000),
   /** Pseudonymous identifier used only for opt-in usage samples. */
   installationId: z.string().uuid().nullable().default(null),
   /**
@@ -339,11 +353,22 @@ export const estimatePreviewSchema = z.object({
 
 export const notificationSchema = z.object({
   key: z.string().min(1),
-  severity: z.enum(["warning", "error"]),
+  severity: z.enum(["success", "warning", "error"]),
   message: z.string().min(1),
   action: z
     .object({ label: z.string().min(1), route: z.string().min(1) })
     .optional(),
+  /** The serving address, when the entry announces a ready run. */
+  endpoint: z
+    .object({
+      baseUrl: z.string().min(1),
+      host: z.string().min(1),
+      port: z.number().int().positive(),
+      modelId: z.string().min(1)
+    })
+    .optional(),
+  /** Where the entry belongs in the product (`/models?run=<id>`). */
+  route: z.string().min(1).optional(),
   createdAt: z.string(),
   /** Setup requirements cannot be dismissed; transient notices can. */
   dismissible: z.boolean()
@@ -352,6 +377,14 @@ export const notificationSchema = z.object({
 export const notificationSnapshotSchema = z.object({
   notifications: z.array(notificationSchema),
   indicator: z.enum(["error", "warning", "none"])
+});
+
+/** Claims a notification for the toast surface; answers shown once per account. */
+export const notificationClaimSchema = z.object({ key: z.string().min(1) });
+
+export const notificationClaimResultSchema = z.object({
+  shown: z.boolean(),
+  snapshot: notificationSnapshotSchema
 });
 
 export const credentialCheckSchema = z.object({
@@ -384,6 +417,7 @@ export type CredentialTestResult = z.infer<typeof credentialTestResultSchema>;
 export type IpcChannel = z.infer<typeof ipcChannelSchema>;
 export type Notification = z.infer<typeof notificationSchema>;
 export type NotificationSnapshot = z.infer<typeof notificationSnapshotSchema>;
+export type NotificationClaimResult = z.infer<typeof notificationClaimResultSchema>;
 export type CredentialCheck = z.infer<typeof credentialCheckSchema>;
 export type BalanceState = z.infer<typeof balanceStateSchema>;
 export type ProviderHealth = z.infer<typeof providerHealthSchema>;

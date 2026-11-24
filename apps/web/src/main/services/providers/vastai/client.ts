@@ -35,6 +35,14 @@ export interface VastAiOfferPayload {
 export interface VastAiInstancePayload {
   id?: number;
   actual_status?: string;
+  /**
+   * The lifecycle state vast.ai tracks itself.
+   *
+   * Hosts do not always fill `actual_status` in promptly — some leave it null for
+   * the whole boot while `cur_state` already says `running`. Reading only the
+   * first field made a serving container look like it had never reported in.
+   */
+  cur_state?: string;
   status_msg?: string;
   public_ipaddr?: string;
   ssh_host?: string;
@@ -436,8 +444,10 @@ export class VastAiClient {
         const response = await this.http.request(`/api/v0/instances/${instanceId}/`, {
           headers: this.authHeaders()
         });
-        const payload = (await response.json()) as VastAiInstancePayload;
-        const value = payload;
+        const payload = (await response.json()) as VastAiInstancePayload | {
+          instances?: VastAiInstancePayload;
+        };
+        const value = unwrapInstance(payload);
         this.instanceCache.set(instanceId, { at: this.now(), value });
         return value;
       } catch {
@@ -534,6 +544,27 @@ export class VastAiClient {
   private authHeaders(): Record<string, string> {
     return { authorization: `Bearer ${this.apiKey}` };
   }
+}
+
+/**
+ * The instance record itself.
+ *
+ * `GET /api/v0/instances/{id}/` answers `{"instances": {…}}` while the list
+ * endpoint answers `{"instances": [ … ]}`. Reading the wrapper as if it were the
+ * instance left every field undefined, so a boot saw "status: unknown" for a
+ * machine that was already serving — and released it while vast.ai kept billing.
+ */
+export function unwrapInstance(
+  payload: VastAiInstancePayload | { instances?: VastAiInstancePayload | VastAiInstancePayload[] }
+): VastAiInstancePayload {
+  const nested = (payload as { instances?: VastAiInstancePayload | VastAiInstancePayload[] }).instances;
+  if (nested && !Array.isArray(nested)) {
+    return nested;
+  }
+  if (Array.isArray(nested) && nested.length > 0) {
+    return nested[0] as VastAiInstancePayload;
+  }
+  return payload as VastAiInstancePayload;
 }
 
 /** Reads the mapped HTTP port from an instance payload. */

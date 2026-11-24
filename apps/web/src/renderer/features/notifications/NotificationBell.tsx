@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import type { Notification, NotificationSnapshot } from "@maia/contracts";
+import type { Notification } from "@maia/contracts";
 import { useWorkspace } from "../../shared/session/WorkspaceProvider";
 import { useUiPreferences } from "../../shared/preferences/useUiPreferences";
+import { useNotifications } from "./NotificationProvider";
 
 /**
  * Header bell. Server-side conditions (credentials, balance) come from the main
@@ -12,7 +13,7 @@ import { useUiPreferences } from "../../shared/preferences/useUiPreferences";
 export function NotificationBell() {
   const { sessions } = useWorkspace();
   const navigate = useNavigate();
-  const [snapshot, setSnapshot] = useState<NotificationSnapshot | null>(null);
+  const { snapshot, dismiss } = useNotifications();
   const [open, setOpen] = useState(false);
   const container = useRef<HTMLDivElement>(null);
 
@@ -42,29 +43,6 @@ export function NotificationBell() {
     };
   }, [open]);
 
-  const reload = useCallback(async () => {
-    const bridge = window.maia;
-    if (!bridge) {
-      return;
-    }
-
-    const result = await bridge.invoke<NotificationSnapshot>("notifications.list");
-    if (result.ok) {
-      setSnapshot(result.data);
-    }
-  }, []);
-
-  useEffect(() => {
-    void reload();
-    const timer = setInterval(() => {
-      if (typeof document !== "undefined" && document.hidden) {
-        return;
-      }
-      void reload();
-    }, 5_000);
-    return () => clearInterval(timer);
-  }, [reload]);
-
   const acknowledged = new Set(useUiPreferences().acknowledgedFailureIds);
   const failures: Notification[] = sessions
     .filter((session) => session.state === "failed" && !acknowledged.has(session.id))
@@ -80,21 +58,9 @@ export function NotificationBell() {
   const notifications = [...failures, ...(snapshot?.notifications ?? [])];
   const indicator = notifications.some((entry) => entry.severity === "error")
     ? "error"
-    : notifications.length > 0
+    : notifications.some((entry) => entry.severity === "warning")
       ? "warning"
       : "none";
-
-  async function dismiss(key: string): Promise<void> {
-    const bridge = window.maia;
-    if (!bridge) {
-      return;
-    }
-
-    const result = await bridge.invoke<NotificationSnapshot>("notifications.dismiss", { key });
-    if (result.ok) {
-      setSnapshot(result.data);
-    }
-  }
 
   return (
     <div className="notifications" ref={container}>

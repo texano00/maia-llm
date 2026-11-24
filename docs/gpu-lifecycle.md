@@ -256,3 +256,13 @@ telemetry service — which is a deployment decision rather than product behavio
   visible instead of silent.
 - `GET /v1/gpus/:machineId/reports` on the shared service keeps the attempt
   history per machine.
+
+## Release is decided by evidence (0.12.0)
+
+The idle reaper, the budget cap and the person's stop release a machine. A boot is
+never released because time passed: the readiness loop reads the container's own
+output for progress (download percentage, `load_tensors`, `Application startup
+complete`) and for fatal errors, and re-checks the instance while the model loads.
+One transient `offline` report never ends an attempt; a sustained one does. The
+disclosed ceiling only produces a report and a reminder, so a large model on a
+slow host is never cut off just before it serves.

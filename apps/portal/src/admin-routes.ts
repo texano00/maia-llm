@@ -94,6 +94,28 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRouteOpt
     };
   });
 
+  // Releases by day and reason (feature 011). The product builds the projection;
+  // the portal only forwards it, so no account, machine or model identifier is
+  // ever assembled here.
+  app.get("/admin-api/provisioning", async (request, reply) => {
+    if (!(await requireAdmin(request))) {
+      return reply.status(401).send(unauthorized);
+    }
+
+    const query = (request.query ?? {}) as Record<string, unknown>;
+    try {
+      const summary = await options.internal.provisioningSummary(
+        clampNumber(query.days, 30, 1, 365)
+      );
+      return { summary, configured: true };
+    } catch (error) {
+      const failure = describeInternalFailure(error);
+      return reply
+        .status(failure.status)
+        .send({ error: failure.error, configured: options.internal.configured });
+    }
+  });
+
   // One account in full. The projection is built by the product, which owns the
   // rows: the portal asks for it and renders it, so no rule about what may leave
   // the product lives here.

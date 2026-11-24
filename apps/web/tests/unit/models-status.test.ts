@@ -26,13 +26,15 @@ function session(state: SessionState, overrides: Partial<Session> = {}): Session
 }
 
 describe("toVisibleStatus", () => {
-  it("projects every internal state onto exactly three visible statuses", () => {
+  it("projects every internal state onto the four visible statuses", () => {
+    // `ending` is its own visible status on purpose: the machine is not confirmed
+    // gone, so it must not be presented as terminated.
     const expected: Record<SessionState, string> = {
       estimated: "initializing",
       provisioning: "initializing",
       ready: "initializing",
       active: "running",
-      ending: "terminated",
+      ending: "stopping",
       ended: "terminated",
       cancelled: "terminated",
       failed: "terminated"

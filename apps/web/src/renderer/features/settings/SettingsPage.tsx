@@ -67,6 +67,7 @@ export function SettingsPage() {
   const [minUploadMbps, setMinUploadMbps] = useState("");
   const [minDiskMBps, setMinDiskMBps] = useState("");
   const [gpuStartupRetries, setGpuStartupRetries] = useState(String(DEFAULT_GPU_STARTUP_RETRIES));
+  const [sessionCapUsd, setSessionCapUsd] = useState("10");
   const [walletWarnUsd, setWalletWarnUsd] = useState("2");
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [gpuState, setGpuState] = useState<"idle" | "saving" | "saved">("idle");
@@ -138,6 +139,7 @@ export function SettingsPage() {
         applyGpuFilters(result.data.gpuFilters);
         setGpuStartupRetries(String(result.data.gpuStartupRetries));
         setWalletWarnUsd(String(result.data.walletWarnThresholdMicroUsd / 1_000_000));
+        setSessionCapUsd(String(result.data.sessionCapMicroUsd / 1_000_000));
       }
     });
 
@@ -260,6 +262,12 @@ export function SettingsPage() {
 
     setGpuState("saving");
     setError(null);
+    const capUsd = Number(sessionCapUsd);
+    if (!Number.isFinite(capUsd) || capUsd < 0) {
+      setGpuState("idle");
+      setError("The per-run spending cap must be zero or a positive amount in USD.");
+      return;
+    }
     const filters: GpuFilters = override ?? {
       countries: countries
         .split(",")
@@ -280,7 +288,8 @@ export function SettingsPage() {
     const result = await bridge.invoke<AppSettings>("settings.update", {
       gpuFilters: filters,
       gpuStartupRetries: startupRetries,
-      walletWarnThresholdMicroUsd: Math.round(warnUsd * 1_000_000)
+      walletWarnThresholdMicroUsd: Math.round(warnUsd * 1_000_000),
+      sessionCapMicroUsd: Math.round(capUsd * 1_000_000)
     });
 
     if (result.ok) {
@@ -288,6 +297,7 @@ export function SettingsPage() {
       applyGpuFilters(result.data.gpuFilters);
       setGpuStartupRetries(String(result.data.gpuStartupRetries));
       setWalletWarnUsd(String(result.data.walletWarnThresholdMicroUsd / 1_000_000));
+      setSessionCapUsd(String(result.data.sessionCapMicroUsd / 1_000_000));
       setGpuState("saved");
     } else {
       setGpuState("idle");
@@ -742,6 +752,20 @@ export function SettingsPage() {
               value={walletWarnUsd}
               onChange={(event) => {
                 setWalletWarnUsd(event.target.value);
+                setGpuState("idle");
+              }}
+            />
+          </label>
+          <label className="field">
+            <span>Stop a run at this cost (USD per run; 0 means no cap)</span>
+            <input
+              type="number"
+              min="0"
+              step="0.5"
+              inputMode="decimal"
+              value={sessionCapUsd}
+              onChange={(event) => {
+                setSessionCapUsd(event.target.value);
                 setGpuState("idle");
               }}
             />

@@ -82,3 +82,25 @@ To prove a rental really happened, follow `specs/009-live-gpu-account-detail/qui
 the backoffice `#/accounts/<id>` page under **Running now**) with the instance
 list in the vast.ai console. The run's label starts with `maia:` and carries the
 account id.
+
+## A model takes a long time to become ready (0.12.0)
+
+A boot is judged by evidence, not by a clock: the product watches the container's
+own output for progress and for fatal errors, and only releases the machine when
+it stops advancing, disappears, or the person stops it.
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `MAIA_BOOT_CEILING_MINUTES` | 60 | The point at which the run is reported as *not ready yet* (phase, cost, one-tap stop, then a reminder). It never releases the machine. |
+| `MAIA_BOOT_QUIET_MINUTES` | 15 | No progress for this long ends the attempt with `no_progress`. |
+| `MAIA_BOOT_REMINDER_MINUTES` | 10 | How often the reminder repeats while a run sits past the ceiling. |
+
+A per-run spending cap (Settings → GPU, default 10 USD) is the automatic bound:
+reaching it stops the run, releases the GPU and records `cap_reached`. `0` means
+no cap, and is always an explicit choice.
+
+Release reasons — `model_load_failed`, `repository_missing`, `out_of_memory`,
+`gpu_unsupported`, `engine_crashed`, `image_pull_failed`, `port_not_published`,
+`instance_gone`, `no_progress`, `cap_reached`, `person_stopped`, `start_failed` —
+are shown on the run card, in its history and, in aggregate, in the backoffice's
+**Provisioning** tab.

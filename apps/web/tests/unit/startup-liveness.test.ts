@@ -48,7 +48,7 @@ describe("container liveness while the model loads", () => {
     const startedAt = clock;
 
     await expect(provider.waitUntilReady(1, 60 * 60_000)).rejects.toThrow(
-      /container stopped while loading the model/i
+      /stopped while (starting up|loading the model)/i
     );
 
     // Detected on the second serving poll, not after 40 minutes.

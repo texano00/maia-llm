@@ -21,6 +21,16 @@ const secureCookies = process.env.MAIA_COOKIE_SECURE !== "false";
 const trustProxy = process.env.MAIA_TRUST_PROXY?.trim().toLowerCase() ?? "";
 const publicOrigin = process.env.MAIA_PUBLIC_ORIGIN?.trim() || null;
 
+/** Reads a bounded minute value from the environment, falling back quietly. */
+function minutesFrom(value: string | undefined, fallback: number, min: number, max: number): number {
+  const parsed = Number(value?.trim());
+  return Number.isFinite(parsed) ? Math.min(max, Math.max(min, Math.round(parsed))) : fallback;
+}
+
+const bootCeilingMinutes = minutesFrom(process.env.MAIA_BOOT_CEILING_MINUTES, 60, 5, 240);
+const bootQuietMinutes = minutesFrom(process.env.MAIA_BOOT_QUIET_MINUTES, 15, 5, 120);
+const bootReminderMinutes = minutesFrom(process.env.MAIA_BOOT_REMINDER_MINUTES, 10, 1, 60);
+
 /** Four 20 MB images, base64 encoded, inside one `chat.send`. */
 const MAX_BODY_BYTES = 128 * 1024 * 1024;
 
@@ -67,6 +77,9 @@ async function main(): Promise<void> {
   const platform = await createWebPlatform({
     databasePath: join(DATA_DIR, "maia.db"),
     providerMode,
+    bootCeilingMinutes,
+    bootQuietMinutes,
+    bootReminderMinutes,
     onEvent: record
   });
 
