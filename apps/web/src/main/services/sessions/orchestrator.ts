@@ -729,7 +729,8 @@ export class SessionOrchestrator {
 
             // Persist the phase for the Run card, throttled: the column exists
             // so the person can see progress, not so every status is a write.
-            if (phase.length > 0 && (phase !== lastPhase || startedMs - lastBootWriteAt >= 10_000)) {
+            const phaseChanged = phase.length > 0 && phase !== lastPhase;
+            if (phase.length > 0 && (phaseChanged || startedMs - lastBootWriteAt >= 10_000)) {
               lastPhase = phase;
               lastBootWriteAt = startedMs;
               const percentMatch = /(\d{1,3})%/.exec(phase);
@@ -745,8 +746,9 @@ export class SessionOrchestrator {
               });
             }
 
-            // One line per meaningful change, not per poll.
-            if (update.status !== "starting" || phase !== lastPhase) {
+            // One line per meaningful change, not per poll. A repeated report of
+            // the same phase is how the card stays current, not news.
+            if (update.status !== "starting" || phaseChanged) {
               const detail = phase ? ` — ${phase}` : "";
               const line = `${describeStatus(update.status)}${detail} (${formatDuration(update.elapsedMs)})`;
               append("info", line);
@@ -832,6 +834,13 @@ export class SessionOrchestrator {
         });
         return;
       } catch (error) {
+        // A person who stopped the run released the machine on purpose; the
+        // attempt's failure (and the log of a container that no longer exists)
+        // is not news and must not be written down as one.
+        if (!stillProvisioning()) {
+          return;
+        }
+
         const message = error instanceof Error ? error.message : String(error);
         const unrecoverable = this.options.compute.isUnrecoverable?.(error) === true;
         const totalAttempts = startupRetries + 1;

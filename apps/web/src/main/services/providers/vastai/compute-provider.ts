@@ -75,6 +75,12 @@ export interface VastComputeProviderOptions {
   runningQuietWindowMs?: number;
   /** How long one log read may block the wait; a vast.ai log can take a minute. */
   logFetchTimeoutMs?: number;
+  /**
+   * How often the current phase is reported while the model loads. The run card
+   * treats a phase older than a minute as "not current", so silence here turns a
+   * healthy boot into "waiting for the machine to report progress".
+   */
+  phaseReportIntervalMs?: number;
   /** How often the container tail is read for progress, phase and fatal errors. */
   logIntervalMs?: number;
   /**
@@ -302,11 +308,17 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
       // With `runtype: "args"` the field becomes the container command verbatim,
       // which is how `uv pip install … || python3 -m pip …` ended up as a single
       // executable name and killed the container before vLLM started.
-      const launchScript = plan.onstart
-        ? `${plan.onstart}; exec python3 -m vllm.entrypoints.openai.api_server ${plan.args
-            .map(shellQuote)
-            .join(" ")}`
-        : null;
+      //
+      // A plan that owns the whole process (llama.cpp narrates its own download)
+      // brings the script itself: appending an `exec` to it would start a second
+      // server on the same port.
+      const launchScript =
+        plan.launch ??
+        (plan.onstart
+          ? `${plan.onstart}; exec python3 -m vllm.entrypoints.openai.api_server ${plan.args
+              .map(shellQuote)
+              .join(" ")}`
+          : null);
 
       const instanceId = await api.createInstance({
         offerId: offer.offerId,
@@ -365,6 +377,9 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
       const aliveCheckIntervalMs = options.aliveCheckIntervalMs ?? 15_000;
       const missingPortTimeoutMs = options.missingPortTimeoutMs ?? 90_000;
       const unknownStatusTimeoutMs = options.unknownStatusTimeoutMs ?? 12 * 60_000;
+      // Reports on the run card's own scale: the card calls a phase older than a
+      // minute "not current", so an unreported-but-alive boot looks stalled.
+      const phaseReportIntervalMs = options.phaseReportIntervalMs ?? 30_000;
       const context = bootContext.get(instanceId) ?? { modelId: "", apiKey: "" };
 
       let lastStatus = "";
@@ -391,6 +406,9 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
       let ceilingReportedAt: number | null = null;
       let unknownSince: number | null = null;
       let runningWithoutPortSince: number | null = null;
+      // The engine's own sentence from a probe that was answered but not served.
+      let engineDetail: string | null = null;
+      let lastPhaseReportAt = 0;
       // Once the container is up the host is doing real work: pulling the image,
       // then downloading weights. That phase gets the full quiet window instead
       // of being cancelled for "looking quiet".
@@ -548,6 +566,23 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
 
               if (probe.kind === "failed") {
                 throw new InstanceStartError(probe.detail, instanceId, probe.reason);
+              }
+
+              // A llama.cpp download can write nothing for half an hour (its
+              // progress bar is buffered), while the engine already answers
+              // "Loading model". That answer is the evidence the log withholds,
+              // so it is reported on a cadence: the run card stays current and
+              // says what the engine says instead of going quiet.
+              if (probe.kind === "waiting" && probe.answered && probe.detail) {
+                engineDetail = probe.detail;
+              }
+
+              if (now() - lastPhaseReportAt >= phaseReportIntervalMs) {
+                lastPhaseReportAt = now();
+                const message = describePhase() || engineDetail;
+                if (message) {
+                  onProgress?.({ status: "starting", message, elapsedMs: now() - startedAt });
+                }
               }
 
               // A crashed engine core closes the port, so the instance is asked

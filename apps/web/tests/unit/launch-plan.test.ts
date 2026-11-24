@@ -48,6 +48,10 @@ describe("launch planning", () => {
     expect(plan.args).toEqual([
       "-hf",
       `${MODEL_ID}:Q4_K_M`,
+      // The exact file, so a repository full of quants cannot be resolved by
+      // guessing — and so the download meter measures the file we priced.
+      "-hff",
+      "Huihui-Qwen3.8-27B-Q4_K_M-00001-of-00002.gguf",
       "--host",
       "0.0.0.0",
       "--port",
@@ -70,6 +74,25 @@ describe("launch planning", () => {
     expect(plan.onstart).toBeUndefined();
     expect(plan.gguf).toBe(true);
     expect(plan.quantization).toBe("Q4_K_M");
+  });
+
+  it("narrates the download, because the engine's own bar never reaches Docker", () => {
+    const plan = planLaunch({
+      modelId: MODEL_ID,
+      artifacts: ggufShards,
+      vramGb: 24,
+      parameterCount: 27_300_000_000
+    });
+
+    // The container command is ours: the server starts in the background and a
+    // watcher prints a percentage with a newline every few seconds.
+    expect(plan.launch).toContain("/app/llama-server");
+    expect(plan.launch).toContain("downloading the model");
+    // Both shards count: 2 × 16 GB, not 16 GB.
+    expect(plan.launch).toContain("expected=32000000000");
+    expect(plan.env).toEqual({ LLAMA_CACHE: "/models" });
+    // The disk request follows the real file, not a bytes-per-parameter guess.
+    expect(plan.weightsGb).toBe(32);
   });
 
   it("sizes the context to the card instead of trusting the advertised window", () => {

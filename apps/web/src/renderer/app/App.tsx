@@ -10,6 +10,7 @@ import { WorkspaceProvider } from "../shared/session/WorkspaceProvider";
 import { OnboardingGate } from "../features/onboarding/OnboardingGate";
 import { AccessPage } from "../features/access/AccessPage";
 import { hydratePreferences } from "../shared/preferences/store";
+import { syncClockFromServer } from "../shared/clock";
 import {
   CARRY_OVER_MARKER,
   alreadyCarriedOver,
@@ -17,6 +18,12 @@ import {
 } from "../shared/preferences/carry-over";
 
 export function App() {
+  // Everything measured from a server timestamp (elapsed, accrued, "is this
+  // reading current") needs the server's clock, not this tab's.
+  useEffect(() => {
+    void syncClockFromServer();
+  }, []);
+
   return (
     <ErrorBoundary>
       <HashRouter>

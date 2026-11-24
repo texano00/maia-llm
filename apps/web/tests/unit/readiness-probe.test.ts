@@ -47,7 +47,22 @@ describe("probeInference", () => {
       }) as never
     });
 
-    expect(result.kind).toBe("waiting");
+    expect(result).toEqual({ kind: "waiting", answered: false });
+  });
+
+  it("carries the engine's own words when it answers but cannot serve yet", async () => {
+    // What llama.cpp actually answers while it loads a GGUF.
+    const result = await probeInference({
+      baseUrl: "http://203.0.113.5:30000",
+      modelId: "x",
+      apiKey: "k",
+      fetchImpl: (async () =>
+        new Response(JSON.stringify({ error: { message: "Loading model" } }), {
+          status: 503
+        })) as never
+    });
+
+    expect(result).toEqual({ kind: "waiting", answered: true, detail: "Loading model" });
   });
 
   it("reports a model the endpoint refuses to serve", async () => {

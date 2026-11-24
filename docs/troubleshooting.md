@@ -104,3 +104,18 @@ Release reasons — `model_load_failed`, `repository_missing`, `out_of_memory`,
 `instance_gone`, `no_progress`, `cap_reached`, `person_stopped`, `start_failed` —
 are shown on the run card, in its history and, in aggregate, in the backoffice's
 **Provisioning** tab.
+
+### A GGUF download that says nothing (0.12.4)
+
+llama.cpp writes its download bar with a carriage return and no newline, so
+Docker keeps the container log at four lines for the whole download — half an
+hour on a 27B model, with no way to tell 40 MB/s from a wedged connection.
+
+The GGUF launch now runs on a small wrapper: the server starts as usual and a
+watcher prints `downloading the model (37%)` every 15 seconds from the size of
+the cache directory (`LLAMA_CACHE=/models`). The run card reads that percentage
+like any other boot phase, and the weight file is named explicitly (`-hff`), so a
+repository holding a hundred GGUFs cannot be resolved by the engine's own default.
+When the server exits, the wrapper writes `error: the model server exited with
+status N` — a fatal line the readiness loop reads as `engine_crashed` instead of
+waiting out the quiet window with a dead engine billing.
