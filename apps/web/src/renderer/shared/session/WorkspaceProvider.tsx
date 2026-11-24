@@ -106,6 +106,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   // produces exactly one notification and never repeats it.
   const runStates = useRef<Record<string, string>>({});
 
+  /** Sequence of catalogue searches; only the newest answer is applied. */
+  const searchSeq = useRef(0);
+
   const reloadSessions = useCallback(async () => {
     const bridge = window.maia;
     if (!bridge) {
@@ -131,6 +134,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         return;
       }
 
+      // Only the newest answer may touch the list: a slow first keystroke must
+      // not overwrite the results of the third one.
+      const seq = ++searchSeq.current;
       setLoadingCatalogue(true);
       const result = await bridge.invoke<CatalogueResult>("catalogue.search", {
         search: term || undefined,
@@ -140,9 +146,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         // readiness filter hides; the filtering happens there, per account.
         limit: 100
       });
+
+      if (seq !== searchSeq.current) {
+        return;
+      }
+
       setLoadingCatalogue(false);
 
       if (result.ok) {
+        // The previous list stays on screen while a new search is in flight; it
+        // is replaced here, never cleared first.
         setModels(result.data.models);
         setStale(result.data.stale);
         setSnapshot(result.data.snapshot ?? null);
@@ -154,11 +167,17 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   );
 
   // Sort and feature changes are instant; typing is debounced so the live
-  // Hugging Face search is not called on every keystroke.
+  // Hugging Face search is not called on every keystroke, and a single letter is
+  // too broad to ask for at all.
   useEffect(() => {
+    const trimmed = search.trim();
+    if (trimmed.length === 1) {
+      return;
+    }
+
     const timer = setTimeout(() => {
       void loadCatalogue(search, sort, capability);
-    }, search.length > 0 ? 400 : 0);
+    }, trimmed.length > 0 ? 350 : 0);
 
     return () => clearTimeout(timer);
   }, [capability, loadCatalogue, search, sort]);

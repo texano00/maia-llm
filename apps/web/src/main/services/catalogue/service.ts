@@ -15,6 +15,30 @@ import { assessRepository, type RepositoryVerdict } from "./repository-check";
 export type CatalogueSupport = ModelSupport;
 export type { CatalogueSnapshotInfo };
 
+/** How long a search answer stays warm; the Hub listing changes slowly. */
+const SEARCH_CACHE_MS = 30_000;
+/** How many distinct queries are remembered (typed terms × sort × capability). */
+const SEARCH_CACHE_LIMIT = 20;
+/** How long one search may wait for upstream before answering from cache. */
+const SEARCH_BUDGET_MS = 10_000;
+
+const DEADLINE_EXCEEDED = Symbol("catalogue-deadline");
+
+/** Rejects with `DEADLINE_EXCEEDED` when the work outlives the budget. */
+function withDeadline<T>(work: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(DEADLINE_EXCEEDED), ms);
+    timer.unref?.();
+  });
+
+  return Promise.race([work, deadline]).finally(() => {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  });
+}
+
 export interface CatalogueSource {
   /**
    * Rows that already carry the backend's verdict.
@@ -49,6 +73,8 @@ export interface CatalogueServiceOptions {
   source: CatalogueSource;
   now?: () => Date;
   ttlMs?: number;
+  /** How long one search may wait for upstream before answering from cache. */
+  searchBudgetMs?: number;
   logger?: { info(message: string, context?: Record<string, unknown>): void; warn(message: string, context?: Record<string, unknown>): void } | undefined;
 }
 
@@ -72,6 +98,10 @@ export class CatalogueService {
   private readonly chatTemplates = new Map<string, boolean>();
   /** Repository verdicts (config.json, weights), also cached per model. */
   private readonly repositories = new Map<string, RepositoryVerdict>();
+  /** Recent answers per query, so typing back and forth costs no upstream calls. */
+  private readonly searchCache = new Map<string, { at: number; result: CatalogueResult }>();
+  /** Identical searches share one upstream call instead of racing each other. */
+  private readonly searchInFlight = new Map<string, Promise<CatalogueResult>>();
 
   constructor(private readonly options: CatalogueServiceOptions) {
     this.now = options.now ?? (() => new Date());
@@ -151,19 +181,55 @@ export class CatalogueService {
   }
 
   async search(query: CatalogueQuery = {}): Promise<CatalogueResult> {
+    const key = JSON.stringify([
+      query.search?.trim() ?? "",
+      query.sort ?? null,
+      query.capability ?? null,
+      query.limit ?? null
+    ]);
+
+    // Typing back and forth must not re-ask the Hub for the same term.
+    const cached = this.searchCache.get(key);
+    if (cached && this.now().getTime() - cached.at < SEARCH_CACHE_MS) {
+      return cached.result;
+    }
+
+    const existing = this.searchInFlight.get(key);
+    if (existing) {
+      return existing;
+    }
+
+    const promise = this.runSearch(query, key).finally(() => this.searchInFlight.delete(key));
+    this.searchInFlight.set(key, promise);
+    return promise;
+  }
+
+  /**
+   * One search, bounded in time.
+   *
+   * A term that takes longer than the budget answers with what the cache already
+   * holds, marked stale, instead of holding the request until Cloudflare gives up
+   * (which is what turned a slow Hub search into a 504 page).
+   */
+  private async runSearch(query: CatalogueQuery, key: string): Promise<CatalogueResult> {
     const ttlMs = this.options.ttlMs;
-    const term = query.search?.trim() ?? "";
-    const needsRefresh = term.length >= 2 || !this.options.repository.isFresh(ttlMs, this.now());
+    const term = query.search?.trim() ?? "";    const needsRefresh = term.length >= 2 || !this.options.repository.isFresh(ttlMs, this.now());
     let stale = !this.options.repository.isFresh(ttlMs, this.now());
 
     if (needsRefresh) {
+      const refresh = this.refreshInto(term);
+      // If the deadline wins, the refresh keeps running and updates the cache for
+      // the next call; its rejection (if any) is swallowed here.
+      refresh.catch(() => undefined);
+
       try {
-        await this.refreshInto(term);
+        await withDeadline(refresh, this.options.searchBudgetMs ?? SEARCH_BUDGET_MS);
         stale = false;
       } catch (error) {
         this.options.logger?.warn("Catalogue refresh failed; serving the cached snapshot", {
           search: term,
-          message: errorMessage(error)
+          timedOut: error === DEADLINE_EXCEEDED,
+          message: error === DEADLINE_EXCEEDED ? "deadline" : errorMessage(error)
         });
         stale = true;
       }
@@ -171,12 +237,22 @@ export class CatalogueService {
 
     const { models, cachedAt } = this.options.repository.list();
 
-    return {
+    const result: CatalogueResult = {
       models: filterAndSort(this.withSupport(models), query),
       stale,
       fetchedAt: cachedAt ?? this.now().toISOString(),
       snapshot: this.options.source.snapshotInfo?.() ?? null
     };
+
+    this.searchCache.set(key, { at: this.now().getTime(), result });
+    if (this.searchCache.size > SEARCH_CACHE_LIMIT) {
+      const oldest = [...this.searchCache.entries()].sort((left, right) => left[1].at - right[1].at)[0];
+      if (oldest) {
+        this.searchCache.delete(oldest[0]);
+      }
+    }
+
+    return result;
   }
 
   /** Attaches the backend verdict to cached rows; unknown stays unknown. */
@@ -199,6 +275,7 @@ export class CatalogueService {
   }
 
   async refresh(): Promise<CatalogueResult> {
+    this.searchCache.clear();
     const result = await this.refreshInto("");
     return {
       ...result,

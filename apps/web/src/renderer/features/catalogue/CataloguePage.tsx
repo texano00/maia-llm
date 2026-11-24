@@ -132,6 +132,13 @@ export function CataloguePage() {
           value={search}
           onChange={(event) => setSearch(event.target.value)}
         />
+        {/* The previous results stay on screen while this runs; the status is
+            what tells a person the list behind it is about to change. */}
+        {loadingCatalogue ? (
+          <span className="muted small" role="status">
+            Searching…
+          </span>
+        ) : null}
         <button
           type="button"
           className="ghost-button"
