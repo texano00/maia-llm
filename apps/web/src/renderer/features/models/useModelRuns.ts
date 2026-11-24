@@ -50,7 +50,7 @@ export function useModelRuns(): ModelRunsValue {
       }
 
       void reloadHistory();
-    }, 5_000);
+    }, 10_000);
 
     const onVisible = (): void => {
       if (!document.hidden) {

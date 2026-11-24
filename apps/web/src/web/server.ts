@@ -3,7 +3,7 @@ import { mkdir, readFile, stat } from "node:fs/promises";
 import { extname, join, normalize, resolve } from "node:path";
 import { fail, ipcChannels, type AuthState, type IpcChannel, type Result } from "@maia/contracts";
 import { createWebPlatform, publicChannels, type WebPlatform } from "./host";
-import type { IpcRegistry } from "../main/ipc/registry";
+import type { IpcRegistry, IpcInvokeContext } from "../main/ipc/registry";
 import { clearedSessionCookie, maxAgeSeconds, parseCookie, sessionCookie } from "./cookies";
 import { appearanceCookie } from "./preferences";
 import { createInternalRoutes } from "./internal";
@@ -171,7 +171,6 @@ async function handleRpc(
   const token = parseCookie(request.headers.cookie);
   const headers: Record<string, string> = { "cache-control": "no-store" };
   const typed = channel as IpcChannel;
-
   let registry: IpcRegistry;
   let accountId: string | null = null;
 
@@ -189,7 +188,7 @@ async function handleRpc(
     registry = (await platform.accounts.get(accountId)).registry;
   }
 
-  const result = await registry.invoke(typed, body.payload, {
+  const result = await invokeWithDeadline(registry, typed, body.payload, {
     sessionToken: token,
     sourceAddress: clientAddress(request),
     userAgent: request.headers["user-agent"] ?? null,
@@ -202,7 +201,26 @@ async function handleRpc(
     setAppearance: (value) => {
       headers["set-cookie"] = appearanceCookie(value, secureCookies);
     }
-  });
+  }, typed);
+
+  if (result === TIMED_OUT) {
+    // Cloudflare gives up at ~100 s and shows its own error page. Answering here
+    // with a typed, retryable error keeps the product in charge of its own
+    // failure, and the catalogue serves what it already has.
+    sendJson(
+      response,
+      200,
+      fail(
+        "PROVIDER_UNAVAILABLE",
+        typed.startsWith("catalogue")
+          ? "The catalogue is taking longer than usual. Showing what is already loaded; try again in a moment."
+          : "This is taking longer than expected. Try again in a moment.",
+        true
+      ),
+      headers
+    );
+    return;
+  }
 
   // The signed-in account's stored appearance seeds the cookie a new browser
   // reads before its first paint.
@@ -366,6 +384,47 @@ async function readJson(request: IncomingMessage): Promise<Record<string, unknow
 
   const raw = Buffer.concat(chunks).toString("utf8");
   return raw.length > 0 ? (JSON.parse(raw) as Record<string, unknown>) : {};
+}
+
+/**
+ * How long one channel may run before the host answers on its behalf.
+ *
+ * Cloudflare gives up at ~100 s and shows its own error page, which is how a slow
+ * Hugging Face search became a 504 instead of a product message. A deadline here
+ * keeps the origin responsive and lets the catalogue serve what it already has;
+ * the underlying work is bounded by its own provider timeouts.
+ */
+const RPC_BUDGET_MS: Record<string, number> = {
+  "catalogue.search": 12_000,
+  "catalogue.refresh": 20_000,
+  "catalogue.detail": 15_000
+};
+const DEFAULT_RPC_BUDGET_MS = 30_000;
+
+const TIMED_OUT = Symbol("rpc-timed-out");
+
+async function invokeWithDeadline(
+  registry: IpcRegistry,
+  channel: IpcChannel,
+  payload: unknown,
+  context: IpcInvokeContext,
+  typed: IpcChannel
+): Promise<Result<unknown> | typeof TIMED_OUT> {
+  const budget = RPC_BUDGET_MS[typed] ?? DEFAULT_RPC_BUDGET_MS;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  const deadline = new Promise<typeof TIMED_OUT>((resolve) => {
+    timer = setTimeout(() => resolve(TIMED_OUT), budget);
+    timer.unref?.();
+  });
+
+  try {
+    return await Promise.race([registry.invoke(typed, payload, context), deadline]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
 }
 
 void main();

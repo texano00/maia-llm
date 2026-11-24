@@ -46,6 +46,13 @@ export function installWebBridge(): void {
       return;
     }
 
+    // A hidden tab has no one watching the tokens arrive; the next visibility
+    // change drains what was missed. This is the highest-frequency request in
+    // the product while a chat streams.
+    if (typeof document !== "undefined" && document.hidden) {
+      return;
+    }
+
     polling = true;
     try {
       const response = await fetch(`/events?since=${cursor}`);

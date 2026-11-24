@@ -41,7 +41,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         return;
       }
       void reload();
-    }, 5_000);
+    }, 10_000);
 
     const onVisible = (): void => {
       if (!document.hidden) {
