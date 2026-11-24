@@ -56,12 +56,16 @@ export function describeRun(session: Session, options: { now?: number } = {}): R
   };
 
   if (visibleStatus === "initializing") {
+    // The machine is rented and billed from the first second, so the meter runs
+    // while it loads; only the estimate itself is still uncertain.
+    const accrued = accruedMicroUsd(session.hourlyRateMicroUsd, session.startedAt, now);
+
     return {
       ...base,
-      elapsed: "pending",
-      durationMs: null,
-      accruedMicroUsd: null,
-      accrued: "pending",
+      elapsed: formatElapsed(session.startedAt, now),
+      durationMs: Math.max(0, now - startMs),
+      accruedMicroUsd: accrued,
+      accrued: formatUsd(accrued),
       valuesPending: true,
       endDetailsPending: false
     };

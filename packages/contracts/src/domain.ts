@@ -72,6 +72,7 @@ export const releaseReasonSchema = z.enum([
   "ceiling_reached",
   "cap_reached",
   "person_stopped",
+  "app_exit",
   "start_failed"
 ]);
 

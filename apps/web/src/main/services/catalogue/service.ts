@@ -19,8 +19,12 @@ export type { CatalogueSnapshotInfo };
 const SEARCH_CACHE_MS = 30_000;
 /** How many distinct queries are remembered (typed terms × sort × capability). */
 const SEARCH_CACHE_LIMIT = 20;
-/** How long one search may wait for upstream before answering from cache. */
-const SEARCH_BUDGET_MS = 10_000;
+/**
+ * How long the *first* answer may wait. A person typing should see the locally
+ * known matches at once; the provider refresh keeps running and replaces the
+ * cached answer when it lands.
+ */
+const SEARCH_FIRST_PAINT_MS = 2_500;
 
 const DEADLINE_EXCEEDED = Symbol("catalogue-deadline");
 
@@ -221,17 +225,39 @@ export class CatalogueService {
       // If the deadline wins, the refresh keeps running and updates the cache for
       // the next call; its rejection (if any) is swallowed here.
       refresh.catch(() => undefined);
+      let settled = false;
 
       try {
-        await withDeadline(refresh, this.options.searchBudgetMs ?? SEARCH_BUDGET_MS);
+        await withDeadline(refresh, this.options.searchBudgetMs ?? SEARCH_FIRST_PAINT_MS);
+        settled = true;
         stale = false;
       } catch (error) {
-        this.options.logger?.warn("Catalogue refresh failed; serving the cached snapshot", {
+        this.options.logger?.warn("Catalogue refresh is slow; answering from the cache", {
           search: term,
           timedOut: error === DEADLINE_EXCEEDED,
           message: error === DEADLINE_EXCEEDED ? "deadline" : errorMessage(error)
         });
         stale = true;
+      }
+
+      if (!settled) {
+        // The provider is still working. When it finishes, replace the cached
+        // answer for this query so the client's single retry gets real results
+        // instead of the stale list it was first shown.
+        refresh
+          .then(() => {
+            const { models, cachedAt } = this.options.repository.list();
+            this.searchCache.set(key, {
+              at: this.now().getTime(),
+              result: {
+                models: filterAndSort(this.withSupport(models), query),
+                stale: false,
+                fetchedAt: cachedAt ?? this.now().toISOString(),
+                snapshot: this.options.source.snapshotInfo?.() ?? null
+              }
+            });
+          })
+          .catch(() => undefined);
       }
     }
 

@@ -49,14 +49,15 @@ describe("toVisibleStatus", () => {
 describe("describeRun", () => {
   const now = Date.parse("2026-11-11T10:05:00.000Z");
 
-  it("marks runtime and cost values pending while initializing", () => {
+  it("meters a provisioning run, because the machine is already billing", () => {
     const details = describeRun(session("provisioning"), { now });
 
+    // The estimate is still uncertain, but elapsed and accrued are facts.
     expect(details.valuesPending).toBe(true);
-    expect(details.elapsed).toBe("pending");
-    expect(details.accrued).toBe("pending");
-    expect(details.accruedMicroUsd).toBeNull();
-    expect(details.durationMs).toBeNull();
+    expect(details.elapsed).toBe("5m 00s");
+    expect(details.accrued).not.toBe("pending");
+    expect(details.accruedMicroUsd).toBeGreaterThan(0);
+    expect(details.durationMs).toBe(5 * 60_000);
   });
 
   it("computes elapsed time and accrued cost for a running run", () => {

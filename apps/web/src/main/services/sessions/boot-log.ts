@@ -28,8 +28,10 @@ function lines(logs: string | null | undefined): string[] {
     return [];
   }
 
+  // llama.cpp redraws its download bar with `\r`; splitting on newlines only
+  // would collapse minutes of progress into one unreadable line.
   return logs
-    .split("\n")
+    .split(/\r\n|\r|\n/)
     .map((line) => stripAnsi(line).trim())
     .filter((line) => line.length > 0);
 }
@@ -69,6 +71,34 @@ export function summarizeBootLog(logs: string | null | undefined): string | null
       pattern: /(\d{1,3}(?:\.\d+)?)\s*%/,
       describe: (match) => `downloading the model (${match[1]}%)`
     },
+    // llama.cpp downloads with `-hf` and reports `done/total` rather than a
+    // percentage; without this a healthy 27B download looked like a dead boot.
+    {
+      pattern: /(\d+(?:\.\d+)?)\s*[MG]i?B\s*\/\s*(\d+(?:\.\d+)?)\s*[MG]i?B/i,
+      describe: (match) => {
+        const done = Number(match[1]);
+        const total = Number(match[2]);
+        return total > 0 && Number.isFinite(done)
+          ? `downloading the model (${Math.min(100, Math.round((done / total) * 100))}%)`
+          : "downloading the model";
+      }
+    },
+    {
+      pattern: /download(?:ing)? model file|common_download|Downloading \(incomplete/i,
+      describe: () => "downloading the model"
+    },
+    {
+      pattern: /print_info: (?:arch|file type|file size)|llama_model_load: (?:loading|n_tensors)/i,
+      describe: () => "loading the model"
+    },
+    {
+      pattern: /using device (?:CUDA|ROCm)|offloaded \d+\/\d+ layers to GPU/i,
+      describe: () => "moving the weights onto the GPU"
+    },
+    {
+      pattern: /(\d{1,3}(?:\.\d+)?)\s*%/,
+      describe: (match) => `downloading the model (${match[1]}%)`
+    },
     {
       pattern: /Engine core initialization failed|llama_model_load: error|out of memory/i,
       describe: (_match, line) => `container error: ${line.slice(0, 120)}`
@@ -93,10 +123,21 @@ export function bootPercent(logs: string | null | undefined): number | null {
   const entries = lines(logs);
 
   for (let index = entries.length - 1; index >= 0; index -= 1) {
-    const match = /(\d{1,3}(?:\.\d+)?)\s*%/.exec(entries[index] ?? "");
-    if (match) {
-      const value = Math.round(Number(match[1]));
+    const line = entries[index] ?? "";
+
+    const percent = /(\d{1,3}(?:\.\d+)?)\s*%/.exec(line);
+    if (percent) {
+      const value = Math.round(Number(percent[1]));
       return Number.isFinite(value) ? Math.min(100, Math.max(0, value)) : null;
+    }
+
+    const ratio = /(\d+(?:\.\d+)?)\s*[MG]i?B\s*\/\s*(\d+(?:\.\d+)?)\s*[MG]i?B/i.exec(line);
+    if (ratio) {
+      const done = Number(ratio[1]);
+      const total = Number(ratio[2]);
+      if (Number.isFinite(done) && Number.isFinite(total) && total > 0) {
+        return Math.min(100, Math.max(0, Math.round((done / total) * 100)));
+      }
     }
   }
 

@@ -159,6 +159,17 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         setModels(result.data.models);
         setStale(result.data.stale);
         setSnapshot(result.data.snapshot ?? null);
+
+        // A stale answer means the provider was still thinking. Ask once more
+        // shortly, so the full results replace the local ones without another
+        // keystroke; the server has cached them by then.
+        if (result.data.stale && term.trim().length >= 2) {
+          window.setTimeout(() => {
+            if (seq === searchSeq.current) {
+              void loadCatalogue(term, order, feature);
+            }
+          }, 1_500);
+        }
       } else {
         setError(result.error.message);
       }

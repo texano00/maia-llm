@@ -204,6 +204,8 @@ export interface SessionOrchestratorOptions {
   reportFailure?: (event: FailureEvent) => void;
   /** What a run of this model can do; defaults to text when unknown. */
   capabilityFor?: (modelId: string) => ModelCapability;
+  /** Which engine will serve this model, for the run card's runtime label. */
+  runtimeFor?: (modelId: string) => Session["runtime"];
   /** Called once when a run reaches a terminal state, after metrics are stored. */
   onRunFinished?: (session: Session) => void;
 }
@@ -278,6 +280,8 @@ function releaseReasonForEnd(reason: NonNullable<Session["endReason"]>): Release
       return "start_failed";
     case "reconciled":
       return "instance_gone";
+    case "app_exit":
+      return "app_exit";
     default:
       return "person_stopped";
   }
@@ -531,7 +535,7 @@ export class SessionOrchestrator {
         id: sessionId,
         modelId: estimate.modelId,
         state: "provisioning",
-        runtime: "vllm",
+        runtime: this.options.runtimeFor?.(estimate.modelId) ?? "vllm",
         label,
         gpuName: offer.gpuName,
         gpuRamGb: offer.gpuRamGb,
@@ -707,6 +711,7 @@ export class SessionOrchestrator {
         append("info", `Booting ${current.offer.gpuName} and downloading the model…`);
         let lastPhase = "";
         let lastBootWriteAt = 0;
+        let lastEndpoint: { host: string; port: number } | null = null;
         await this.options.compute.waitUntilReady(
           current.instanceId,
           this.options.bootCeilingMs ?? this.options.readinessTimeoutMs ?? DEFAULT_READINESS_TIMEOUT_MS,
@@ -745,6 +750,17 @@ export class SessionOrchestrator {
               const detail = phase ? ` — ${phase}` : "";
               const line = `${describeStatus(update.status)}${detail} (${formatDuration(update.elapsedMs)})`;
               append("info", line);
+            }
+
+            // The address exists minutes before the model serves; keeping it lets
+            // the run card say "not serving yet" with the real host and port.
+            const mapped = this.options.compute.resolveEndpoint?.(current.instanceId);
+            if (
+              mapped &&
+              (lastEndpoint?.host !== mapped.host || lastEndpoint.port !== mapped.port)
+            ) {
+              lastEndpoint = mapped;
+              this.options.store.recordEndpoint(sessionId, mapped.host, mapped.port);
             }
 
             // Mirror it into the diagnostics stream without the address: a host

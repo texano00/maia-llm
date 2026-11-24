@@ -65,6 +65,16 @@ export interface VastComputeProviderOptions {
   reminderIntervalMs?: number;
   /** No progress for this long ends the attempt with `no_progress`. */
   quietWindowMs?: number;
+  /**
+   * Silence budget once the container is running.
+   *
+   * A GGUF download can be quiet for half an hour — llama.cpp buffers its
+   * progress bar and Docker writes nothing until a newline — so the pre-container
+   * budget would release a perfectly healthy download (feature 011 follow-up).
+   */
+  runningQuietWindowMs?: number;
+  /** How long one log read may block the wait; a vast.ai log can take a minute. */
+  logFetchTimeoutMs?: number;
   /** How often the container tail is read for progress, phase and fatal errors. */
   logIntervalMs?: number;
   /**
@@ -349,7 +359,9 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
       const reminderIntervalMs = options.reminderIntervalMs ?? 10 * 60_000;
       const progressIntervalMs = options.progressIntervalMs ?? 60_000;
       const quietWindowMs = options.quietWindowMs ?? 15 * 60_000;
+      const runningQuietWindowMs = options.runningQuietWindowMs ?? 45 * 60_000;
       const logIntervalMs = options.logIntervalMs ?? 20_000;
+      const logFetchTimeoutMs = options.logFetchTimeoutMs ?? 5_000;
       const aliveCheckIntervalMs = options.aliveCheckIntervalMs ?? 15_000;
       const missingPortTimeoutMs = options.missingPortTimeoutMs ?? 90_000;
       const unknownStatusTimeoutMs = options.unknownStatusTimeoutMs ?? 12 * 60_000;
@@ -367,7 +379,13 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
 
       /** Human sentence for the phase, percent included when the log has one. */
       const describePhase = (): string => {
-        const base = phase ?? "waiting for the machine";
+        if (!phase && lastPercent === null) {
+          // Nothing observed yet: an empty message keeps the product from
+          // persisting a placeholder as if it were the container's own words.
+          return "";
+        }
+
+        const base = phase ?? "loading the model";
         return lastPercent === null ? base : `${base} (${lastPercent}%)`;
       };
       let ceilingReportedAt: number | null = null;
@@ -490,11 +508,20 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
 
               if (elapsedMs - lastLogAt >= logIntervalMs) {
                 lastLogAt = elapsedMs;
-                const log = api.getInstanceLogs
-                  ? await api
-                      .getInstanceLogs(instanceId, { tail: 80 })
-                      .catch(() => null)
-                  : null;
+                const reading = api.getInstanceLogs
+                  ? api.getInstanceLogs(instanceId, { tail: 80 }).catch(() => null)
+                  : Promise.resolve(null);
+
+                // A log read must never be what delays the probe: vast.ai builds
+                // the log on demand and can take a minute. The read keeps going
+                // in the background; this iteration just does not wait for it.
+                const log = await Promise.race([
+                  reading,
+                  new Promise<null>((resolve) => {
+                    const timer = setTimeout(() => resolve(null), logFetchTimeoutMs);
+                    timer.unref?.();
+                  })
+                ]);
                 inspectLog(log);
               }
 
@@ -548,9 +575,9 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
                 }
               }
 
-              if (now() - lastProgressAt > quietWindowMs) {
+              if (now() - lastProgressAt > runningQuietWindowMs) {
                 throw new InstanceStartTimeoutError(
-                  `The machine made no progress for ${Math.round(quietWindowMs / 60_000)} min${
+                  `The machine made no progress for ${Math.round(runningQuietWindowMs / 60_000)} min${
                     phase ? ` (last: ${phase})` : ""
                   }. The GPU was released.`,
                   instanceId,
