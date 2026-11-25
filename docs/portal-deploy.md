@@ -306,7 +306,7 @@ docker logs --tail 20 watchtower     # "Found new image" → "Stopping/Starting"
 A release therefore has to land on the server only once — no SSH needed:
 
 ```
-push to main → portal-ci (verify) → publish :<version> and :latest
+push to main → images.yml version-guard → publish :<version> and :latest
              → watchtower (≤ N minutes) → container recreated
 ```
 
@@ -473,13 +473,14 @@ valid with the same secret.
 | `502 Bad Gateway` on every vhost                          | `curl -s http://127.0.0.1:8787/health` on the host; if that fails the container is down (`maia ps`)                  |
 | Every log line shows `127.0.0.1` as the client            | `MAIA_TRUST_PROXY=false`, or `maia-proxy.conf` is not installed in `/etc/nginx/snippets/`                            |
 | `GET /v1/config/catalogue` returns `503 no_snapshot`      | No successful snapshot yet: set `MAIA_PORTAL_HF_TOKEN` and press **Operations → Force refresh**                      |
-| Watchtower logs "No new images found" after a release     | The release did not publish (`Actions → portal-ci`), or this host is pinned with `MAIA_IMAGE_TAG`                    |
+| Watchtower logs "No new images found" after a release     | The release did not publish (`Actions → images`, where `version-guard` fails when the bump was missed), or this host is pinned with `MAIA_IMAGE_TAG` |
 | Logins invalidated after a restart                        | `MAIA_PORTAL_TOKEN_SECRET` changed; restore the previous value                                                       |
 | Disk filling with logs                                    | `logging.options.max-size` in the Compose file; also `docker image prune`                                            |
 
 ### Usage reporting endpoints
 
-`portal-ci` deploys the opt-in measurement endpoints alongside the diagnostics sink:
+The portal image serves the opt-in measurement endpoints alongside the
+diagnostics sink:
 
 - `POST /api/v0/usage` — one content-free sample per finished run (`202`, or `400`
   for unknown keys, `403` when the installation opted out).

@@ -1,6 +1,6 @@
 {
   "name": "maia-llm",
-  "version": "0.12.4",
+  "version": "0.13.0",
   "private": true,
   "license": "Apache-2.0",
   "type": "module",
@@ -23,6 +23,7 @@
     "test:telemetry-allowlist": "vitest run apps/portal/tests/contract/telemetry-allowlist.test.ts",
     "format": "prettier --write .",
     "assets:logo": "node scripts/generate-logo-assets.mjs",
+    "version:bump": "npm version --workspaces --include-workspace-root --no-git-tag-version",
     "test:e2e": "node scripts/e2e/models-flow.mjs"
   },
   "devDependencies": {
