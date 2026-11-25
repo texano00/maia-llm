@@ -130,7 +130,9 @@ describe("restarting a run in place", () => {
       failDestroyTimes: 1,
       assertRunnable: () => {
         calls += 1;
-        if (calls > 1) {
+        // createEstimate (1) and start (2) must succeed; the fallback estimate
+        // created after the failed restart is the one that cannot be priced.
+        if (calls > 2) {
           throw new Error("no machine available");
         }
       }

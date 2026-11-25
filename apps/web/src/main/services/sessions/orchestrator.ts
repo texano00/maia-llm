@@ -1321,11 +1321,8 @@ export class SessionOrchestrator {
       );
     }
 
-    // A reply in flight belongs to the old server; stop it and let it settle so
-    // the stored turn is marked interrupted before the machine disappears.
-    runtime.abort?.abort();
-    await runtime.sending?.catch(() => undefined);
-
+    // Take the lock before the first await: a second request that arrives while
+    // the in-flight reply settles must already see a restart in progress.
     const requestedAt = new Date(this.now()).toISOString();
     const restart: RestartState = {
       startedAt: requestedAt,
@@ -1357,6 +1354,11 @@ export class SessionOrchestrator {
       outcome: "started",
       requestedAt
     });
+
+    // A reply in flight belongs to the old server; stop it and let it settle so
+    // the stored turn is marked interrupted before the machine disappears.
+    runtime.abort?.abort();
+    await runtime.sending?.catch(() => undefined);
 
     const fail = (reason: string): RestartResult => {
       this.options.store.transition(sessionId, "failed", {

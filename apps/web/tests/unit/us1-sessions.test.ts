@@ -176,11 +176,15 @@ describe("SessionOrchestrator", () => {
     expect(store.getActive()).toHaveLength(1);
 
     const chunks: string[] = [];
-    const result = await orchestrator.send(session!.id, "hi", (kind, delta) => {
-      if (kind === "content") {
-        chunks.push(delta);
+    const result = await orchestrator.send(
+      session!.id,
+      [{ role: "user", content: "hi" }],
+      (kind, delta) => {
+        if (kind === "content") {
+          chunks.push(delta);
+        }
       }
-    });
+    );
 
     expect(result.text).toBe("hello from the mock runtime");
     expect(chunks.join("")).toBe("hello from the mock runtime");
@@ -973,7 +977,7 @@ describe("SessionOrchestrator", () => {
     await orchestrator.awaitProvisioning(session.id);
 
     clock += 9 * 60_000;
-    await orchestrator.send(session.id, "still here", () => undefined);
+    await orchestrator.send(session.id, [{ role: "user", content: "still here" }], () => undefined);
     clock += 9 * 60_000;
 
     await expect(orchestrator.reapIdle()).resolves.toHaveLength(0);
