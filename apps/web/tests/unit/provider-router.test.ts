@@ -176,7 +176,7 @@ describe("provider router", () => {
       sessionId: "s1",
       modelId: "a/b",
       instanceId: liveInstance.instanceId,
-      prompt: "hi",
+      messages: [{ role: "user", content: "hi" }],
       signal: new AbortController().signal,
       onDelta: () => undefined
     });
@@ -184,7 +184,7 @@ describe("provider router", () => {
       sessionId: "s2",
       modelId: "a/b",
       instanceId: mockInstance.instanceId,
-      prompt: "hi",
+      messages: [{ role: "user", content: "hi" }],
       signal: new AbortController().signal,
       onDelta: () => undefined
     });
