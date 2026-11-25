@@ -39,9 +39,16 @@ export interface VllmModelPlan {
 
 /** Context/parallelism the launch is allowed to use on the chosen card. */
 export interface LaunchLimits {
+  /** Per-request context window. */
   maxModelLen: number;
   gpuMemoryUtilization: number;
   maxNumSeqs: number;
+  /** Requests the server handles at once (the person's choice, clamped). */
+  maxConcurrentRequests: number;
+  /** Largest per-request context this card can hold at that concurrency. */
+  estimatedMaxContext: number;
+  /** True when the requested context is at or below the estimate. */
+  fits: boolean;
 }
 
 const DEFAULT_CONTEXT_LIMIT = 32_768;
@@ -49,7 +56,8 @@ const MIN_CONTEXT_LIMIT = 4_096;
 /** CUDA context, activations and the loader need room that is not KV cache. */
 const RESERVE_GB = 1.5;
 const GPU_MEMORY_UTILIZATION = 0.9;
-const MAX_NUM_SEQS = 4;
+/** vLLM's historical default, kept as the run's starting concurrency. */
+export const DEFAULT_VLLM_MAX_SEQS = 4;
 /**
  * KV cache growth per parameter per token, in GB.
  *
@@ -114,6 +122,18 @@ export function planLaunchLimits(input: {
   quantization?: string | null;
   contextWindow?: number | null;
   /**
+   * A value the person chose. It is clamped only by what the model documents,
+   * never by the product's default: a silent reduction is what FR-009 forbids.
+   */
+  requestedMaxModelLen?: number | null;
+  /** Requests handled at once; defaults to one so old callers keep their shape. */
+  maxConcurrentRequests?: number | null;
+  /**
+   * True when concurrency splits one context budget (llama.cpp's `-c` is the
+   * total across `--parallel` slots). vLLM draws every slot from one cache pool.
+   */
+  concurrencyMultipliesContext?: boolean;
+  /**
    * Multiplier applied after a memory failure, so the retry asks for less
    * instead of repeating the same crash on another host.
    */
@@ -121,10 +141,19 @@ export function planLaunchLimits(input: {
 }): LaunchLimits {
   const advertised =
     input.contextWindow && input.contextWindow > 0 ? input.contextWindow : DEFAULT_CONTEXT_LIMIT;
-  // Never ask for more than 32k: past that, KV cache dominates and the model
-  // answers no better for the price. Smaller advertised windows are respected.
-  const desired = Math.max(MIN_CONTEXT_LIMIT, Math.min(advertised, DEFAULT_CONTEXT_LIMIT));
+  const requested =
+    input.requestedMaxModelLen && input.requestedMaxModelLen > 0
+      ? input.requestedMaxModelLen
+      : null;
+  // The model's own maximum is the ceiling; the product's 32k stays the default.
+  const desired = requested
+    ? Math.max(MIN_CONTEXT_LIMIT, Math.min(requested, advertised))
+    : Math.max(MIN_CONTEXT_LIMIT, Math.min(advertised, DEFAULT_CONTEXT_LIMIT));
 
+  const concurrency = Math.min(
+    8,
+    Math.max(1, Math.round(input.maxConcurrentRequests ?? DEFAULT_VLLM_MAX_SEQS))
+  );
   const parameters = input.parameterCount && input.parameterCount > 0 ? input.parameterCount : null;
   const weightsGb = parameters
     ? (parameters * bytesPerParameter(input.quantization)) / 1e9
@@ -135,10 +164,22 @@ export function planLaunchLimits(input: {
   );
 
   const kvPerTokenGb = parameters ? parameters * KV_GB_PER_PARAMETER_TOKEN : null;
-  const fitting = kvPerTokenGb ? Math.floor(availableGb / kvPerTokenGb / 1_024) * 1_024 : 0;
+  // Total tokens the card can hold across every concurrent request.
+  const totalCapacityTokens = kvPerTokenGb ? Math.floor(availableGb / kvPerTokenGb) : null;
+  const slots = input.concurrencyMultipliesContext === true ? concurrency : 1;
+  const estimatedMaxContext =
+    totalCapacityTokens === null
+      ? desired
+      : Math.max(
+          MIN_CONTEXT_LIMIT,
+          Math.floor(totalCapacityTokens / slots / 1_024) * 1_024
+        );
 
-  const fitted =
-    fitting > 0 ? Math.min(desired, Math.max(MIN_CONTEXT_LIMIT, fitting)) : desired;
+  // The default shrinks to what fits; an explicit request is honoured so the
+  // person sees the consequence rather than a silently smaller number.
+  const fitted = requested
+    ? desired
+    : Math.min(desired, Math.max(MIN_CONTEXT_LIMIT, estimatedMaxContext));
 
   const scale = input.contextScale;
   const maxModelLen =
@@ -149,7 +190,10 @@ export function planLaunchLimits(input: {
   return {
     maxModelLen,
     gpuMemoryUtilization: GPU_MEMORY_UTILIZATION,
-    maxNumSeqs: MAX_NUM_SEQS
+    maxNumSeqs: concurrency,
+    maxConcurrentRequests: concurrency,
+    estimatedMaxContext,
+    fits: maxModelLen <= estimatedMaxContext
   };
 }
 
@@ -257,6 +301,16 @@ export interface PlanVllmModelInput {
   vramGb?: number | null;
   parameterCount?: number | null;
   contextWindow?: number | null;
+  /** The person's explicit per-request context, when they changed it. */
+  requestedContextWindow?: number | null;
+  /** Requests handled at once; defaults to vLLM's historical 4. */
+  maxConcurrentRequests?: number | null;
+  /**
+   * True when concurrency splits one context budget (llama.cpp's `-c` is the
+   * total across `--parallel` slots). vLLM draws every slot from one cache pool,
+   * so its per-request context does not shrink as concurrency rises.
+   */
+  concurrencyMultipliesContext?: boolean;
   /** Shrinks the context on a retry after a memory failure (0 < scale < 1). */
   contextScale?: number | null;
 }
@@ -285,6 +339,8 @@ export function planVllmModel(input: PlanVllmModelInput): VllmModelPlan {
           parameterCount: input.parameterCount ?? null,
           quantization,
           contextWindow: input.contextWindow ?? null,
+          requestedMaxModelLen: input.requestedContextWindow ?? null,
+          maxConcurrentRequests: input.maxConcurrentRequests ?? DEFAULT_VLLM_MAX_SEQS,
           contextScale: input.contextScale ?? null
         })
       : null;

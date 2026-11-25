@@ -54,7 +54,8 @@ export interface VastComputeProviderOptions {
     modelId: string,
     offer: ComputeOffer,
     contextScale?: number,
-    apiKey?: string
+    apiKey?: string,
+    runtime?: { contextWindow?: number; maxConcurrentRequests?: number }
   ) => Promise<LaunchPlan>;
   /**
    * The per-attempt ceiling in minutes, used for the *report* that says a boot
@@ -301,7 +302,8 @@ export function createVastComputeProvider(options: VastComputeProviderOptions): 
         context.modelId,
         offer,
         context.contextScale,
-        context.apiKey
+        context.apiKey,
+        context.runtime
       )) ?? fallbackVllmPlan(context.modelId);
 
       // `onstart` only runs as a shell script under Vast's SSH/Jupyter entrypoint.

@@ -27,6 +27,8 @@ interface MessageRow {
   interrupted: number;
   error_code: string | null;
   created_at: string;
+  superseded_at: string | null;
+  superseded_by: string | null;
 }
 
 export interface Conversation {
@@ -55,6 +57,9 @@ export interface Message {
   interrupted: boolean;
   errorCode: string | null;
   createdAt: string;
+  /** Set when a regenerate or edit replaced this attempt. */
+  supersededAt: string | null;
+  supersededBy: string | null;
 }
 
 export interface ConversationSummary {
@@ -192,7 +197,9 @@ export class HistoryRepository {
       completionTokens: input.completionTokens ?? null,
       interrupted,
       errorCode: input.errorCode ?? null,
-      createdAt: now
+      createdAt: now,
+      supersededAt: null,
+      supersededBy: null
     };
   }
 
@@ -206,13 +213,80 @@ export class HistoryRepository {
     }
 
     const messages = this.db
-      .prepare("SELECT * FROM messages WHERE conversation_id = ? ORDER BY sequence ASC")
+      .prepare(
+        "SELECT * FROM messages WHERE conversation_id = ? AND superseded_at IS NULL ORDER BY sequence ASC"
+      )
       .all(id) as MessageRow[];
 
     return {
       conversation: mapConversation(conversation),
       messages: messages.map(mapMessage)
     };
+  }
+
+  /**
+   * The full transcript, including attempts a regenerate or edit superseded.
+   * This is the data path any export must use; nothing is ever deleted.
+   */
+  getAllMessages(conversationId: string): Message[] {
+    const owns = this.db
+      .prepare("SELECT id FROM conversations WHERE id = ? AND account_id = ?")
+      .get(conversationId, this.accountId) as { id: string } | undefined;
+
+    if (!owns) {
+      return [];
+    }
+
+    const rows = this.db
+      .prepare("SELECT * FROM messages WHERE conversation_id = ? ORDER BY sequence ASC")
+      .all(conversationId) as MessageRow[];
+
+    return rows.map(mapMessage);
+  }
+
+  /**
+   * Hides one message from the visible transcript without deleting it. The
+   * replacement id is recorded so an exported transcript can explain the order.
+   */
+  supersedeMessage(messageId: string, supersededBy: string): void {
+    this.db
+      .prepare(
+        `UPDATE messages
+            SET superseded_at = ?, superseded_by = ?
+          WHERE id = ? AND superseded_at IS NULL
+            AND conversation_id IN (SELECT id FROM conversations WHERE account_id = ?)`
+      )
+      .run(new Date().toISOString(), supersededBy, messageId, this.accountId);
+  }
+
+  /**
+   * Hides a message and everything after it. Used by an edit: the edited turn
+   * replaces the old attempt and its answer together. `untilSequence` excludes
+   * the replacement itself, which sits after the old attempt.
+   */
+  supersedeFrom(
+    conversationId: string,
+    sequence: number,
+    supersededBy: string,
+    untilSequence: number | null = null
+  ): void {
+    this.db
+      .prepare(
+        `UPDATE messages
+            SET superseded_at = ?, superseded_by = ?
+          WHERE conversation_id = ? AND sequence >= ? AND superseded_at IS NULL
+            AND (? IS NULL OR sequence < ?)
+            AND conversation_id IN (SELECT id FROM conversations WHERE account_id = ?)`
+      )
+      .run(
+        new Date().toISOString(),
+        supersededBy,
+        conversationId,
+        sequence,
+        untilSequence,
+        untilSequence,
+        this.accountId
+      );
   }
 
   listConversations(limit = 50, offset = 0): ConversationSummary[] {
@@ -222,7 +296,7 @@ export class HistoryRepository {
     const rows = this.db
       .prepare(
         `SELECT c.id, c.title, c.model_id, c.origin, c.updated_at, c.pinned,
-                (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id) AS message_count
+                (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id AND m.superseded_at IS NULL) AS message_count
          FROM conversations c
          WHERE c.account_id = ?
          ORDER BY c.pinned DESC, c.updated_at DESC
@@ -262,11 +336,11 @@ export class HistoryRepository {
       .prepare(
         `SELECT c.id, c.title, c.model_id, c.origin, c.updated_at, c.pinned,
                 MIN(m.sequence) AS first_sequence,
-                (SELECT COUNT(*) FROM messages m2 WHERE m2.conversation_id = c.id) AS message_count
+                (SELECT COUNT(*) FROM messages m2 WHERE m2.conversation_id = c.id AND m2.superseded_at IS NULL) AS message_count
          FROM messages_fts
          JOIN messages m ON m.rowid = messages_fts.rowid
          JOIN conversations c ON c.id = m.conversation_id
-         WHERE messages_fts MATCH ? AND c.account_id = ?
+         WHERE messages_fts MATCH ? AND c.account_id = ? AND m.superseded_at IS NULL
          GROUP BY c.id
          ORDER BY c.pinned DESC, c.updated_at DESC
          LIMIT ?`
@@ -287,6 +361,7 @@ export class HistoryRepository {
        FROM messages_fts
        JOIN messages m ON m.rowid = messages_fts.rowid
        WHERE messages_fts MATCH ? AND m.conversation_id = ? AND m.sequence = ?
+         AND m.superseded_at IS NULL
        LIMIT 1`
     );
 
@@ -385,7 +460,9 @@ function mapMessage(row: MessageRow): Message {
     completionTokens: row.completion_tokens,
     interrupted: row.interrupted === 1,
     errorCode: row.error_code,
-    createdAt: row.created_at
+    createdAt: row.created_at,
+    supersededAt: row.superseded_at,
+    supersededBy: row.superseded_by
   };
 }
 

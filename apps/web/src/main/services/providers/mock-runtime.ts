@@ -52,6 +52,12 @@ export const MOCK_OFFER = MOCK_OFFERS[0]!;
 export interface MockComputeOptions {
   provisionDelayMs?: number;
   offer?: ComputeOffer;
+  /** Refuse the first N create calls, so a restart fallback is scriptable. */
+  failCreateTimes?: number;
+  /** Refuse every create from this 1-based attempt onward (1 = the first boot). */
+  failCreateFrom?: number;
+  /** Refuse the first N destroy calls. */
+  failDestroyTimes?: number;
 }
 
 /** Datacenter ids are `provider-country-index`, so the country is the middle segment. */
@@ -62,12 +68,19 @@ export function countryOf(datacenter: string): string {
 
 export function createMockComputeProvider(options: MockComputeOptions = {}): ComputeProvider & {
   destroyed: number[];
+  created: number[];
 } {
   const destroyed: number[] = [];
+  const created: number[] = [];
+  const everCreated = new Set<number>();
   let nextInstanceId = 1000;
+  let createFailures = options.failCreateTimes ?? 0;
+  let createAttempts = 0;
+  let destroyFailures = options.failDestroyTimes ?? 0;
 
   return {
     destroyed,
+    created,
 
     async findOffer({ filters, excludeOfferIds }) {
       if (options.offer) {
@@ -82,7 +95,18 @@ export function createMockComputeProvider(options: MockComputeOptions = {}): Com
     },
 
     async createInstance() {
+      createAttempts += 1;
+      if (createFailures > 0) {
+        createFailures -= 1;
+        throw new Error("Mock machine is no longer available");
+      }
+      if (options.failCreateFrom !== undefined && createAttempts >= options.failCreateFrom) {
+        throw new Error("Mock machine is no longer available");
+      }
+
       nextInstanceId += 1;
+      created.push(nextInstanceId);
+      everCreated.add(nextInstanceId);
       return { instanceId: nextInstanceId };
     },
     async waitUntilReady() {
@@ -92,7 +116,18 @@ export function createMockComputeProvider(options: MockComputeOptions = {}): Com
     },
 
     async destroyInstance(instanceId: number) {
+      if (destroyFailures > 0) {
+        destroyFailures -= 1;
+        throw new Error("Mock teardown failed");
+      }
+
       destroyed.push(instanceId);
+      everCreated.delete(instanceId);
+    },
+
+    /** A destroyed instance is gone; an unknown id was never ours. */
+    async instanceExists(instanceId: number) {
+      return everCreated.has(instanceId);
     },
 
     /**
@@ -187,7 +222,9 @@ export function createMockInference(options: MockInferenceOptions = {}): Inferen
     ].join("\n");
 
   return {
-    async stream({ prompt, signal, onDelta }) {
+    async stream({ messages, signal, onDelta }) {
+      const prompt = messages.map((message) => message.content).join("\n");
+
       for (const word of reasoning.split(" ")) {
         if (signal.aborted) {
           throw new Error("Generation cancelled");

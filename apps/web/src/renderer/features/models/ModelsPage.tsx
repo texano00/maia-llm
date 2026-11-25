@@ -6,6 +6,7 @@ import { DEFAULT_STATUS_FILTER, filterRuns, emptyStateFor, STATUS_FILTERS, type 
 import { describeRun } from "./run-details";
 import { isChatEligible, isStoppable, type VisibleStatus } from "./status";
 import { ExternalAccessPanel } from "./ExternalAccessPanel";
+import { RunRuntimeSettings } from "./RunRuntimeSettings";
 import { RunEndpoint } from "./RunEndpoint";
 import { bootLine, releaseSentence } from "./endpoint";
 import { RunLogs } from "./RunLogs";
@@ -249,6 +250,16 @@ export function ModelsPage() {
                 {details.accruedMicroUsd !== null ? <p className="muted small">{details.note}</p> : null}
 
                 {run.state === "active" ? <ExternalAccessPanel sessionId={run.id} /> : null}
+
+                {run.state === "active" || run.state === "ready" ? (
+                  <RunRuntimeSettings
+                    sessionId={run.id}
+                    onChanged={() => {
+                      void reloadSessions();
+                      void reloadHistory();
+                    }}
+                  />
+                ) : null}
 
                 <RunEndpoint run={run} />
 

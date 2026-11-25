@@ -68,6 +68,41 @@ export const sessionReleaseSchema = z.object({
   elapsedMs: z.number().int().nonnegative()
 });
 
+/**
+ * The values a person can change on a run. Both take effect only when the
+ * model server starts, so a change is applied through a restart.
+ */
+export const runtimeValuesSchema = z.object({
+  /** Per-request context window, in tokens. */
+  contextWindow: z.number().int().min(4096),
+  /** Requests the server handles at once. */
+  maxConcurrentRequests: z.number().int().min(1).max(8)
+});
+
+export const restartStateSchema = z.object({
+  startedAt: z.string(),
+  previous: runtimeValuesSchema,
+  target: runtimeValuesSchema,
+  phase: z.enum(["stopping", "booting", "serving"])
+});
+
+export const runtimeConfigSchema = z.object({
+  current: runtimeValuesSchema,
+  defaults: runtimeValuesSchema,
+  /** Largest context the model itself documents; null when it documents none. */
+  contextWindowMax: z.number().int().positive().nullable(),
+  /** "model" when the maximum above came from the model, "product" otherwise. */
+  contextWindowMaxSource: z.enum(["model", "product"]),
+  /** Requests range this card can serve at the current context. */
+  concurrencyMax: z.number().int().min(1),
+  /** What the card can plausibly hold at this concurrency (advisory). */
+  estimatedMaxContext: z.number().int().positive(),
+  /** True when `current` is at or below the advisory estimate. */
+  fits: z.boolean(),
+  /** Non-null while a restart is in flight. */
+  restart: restartStateSchema.nullable()
+});
+
 export const sessionSchema = z.object({
   id: z.string().min(1),
   modelId: z.string().min(1),
@@ -97,7 +132,38 @@ export const sessionSchema = z.object({
   /** Mapped address, present from the moment the provider publishes a port. */
   endpoint: sessionBootEndpointSchema.nullable().default(null),
   /** Set on every terminal path (FR-007). Absent on runs from before 0.12.0. */
-  release: sessionReleaseSchema.nullable().default(null)
+  release: sessionReleaseSchema.nullable().default(null),
+  /** The values this run was launched with and the ceilings they were checked against. */
+  runtimeConfig: runtimeConfigSchema.nullable().default(null),
+  /** Present only while a restart is in flight. */
+  restart: restartStateSchema.nullable().default(null)
+});
+
+export const restartResultSchema = z.discriminatedUnion("status", [
+  z.object({
+    status: z.literal("restarted"),
+    session: sessionSchema,
+    config: runtimeConfigSchema
+  }),
+  z.object({
+    status: z.literal("failed"),
+    session: sessionSchema,
+    config: runtimeConfigSchema,
+    reason: z.string().min(1)
+  }),
+  z.object({
+    status: z.literal("fresh_run_required"),
+    session: sessionSchema,
+    estimate: estimateSchema,
+    reason: z.string().min(1)
+  })
+]);
+
+export const restartRequestSchema = z.object({
+  sessionId: z.string().min(1).max(100),
+  /** Mirrors `confirmEstimate`: the person has seen the consequences. */
+  confirmRestart: z.literal(true),
+  values: runtimeValuesSchema
 });
 
 export const sessionStartSchema = z.object({
@@ -107,14 +173,7 @@ export const sessionStartSchema = z.object({
   /** Compute power tier the user confirmed in the catalogue popup. */
   powerTier: powerTierSchema.optional(),
   /** Gated models require explicit confirmation before Maia provisions a GPU. */
-  confirmGatedAccess: z.boolean().optional(),
-  generation: z
-    .object({
-      temperature: z.number().min(0).max(2).optional(),
-      maxTokens: z.number().int().min(1).max(8192).optional(),
-      contextWindow: z.number().int().min(512).max(262144).optional()
-    })
-    .optional()
+  confirmGatedAccess: z.boolean().optional()
 });
 
 export const sessionEndSchema = z.object({
@@ -171,7 +230,33 @@ export const chatChunkSchema = z.object({
   delta: z.string(),
   done: z.boolean(),
   tokens: z.number().int().nonnegative().optional(),
-  errorMessage: z.string().optional()
+  errorMessage: z.string().optional(),
+  /** Messages the model did not see because they did not fit its context. */
+  omittedMessages: z.number().int().nonnegative().optional(),
+  /** True while the run is restarting; the composer is unavailable. */
+  restarting: z.boolean().optional()
+});
+
+/** What a turn produced, including what the model was not shown. */
+export const chatTurnResultSchema = z.object({
+  conversationId: z.string().min(1),
+  tokens: z.number().int().nonnegative(),
+  text: z.string(),
+  /** Count of stored messages excluded from the model's view. */
+  omittedMessages: z.number().int().nonnegative()
+});
+
+export const chatRegenerateSchema = z.object({
+  sessionId: z.string().min(1).max(100),
+  conversationId: z.string().min(1).max(100),
+  assistantMessageId: z.string().min(1).max(100)
+});
+
+export const chatEditSchema = z.object({
+  sessionId: z.string().min(1).max(100),
+  conversationId: z.string().min(1).max(100),
+  userMessageId: z.string().min(1).max(100),
+  content: z.string().min(1).max(32_000)
 });
 
 /**
@@ -237,6 +322,10 @@ export const conversationMessageSchema = z.object({
   reasoning: z.string().nullable(),
   /** Images attached to this turn, loaded separately so a transcript stays light. */
   images: z.array(chatImageSchema).default([]),
+  /** True when the person stopped the reply or it failed before finishing. */
+  interrupted: z.boolean().default(false),
+  /** Plain-language failure for an interrupted turn, when one was recorded. */
+  errorCode: z.string().nullable().default(null),
   createdAt: z.string()
 });
 
@@ -290,6 +379,14 @@ export type EstimatePreview = z.infer<typeof estimatePreviewResultSchema>;
 
 export type Estimate = z.infer<typeof estimateSchema>;
 export type Session = z.infer<typeof sessionSchema>;
+export type RuntimeValues = z.infer<typeof runtimeValuesSchema>;
+export type RuntimeConfig = z.infer<typeof runtimeConfigSchema>;
+export type RestartState = z.infer<typeof restartStateSchema>;
+export type RestartRequest = z.infer<typeof restartRequestSchema>;
+export type RestartResult = z.infer<typeof restartResultSchema>;
+export type ChatTurnResult = z.infer<typeof chatTurnResultSchema>;
+export type ChatRegenerate = z.infer<typeof chatRegenerateSchema>;
+export type ChatEdit = z.infer<typeof chatEditSchema>;
 export type SessionEvent = z.infer<typeof sessionEventSchema>;
 export type SessionStart = z.infer<typeof sessionStartSchema>;
 export type SessionEnd = z.infer<typeof sessionEndSchema>;

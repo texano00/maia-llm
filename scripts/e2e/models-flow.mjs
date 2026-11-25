@@ -329,7 +329,9 @@ async function main() {
     }
 
     if (WANT_BROWSER) {
-      log("--browser requested: React-level walk is documented in scripts/e2e/README.md");
+      log(
+        "--browser requested: run the viewport sweep with scripts/e2e/layout-sweep.mjs (needs Playwright and a signed-in cookie)"
+      );
     }
   } finally {
     // An interrupted run is still a billed run: release whatever is still open

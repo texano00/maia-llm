@@ -23,27 +23,68 @@ export function createVllmRuntime(options: VllmRuntimeOptions): InferenceRuntime
   const fetchImpl = options.fetchImpl ?? fetch;
 
   return {
-    async stream({ modelId, instanceId, prompt, images, signal, onDelta }) {
+    async stream({ modelId, instanceId, messages, images, signal, onDelta, apiKey }) {
       if (instanceId === null) {
         throw new Error("The model instance is not available.");
       }
 
-      const endpoint = options.resolveEndpoint(instanceId);
-      if (!endpoint) {
-        throw new Error("The model endpoint is not reachable; the GPU may have been released.");
+      // Images belong to the turn that carried them: the newest user message.
+      const lastUserIndex = messages.reduce(
+        (found, message, index) => (message.role === "user" ? index : found),
+        -1
+      );
+      const payloadMessages = messages.map((message, index) => ({
+        role: message.role,
+        content:
+          index === lastUserIndex ? buildContent(message.content, images) : message.content
+      }));
+
+      /**
+       * The endpoint is resolved per attempt: a restart can move the mapped
+       * port, and a retry that reused the old one would fail for the wrong
+       * reason. The run's key, when present, is the only credential sent.
+       */
+      const post = async (): Promise<Response> => {
+        const endpoint = options.resolveEndpoint(instanceId);
+        if (!endpoint) {
+          throw new Error("The model endpoint is not reachable; the GPU may have been released.");
+        }
+
+        const headers: Record<string, string> = { "content-type": "application/json" };
+        if (apiKey) {
+          headers.authorization = `Bearer ${apiKey}`;
+        }
+
+        return fetchImpl(`http://${endpoint.host}:${endpoint.port}/v1/chat/completions`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            model: modelId,
+            messages: payloadMessages,
+            stream: true,
+            stream_options: { include_usage: true }
+          }),
+          signal
+        });
+      };
+
+      let response = await post();
+
+      // One retry: a restart may have republished the run on a new port. A
+      // second rejection means the credential itself is wrong, which no retry
+      // can heal.
+      if (response.status === 401) {
+        response = await post();
       }
 
-      const response = await fetchImpl(`http://${endpoint.host}:${endpoint.port}/v1/chat/completions`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          model: modelId,
-          messages: [{ role: "user", content: buildContent(prompt, images) }],
-          stream: true,
-          stream_options: { include_usage: true }
-        }),
-        signal
-      });
+      if (response.status === 401) {
+        throw Object.assign(
+          new Error(
+            "The model server rejected the run's key. Restart the model to refresh it."
+          ),
+          { code: "CREDENTIAL_REJECTED", status: 401 }
+        );
+      }
 
       if (!response.ok || !response.body) {
         const detail = await response.text().catch(() => "");

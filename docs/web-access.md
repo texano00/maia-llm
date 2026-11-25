@@ -65,6 +65,21 @@ in the database or in logs.
 A captcha failure is `VALIDATION_FAILED`; an unreachable `siteverify` is
 `PROVIDER_UNAVAILABLE` with `retryable: true`. Neither sends email.
 
+## The built-in Chat uses the run's key (0.13.0)
+
+Every run is started with a key (`--api-key`), because its port is reachable from
+the internet. The internal Chat now presents that key on every inference request:
+`InferenceRuntime.stream` receives `apiKey` from the orchestrator's in-memory run
+and `createVllmRuntime` sends `Authorization: Bearer …`. The key never reaches
+the renderer, a log, a transcript or an export. A request answered with 401 is
+retried once after re-resolving the endpoint (a restart can move the port); a
+second 401 is reported as a rejected key with a route to restart the model.
+
+Chat also sends the stored conversation, not just the newest message. The
+request is trimmed to the run's per-request context window (conservative 4
+chars/token, 10 % margin), oldest turns first, and the number of omitted messages
+is returned so the UI can say how many earlier messages the model did not see.
+
 ## Account data
 
 Every signed-in request is dispatched to a per-account service graph whose

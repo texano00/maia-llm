@@ -21,7 +21,9 @@ function session(id: string, state: Session["state"], modelId = "Qwen/Qwen2.5-7B
     powerTier: "balanced",
     capability: "text",
     simulated: false,
-    events: []
+    events: [],
+    runtimeConfig: null,
+    restart: null
   };
 }
 
@@ -49,6 +51,20 @@ describe("chat model readiness", () => {
     expect(sessionForModel(sessions, "meta-llama/Llama-3.1-8B-Instruct")?.id).toBe("live");
     expect(sessionForModel(sessions, "other/model")).toBeNull();
     expect(sessionForModel(sessions, null)).toBeNull();
+  });
+
+  it("never offers a run that is still starting or restarting", () => {
+    const restarting: Session = {
+      ...session("restarting", "provisioning"),
+      restart: {
+        startedAt: "2026-11-25T10:05:00.000Z",
+        previous: { contextWindow: 32768, maxConcurrentRequests: 4 },
+        target: { contextWindow: 65536, maxConcurrentRequests: 2 },
+        phase: "booting"
+      }
+    };
+
+    expect(readySessions([restarting])).toEqual([]);
   });
 
   it("picks a ready model when a new chat has none", () => {

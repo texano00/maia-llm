@@ -11,19 +11,25 @@ import type {
 import {
   catalogueQuerySchema,
   chatAbortSchema,
+  chatEditSchema,
+  chatRegenerateSchema,
   chatSendSchema,
   conversationDeleteSchema,
   conversationImageRequestSchema,
   powerTierSchema,
+  restartRequestSchema,
   sessionEndSchema,
   sessionStartSchema,
-  type ChatChunk
+  type ChatChunk,
+  type ChatImageInput,
+  type ChatTurnResult
 } from "@maia/contracts";
 import type { IpcRegistry } from "./registry";
 import type { CatalogueService } from "../services/catalogue/service";
 import type { SessionOrchestrator } from "../services/sessions/orchestrator";
 import type { HistoryRepository } from "../services/history/repository";
 import type { ConversationImageStore } from "../services/history/images";
+import { buildContext } from "../services/chat/context";
 
 const modelIdSchema = z.object({ id: z.string().min(1).max(200) });
 
@@ -77,6 +83,8 @@ export interface WorkspaceHandlersOptions {
 }
 
 const TITLE_MAX_LENGTH = 60;
+/** Fallback only: every live run reports its own context window. */
+const DEFAULT_CONTEXT_WINDOW = 32_768;
 
 /**
  * Catalogue, session, conversation, and chat surface. Conversations survive the
@@ -138,6 +146,16 @@ export function registerWorkspaceHandlers(options: WorkspaceHandlersOptions): vo
 
   registry.register("session.end", sessionEndSchema, async (payload): Promise<Session | null> => {
     return sessions.end(payload.sessionId, payload.reason ?? "user");
+  });
+
+  // The values this run is serving with, plus what the model and the card can
+  // take. Read is side-effect free; a change goes through `session.restart`.
+  registry.register("session.runtimeConfig", sessionIdSchema, (payload) =>
+    sessions.runtimeConfig(payload.sessionId)
+  );
+
+  registry.register("session.restart", restartRequestSchema, async (payload) => {
+    return sessions.restart(payload.sessionId, payload.values);
   });
 
   registry.register(
@@ -250,48 +268,159 @@ export function registerWorkspaceHandlers(options: WorkspaceHandlersOptions): vo
       });
     }
 
+    return runTurn(session, conversationId, payload.images);
+  });
+
+  /**
+   * Runs one turn from the stored, visible transcript. The request always
+   * carries the conversation up to the newest user message, trimmed to the
+   * run's per-request context window; the count of dropped turns is returned so
+   * the UI can disclose it instead of losing context silently.
+   */
+  async function runTurn(
+    session: Session,
+    conversationId: string,
+    outgoingImages: ChatImageInput[]
+  ): Promise<ChatTurnResult> {
+    const found = history.getConversation(conversationId);
+    if (!found) {
+      throw Object.assign(new Error("Conversation not found"), { code: "NOT_FOUND" });
+    }
+
+    const contextWindow =
+      sessions.runtimeConfig(session.id)?.current.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
+    const built = buildContext(found.messages, { contextWindow });
+
     let text = "";
     // Reasoning models stream their thinking first; it is stored next to the
     // answer so the chat can show it on demand once the turn has finished.
     let reasoning = "";
-    const result = await sessions.send(
-      session.id,
-      payload.content,
-      (kind, delta) => {
-        if (kind === "content") {
-          text += delta;
-        } else {
-          reasoning += delta;
-        }
-        broadcastChat({
-          sessionId: session.id,
-          conversationId,
-          kind,
-          delta,
-          done: false
-        });
-      },
-      payload.images
+
+    try {
+      const result = await sessions.send(
+        session.id,
+        built.messages,
+        (kind, delta) => {
+          if (kind === "content") {
+            text += delta;
+          } else {
+            reasoning += delta;
+          }
+          broadcastChat({
+            sessionId: session.id,
+            conversationId,
+            kind,
+            delta,
+            done: false
+          });
+        },
+        outgoingImages
+      );
+
+      history.appendMessage({
+        conversationId,
+        role: "assistant",
+        content: text,
+        reasoning: reasoning.length > 0 ? reasoning : null,
+        completionTokens: result.tokens
+      });
+
+      broadcastChat({
+        sessionId: session.id,
+        conversationId,
+        kind: "content",
+        delta: "",
+        done: true,
+        tokens: result.tokens,
+        omittedMessages: built.omittedMessages
+      });
+
+      return {
+        conversationId,
+        tokens: result.tokens,
+        text,
+        omittedMessages: built.omittedMessages
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const stopped = /cancel|abort|stopped/i.test(message);
+
+      // A stopped or failed turn is kept, marked interrupted, so the transcript
+      // never loses what the person already read.
+      history.appendMessage({
+        conversationId,
+        role: "assistant",
+        content: text,
+        reasoning: reasoning.length > 0 ? reasoning : null,
+        interrupted: true,
+        errorCode: stopped ? "STOPPED" : message.slice(0, 200)
+      });
+
+      broadcastChat({
+        sessionId: session.id,
+        conversationId,
+        kind: "content",
+        delta: "",
+        done: true,
+        omittedMessages: built.omittedMessages,
+        ...(stopped ? {} : { errorMessage: message })
+      });
+
+      if (stopped) {
+        return { conversationId, tokens: 0, text, omittedMessages: built.omittedMessages };
+      }
+
+      throw Object.assign(new Error(message), { code: "PROVIDER_UNAVAILABLE" });
+    }
+  }
+
+  registry.register("chat.regenerate", chatRegenerateSchema, async (payload) => {
+    const session = sessions.getSession(payload.sessionId);
+    if (!session) {
+      throw Object.assign(new Error("That model is not running any more."), { code: "NOT_FOUND" });
+    }
+
+    const found = history.getConversation(payload.conversationId);
+    const target = found?.messages.find((message) => message.id === payload.assistantMessageId);
+    if (!found || !target || target.role !== "assistant") {
+      throw Object.assign(new Error("That reply is no longer in this conversation."), {
+        code: "NOT_FOUND"
+      });
+    }
+
+    history.supersedeMessage(target.id, target.id);
+    return runTurn(session, payload.conversationId, []);
+  });
+
+  registry.register("chat.edit", chatEditSchema, async (payload) => {
+    const session = sessions.getSession(payload.sessionId);
+    if (!session) {
+      throw Object.assign(new Error("That model is not running any more."), { code: "NOT_FOUND" });
+    }
+
+    const found = history.getConversation(payload.conversationId);
+    const target = found?.messages.find((message) => message.id === payload.userMessageId);
+    if (!found || !target || target.role !== "user") {
+      throw Object.assign(new Error("That message is no longer in this conversation."), {
+        code: "NOT_FOUND"
+      });
+    }
+
+    const replacement = history.appendMessage({
+      conversationId: payload.conversationId,
+      role: "user",
+      content: payload.content
+    });
+    // The edited turn replaces the old one and its answer together, but not
+    // itself: it sits at a higher sequence than the attempt it replaces.
+    history.supersedeFrom(
+      payload.conversationId,
+      target.sequence,
+      replacement.id,
+      replacement.sequence
     );
 
-    history.appendMessage({
-      conversationId,
-      role: "assistant",
-      content: text,
-      reasoning: reasoning.length > 0 ? reasoning : null,
-      completionTokens: result.tokens
-    });
-
-    broadcastChat({
-      sessionId: session.id,
-      conversationId,
-      kind: "content",
-      delta: "",
-      done: true,
-      tokens: result.tokens
-    });
-
-    return { conversationId, tokens: result.tokens, text };
+    return runTurn(session, payload.conversationId, []);
   });
 
   registry.register("chat.abort", chatAbortSchema, (payload) => {
@@ -362,6 +491,8 @@ function describeConversation(
       content: message.content,
       reasoning: message.reasoning,
       images: grouped.get(message.id) ?? [],
+      interrupted: message.interrupted,
+      errorCode: message.errorCode,
       createdAt: message.createdAt
     })),
     frozen:

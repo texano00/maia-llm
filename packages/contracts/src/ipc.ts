@@ -160,6 +160,10 @@ export const ipcChannels = [
   "session.status",
   "session.start",
   "session.end",
+  /** The values this run serves with, and what the model and card can take. */
+  "session.runtimeConfig",
+  /** Restart in place with new values; never rents a second machine silently. */
+  "session.restart",
   /** Base URL, model id and per-run key for using a running model elsewhere. */
   "session.endpoint",
   "conversation.list",
@@ -172,6 +176,10 @@ export const ipcChannels = [
   "conversation.image",
   "chat.send",
   "chat.abort",
+  /** Ask again in place; the earlier attempt is retained, not deleted. */
+  "chat.regenerate",
+  /** Edit a sent message and send it again; earlier attempts are retained. */
+  "chat.edit",
   "notifications.list",
   "notifications.dismiss",
   "notifications.claim",

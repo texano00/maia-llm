@@ -137,3 +137,36 @@ describe("backoffice tables survive a phone", () => {
     expect(jsx).toMatch(/className="ghost"[\s\S]{0,200}?(Grant|Revoke)/);
   });
 });
+
+describe("runtime settings and chat stay inside the column", () => {
+  const theme = rules(read(THEME_CSS));
+
+  it("lets the runtime panel shrink and keeps it one column on a phone", () => {
+    expect(theme).toMatch(/\.runtime-settings\s*\{[^}]*max-width:\s*100%/);
+    expect(theme).toMatch(/\.runtime-settings\s*\{[^}]*min-width:\s*0/);
+
+    const phoneBlock = theme.slice(theme.lastIndexOf("@media (max-width: 640px)"));
+    expect(phoneBlock).toContain(".runtime-settings");
+    expect(phoneBlock).toMatch(/grid-template-columns:\s*minmax\(0,\s*1fr\)/);
+  });
+
+  it("wraps long addresses, identifiers and risk sentences", () => {
+    expect(theme).toMatch(/\.endpoint-value[\s\S]{0,200}?overflow-wrap:\s*anywhere/);
+    expect(theme).toMatch(/\.model-run-facts dd[\s\S]{0,200}?overflow-wrap:\s*anywhere/);
+    expect(theme).toMatch(/\.runtime-risk[\s\S]{0,200}?overflow-wrap:\s*anywhere/);
+    expect(theme).toMatch(/\.chat-omitted[\s\S]{0,200}?overflow-wrap:\s*anywhere/);
+  });
+
+  it("scrolls code inside its bubble instead of the page", () => {
+    expect(theme).toMatch(/\.bubble pre[\s\S]{0,200}?overflow-x:\s*auto/);
+  });
+
+  it("keeps message actions in the markup and wraps them", () => {
+    expect(theme).toMatch(/\.bubble-actions\s*\{[^}]*flex-wrap:\s*wrap/);
+    expect(theme).toContain(".composer-editing");
+  });
+
+  it("has a screen-reader-only status utility", () => {
+    expect(theme).toMatch(/\.sr-only\s*\{[^}]*position:\s*absolute/);
+  });
+});

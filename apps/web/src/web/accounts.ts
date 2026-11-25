@@ -26,6 +26,7 @@ import { deriveDefaultScenarios } from "../main/services/catalogue/default-scena
 import { VastAiClient } from "../main/services/providers/vastai/client";
 import { createVllmRuntime } from "../main/services/inference/vllm";
 import { createModelPlanResolver } from "../main/services/inference/model-plan-resolver";
+import { planLaunchLimits } from "../main/services/inference/model-plan";
 import { resolveEngine } from "../main/services/inference/engine-choice";
 import { createFailureReporter } from "../main/services/diagnostics/failures";
 import { NotificationCenter } from "../main/services/notifications/center";
@@ -263,6 +264,37 @@ export async function createAccountRuntime(
         options.catalogue.supportFor(modelId)?.engine,
         options.catalogueRepository.getArtifacts(modelId)
       ) ?? "vllm",
+    contextWindowFor: (modelId) =>
+      options.catalogueRepository.get(modelId)?.contextWindow ?? null,
+    runtimeLimitsFor: ({ modelId, gpuRamGb, contextWindow, maxConcurrentRequests }) => {
+      const model = options.catalogueRepository.get(modelId);
+      const engine =
+        resolveEngine(
+          modelId,
+          options.catalogue.supportFor(modelId)?.engine,
+          options.catalogueRepository.getArtifacts(modelId)
+        ) ?? "vllm";
+      const attempt = (concurrentRequests: number) =>
+        planLaunchLimits({
+          vramGb: gpuRamGb,
+          parameterCount: model?.parameterCount ?? null,
+          quantization: null,
+          contextWindow: model?.contextWindow ?? contextWindow,
+          requestedMaxModelLen: contextWindow,
+          maxConcurrentRequests: concurrentRequests,
+          concurrencyMultipliesContext: engine === "llamacpp"
+        });
+
+      const base = attempt(maxConcurrentRequests);
+      let concurrencyMax = 1;
+      for (let candidate = 1; candidate <= 8; candidate += 1) {
+        if (attempt(candidate).fits) {
+          concurrencyMax = candidate;
+        }
+      }
+
+      return { estimatedMaxContext: base.estimatedMaxContext, concurrencyMax };
+    },
     reportFailure,
     logger
   });

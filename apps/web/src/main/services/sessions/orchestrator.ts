@@ -8,13 +8,19 @@ import {
   type ModelCapability,
   type PowerTier,
   type ReleaseReason,
+  type RestartResult,
+  type RestartState,
+  type RuntimeConfig,
+  type RuntimeValues,
   type Session,
   type SessionEndpoint,
   type SessionStart
 } from "@maia/contracts";
 import { buildEstimate } from "../cost/estimator";
+import { DEFAULT_VLLM_MAX_SEQS } from "../inference/model-plan";
 import { describeMemoryFailure, describeModelFailure, extractRootCause } from "./failure";
 import { DEFAULT_POWER_TIER, projectTokensPerSecond, tierFilters } from "./power";
+import { validateRestart } from "./restart-policy";
 import type { SessionStore } from "./store";
 
 export type StreamKind = "content" | "reasoning";
@@ -41,7 +47,14 @@ export interface ComputeProvider {
   }): Promise<ComputeOffer | null>;
   createInstance(
     offer: ComputeOffer,
-    context: { label: string; modelId: string; contextScale?: number; apiKey?: string }
+    context: {
+      label: string;
+      modelId: string;
+      contextScale?: number;
+      apiKey?: string;
+      /** Values this boot must apply; absent means the engine defaults. */
+      runtime?: { contextWindow?: number; maxConcurrentRequests?: number };
+    }
   ): Promise<{ instanceId: number }>;
   waitUntilReady(
     instanceId: number,
@@ -107,15 +120,24 @@ export interface InferenceImage {
   dataBase64: string;
 }
 
+/** A stored turn as the model receives it. */
+export interface InferenceMessage {
+  role: "system" | "user" | "assistant";
+  content: string;
+}
+
 export interface InferenceRuntime {
   stream(input: {
     sessionId: string;
     modelId: string;
     instanceId: number | null;
-    prompt: string;
+    /** The conversation up to and including this turn, oldest first. */
+    messages: InferenceMessage[];
     /** Images for vision runs; empty for text-only models. */
     images?: InferenceImage[] | undefined;
     signal: AbortSignal;
+    /** The run's key, when the server was started with one. Never logged. */
+    apiKey?: string | null;
     onDelta: (kind: StreamKind, text: string) => void;
   }): Promise<{ tokens: number; text: string }>;
 }
@@ -127,6 +149,8 @@ export type SessionErrorCode =
   | "MODEL_NOT_READY"
   | "PROVIDER_UNAVAILABLE"
   | "CAPABILITY_UNSUPPORTED"
+  /** The values asked for are outside what the model or the card can use. */
+  | "VALIDATION_FAILED"
   /** No provider credential is saved, so nothing can be rented. */
   | "CREDENTIAL_MISSING"
   /** The saved credential was rejected by the provider. */
@@ -208,12 +232,26 @@ export interface SessionOrchestratorOptions {
   runtimeFor?: (modelId: string) => Session["runtime"];
   /** Called once when a run reaches a terminal state, after metrics are stored. */
   onRunFinished?: (session: Session) => void;
+  /** The model's documented context window, for the parameter panel. */
+  contextWindowFor?: (modelId: string) => number | null;
+  /**
+   * Advisory card limits for the parameter panel: what this GPU can hold at the
+   * requested values. Pure; the composition root owns the catalogue lookups.
+   */
+  runtimeLimitsFor?: (input: {
+    modelId: string;
+    gpuRamGb: number;
+    contextWindow: number;
+    maxConcurrentRequests: number;
+  }) => { estimatedMaxContext: number; concurrencyMax: number };
 }
 
 interface SessionRuntime {
   session: Session;
   lastActivityAt: number;
   abort: AbortController | null;
+  /** The in-flight turn, so a restart can wait for it to settle. */
+  sending: Promise<unknown> | null;
   /** Tokens produced across this run's turns and their generation time. */
   outputTokens: number;
   generationMs: number;
@@ -222,6 +260,8 @@ interface SessionRuntime {
    * never written to a session event, log or usage sample.
    */
   apiKey: string | null;
+  /** The offer this run was booked on, so a restart can reuse the same machine. */
+  lastOffer: ComputeOffer | null;
 }
 
 /**
@@ -230,6 +270,10 @@ interface SessionRuntime {
  */
 /** A cold boot pulls a multi-GB image and then the weights; 20 min was too tight. */
 const DEFAULT_READINESS_TIMEOUT_MS = 40 * 60_000;
+
+/** When a model documents no window, this is the product's ceiling. */
+const PRODUCT_CONTEXT_CEILING = 32_768;
+const MIN_CONTEXT = 4_096;
 
 /** Every instance the app rents carries this label, so orphans can be found. */
 const SESSION_LABEL_PREFIX = "maia:";
@@ -314,11 +358,13 @@ export class SessionOrchestrator {
         session,
         lastActivityAt: this.now(),
         abort: null,
+        sending: null,
         outputTokens: 0,
         generationMs: 0,
         // An inherited session was started by a previous process: its key is
         // gone, so it is reported as terminated on the next reconcile anyway.
-        apiKey: null
+        apiKey: null,
+        lastOffer: null
       });
     }
   }
@@ -567,9 +613,11 @@ export class SessionOrchestrator {
         session: provisioning,
         lastActivityAt: this.now(),
         abort: null,
+        sending: null,
         outputTokens: 0,
         generationMs: 0,
-        apiKey
+        apiKey,
+        lastOffer: offer
       });
 
       // Booting a model takes minutes. The caller must not be blocked for that
@@ -1149,6 +1197,323 @@ export class SessionOrchestrator {
     return runtime ? this.refresh(runtime).session : null;
   }
 
+  /** The values a run is using, its engine defaults and the model's ceiling. */
+  private effectiveRuntime(session: Session): {
+    current: RuntimeValues;
+    defaults: RuntimeValues;
+    contextWindowMax: number | null;
+    contextWindowMaxSource: "model" | "product";
+  } {
+    if (session.runtimeConfig) {
+      const { current, defaults, contextWindowMax, contextWindowMaxSource } = session.runtimeConfig;
+      return { current, defaults, contextWindowMax, contextWindowMaxSource };
+    }
+
+    // A run from before this feature has no stored values. Report the values the
+    // engine actually starts with, never an invented one.
+    const documented = this.options.contextWindowFor?.(session.modelId) ?? null;
+    const contextWindow = Math.max(
+      MIN_CONTEXT,
+      Math.min(documented ?? PRODUCT_CONTEXT_CEILING, PRODUCT_CONTEXT_CEILING)
+    );
+    const values: RuntimeValues = {
+      contextWindow,
+      maxConcurrentRequests: session.runtime === "llamacpp" ? 1 : DEFAULT_VLLM_MAX_SEQS
+    };
+
+    return {
+      current: values,
+      defaults: values,
+      contextWindowMax: documented,
+      contextWindowMaxSource: documented === null ? "product" : "model"
+    };
+  }
+
+  private cardLimits(
+    session: Session,
+    values: RuntimeValues
+  ): { estimatedMaxContext: number; concurrencyMax: number } {
+    if (this.options.runtimeLimitsFor && session.gpuRamGb && session.gpuRamGb > 0) {
+      return this.options.runtimeLimitsFor({
+        modelId: session.modelId,
+        gpuRamGb: session.gpuRamGb,
+        contextWindow: values.contextWindow,
+        maxConcurrentRequests: values.maxConcurrentRequests
+      });
+    }
+
+    return { estimatedMaxContext: values.contextWindow, concurrencyMax: 8 };
+  }
+
+  private accruedMicroUsd(session: Session): number {
+    const startedMs = Date.parse(session.startedAt);
+    const elapsedHours = Math.max(0, this.now() - startedMs) / 3_600_000;
+    return Math.round(elapsedHours * session.hourlyRateMicroUsd);
+  }
+
+  /** What the parameter panel shows, or null when there is no live run. */
+  runtimeConfig(sessionId: string): RuntimeConfig | null {
+    const runtime = this.runtimes.get(sessionId);
+    const session = runtime ? this.refresh(runtime).session : this.options.store.get(sessionId);
+
+    if (!session || ["estimated", "ending", "ended", "cancelled", "failed"].includes(session.state)) {
+      return null;
+    }
+
+    const effective = this.effectiveRuntime(session);
+    const limits = this.cardLimits(session, effective.current);
+
+    return {
+      current: effective.current,
+      defaults: effective.defaults,
+      contextWindowMax: effective.contextWindowMax,
+      contextWindowMaxSource: effective.contextWindowMaxSource,
+      concurrencyMax: limits.concurrencyMax,
+      estimatedMaxContext: limits.estimatedMaxContext,
+      fits: effective.current.contextWindow <= limits.estimatedMaxContext,
+      restart: session.restart
+    };
+  }
+
+  /**
+   * Applies new runtime values by restarting the server on the already-rented
+   * machine. The old instance is confirmed gone before a replacement is booked,
+   * so no moment in this method bills two machines.
+   */
+  async restart(sessionId: string, values: RuntimeValues): Promise<RestartResult> {
+    const runtime = this.runtimes.get(sessionId);
+    const session = runtime ? this.refresh(runtime).session : null;
+
+    if (!runtime || !session) {
+      throw new SessionError("NOT_FOUND", "That model is not running any more.");
+    }
+
+    const effective = this.effectiveRuntime(session);
+    const limits = this.cardLimits(session, values);
+    const capMicroUsd = this.options.capMicroUsd?.() ?? 0;
+    const check = validateRestart({
+      session,
+      values,
+      current: effective.current,
+      contextWindowMax: effective.contextWindowMax,
+      concurrencyMax: limits.concurrencyMax,
+      capMicroUsd,
+      accruedMicroUsd: this.accruedMicroUsd(session)
+    });
+
+    if (!check.ok) {
+      this.options.store.recordRestart({
+        sessionId,
+        previous: effective.current,
+        target: values,
+        outcome: "refused",
+        reason: check.refusal.message
+      });
+      throw new SessionError(check.refusal.code, check.refusal.message);
+    }
+
+    const offer = runtime.lastOffer;
+    const instanceId = session.instanceId;
+    if (!offer || instanceId === null) {
+      throw new SessionError(
+        "MODEL_NOT_READY",
+        "This run cannot be restarted in place. Start the model again, with the values you want."
+      );
+    }
+
+    // A reply in flight belongs to the old server; stop it and let it settle so
+    // the stored turn is marked interrupted before the machine disappears.
+    runtime.abort?.abort();
+    await runtime.sending?.catch(() => undefined);
+
+    const requestedAt = new Date(this.now()).toISOString();
+    const restart: RestartState = {
+      startedAt: requestedAt,
+      previous: effective.current,
+      target: values,
+      phase: "stopping"
+    };
+
+    this.options.store.transition(sessionId, "provisioning");
+    this.options.store.beginRestart(sessionId, restart);
+    this.options.store.appendEvent(
+      sessionId,
+      "info",
+      `Restarting with a ${values.contextWindow.toLocaleString()}-token context and ${values.maxConcurrentRequests} concurrent request(s). The GPU stays rented.`,
+      new Date(this.now())
+    );
+    this.options.notifications?.set({
+      key: `run:restart:${sessionId}`,
+      severity: "warning",
+      message: `${session.modelId} is restarting with a ${values.contextWindow.toLocaleString()}-token context.`,
+      route: `/models?run=${sessionId}`,
+      dismissible: false
+    });
+
+    const auditId = this.options.store.recordRestart({
+      sessionId,
+      previous: effective.current,
+      target: values,
+      outcome: "started",
+      requestedAt
+    });
+
+    const fail = (reason: string): RestartResult => {
+      this.options.store.transition(sessionId, "failed", {
+        endedAt: new Date(this.now()).toISOString(),
+        endReason: "failure",
+        failureCode: "VALIDATION_FAILED"
+      });
+      this.options.store.recordRelease(sessionId, {
+        reason: "start_failed",
+        phase: "restart",
+        elapsedMs: Math.max(0, this.now() - Date.parse(session.startedAt))
+      });
+      this.options.store.clearRestart(sessionId);
+      this.options.store.completeRestart(auditId, "failed", reason);
+      this.options.store.appendEvent(sessionId, "error", reason, new Date(this.now()));
+      this.options.notifications?.set({
+        key: `run:restart:${sessionId}`,
+        severity: "error",
+        message: `${session.modelId} could not restart. ${reason}`,
+        route: `/models?run=${sessionId}`,
+        dismissible: true
+      });
+
+      const settled = this.refresh(runtime).session;
+      const config = this.runtimeConfig(sessionId) ?? {
+        current: effective.current,
+        defaults: effective.defaults,
+        contextWindowMax: effective.contextWindowMax,
+        contextWindowMaxSource: effective.contextWindowMaxSource,
+        concurrencyMax: limits.concurrencyMax,
+        estimatedMaxContext: limits.estimatedMaxContext,
+        fits: true,
+        restart: null
+      };
+
+      return { status: "failed", session: settled, config, reason };
+    };
+
+    try {
+      await this.options.compute.destroyInstance(instanceId);
+
+      // Creating before this confirmation would briefly bill two machines.
+      if (!(await this.confirmGone(instanceId))) {
+        return fail("The machine could not be confirmed released, so nothing new was rented.");
+      }
+
+      this.options.store.clearEndpoint(sessionId);
+      this.options.store.beginRestart(sessionId, { ...restart, phase: "booting" });
+
+      const created = await this.options.compute.createInstance(offer, {
+        label: session.label,
+        modelId: session.modelId,
+        ...(runtime.apiKey ? { apiKey: runtime.apiKey } : {}),
+        runtime: {
+          contextWindow: values.contextWindow,
+          maxConcurrentRequests: values.maxConcurrentRequests
+        }
+      });
+
+      this.options.store.setInstance(sessionId, created.instanceId, offer.offerId);
+      runtime.session = { ...runtime.session, instanceId: created.instanceId, state: "provisioning" };
+
+      await this.options.compute.waitUntilReady(
+        created.instanceId,
+        this.options.bootCeilingMs ?? this.options.readinessTimeoutMs ?? DEFAULT_READINESS_TIMEOUT_MS
+      );
+
+      this.options.store.transition(sessionId, "ready", {
+        readyAt: new Date(this.now()).toISOString()
+      });
+      this.options.store.transition(sessionId, "active");
+      this.options.store.recordRuntimeConfig(sessionId, {
+        current: values,
+        defaults: effective.defaults,
+        contextWindowMax: effective.contextWindowMax,
+        contextWindowMaxSource: effective.contextWindowMaxSource
+      });
+      this.options.store.clearRestart(sessionId);
+      this.options.store.completeRestart(auditId, "succeeded");
+
+      const mapped = this.options.compute.resolveEndpoint?.(created.instanceId);
+      if (mapped) {
+        this.options.store.recordEndpoint(sessionId, mapped.host, mapped.port);
+      }
+
+      this.options.store.appendEvent(
+        sessionId,
+        "info",
+        `Restart complete. The model is serving with a ${values.contextWindow.toLocaleString()}-token context.`,
+        new Date(this.now())
+      );
+      this.options.notifications?.set({
+        key: `run:restart:${sessionId}`,
+        severity: "success",
+        message: `${session.modelId} restarted with a ${values.contextWindow.toLocaleString()}-token context.`,
+        ...(mapped
+          ? {
+              endpoint: {
+                baseUrl: `http://${mapped.host}:${mapped.port}/v1`,
+                host: mapped.host,
+                port: mapped.port,
+                modelId: session.modelId
+              }
+            }
+          : {}),
+        route: `/models?run=${sessionId}`,
+        dismissible: true
+      });
+
+      const refreshed = this.refresh(runtime).session;
+      const config = this.runtimeConfig(sessionId);
+      if (!config) {
+        throw new SessionError("NOT_FOUND", "The restarted run could not be read back.");
+      }
+
+      return { status: "restarted", session: refreshed, config };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const failed = fail(message);
+
+      // The old machine is gone, so a new estimate is the only honest next step.
+      try {
+        const estimate = await this.createEstimate(
+          session.modelId,
+          30,
+          session.powerTier ?? DEFAULT_POWER_TIER
+        );
+        return {
+          status: "fresh_run_required",
+          session: failed.status === "failed" ? failed.session : this.refresh(runtime).session,
+          estimate,
+          reason: message
+        };
+      } catch {
+        return failed;
+      }
+    }
+  }
+
+  /** True once the provider no longer lists the instance (or cannot answer). */
+  private async confirmGone(instanceId: number): Promise<boolean> {
+    const exists = this.options.compute.instanceExists;
+    if (!exists) {
+      return true;
+    }
+
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const seen = await exists.call(this.options.compute, instanceId).catch(() => true);
+      if (!seen) {
+        return true;
+      }
+      await this.delay(300);
+    }
+
+    return false;
+  }
+
   /**
    * How another tool reaches a running model: its mapped base URL, the model id
    * to request and the key that run was started with. Nothing is returned until
@@ -1205,7 +1570,7 @@ export class SessionOrchestrator {
 
   async send(
     sessionId: string,
-    content: string,
+    messages: InferenceMessage[],
     onDelta: (kind: StreamKind, text: string) => void,
     images: InferenceImage[] = []
   ): Promise<{ tokens: number; text: string }> {
@@ -1237,24 +1602,30 @@ export class SessionOrchestrator {
     runtime.abort = abort;
     const generationStarted = this.now();
 
-    try {
-      const result = await this.options.inference.stream({
+    const turn = this.options.inference
+      .stream({
         sessionId,
         modelId: runtime.session.modelId,
         instanceId: runtime.session.instanceId,
-        prompt: content,
+        messages,
         images,
+        apiKey: runtime.apiKey,
         signal: abort.signal,
         onDelta
+      })
+      .then((result) => {
+        runtime.outputTokens += result.tokens;
+        runtime.generationMs += Math.max(0, this.now() - generationStarted);
+        return result;
+      })
+      .finally(() => {
+        runtime.abort = null;
+        runtime.sending = null;
+        this.touchActivity(sessionId);
       });
 
-      runtime.outputTokens += result.tokens;
-      runtime.generationMs += Math.max(0, this.now() - generationStarted);
-      return result;
-    } finally {
-      runtime.abort = null;
-      this.touchActivity(sessionId);
-    }
+    runtime.sending = turn;
+    return turn;
   }
 
   abort(sessionId: string): void {

@@ -2,6 +2,9 @@ import type {
   ModelCapability,
   PowerTier,
   ReleaseReason,
+  RestartState,
+  RuntimeConfig,
+  RuntimeValues,
   Session,
   SessionEvent,
   SessionState
@@ -35,6 +38,28 @@ interface SessionRow {
   release_reason: ReleaseReason | null;
   release_phase: string | null;
   release_elapsed_ms: number | null;
+  runtime_config_json: string | null;
+  restart_json: string | null;
+}
+
+/** One restart attempt as the run's history records it. */
+export interface RestartRecord {
+  id: string;
+  sessionId: string;
+  requestedAt: string;
+  previous: RuntimeValues;
+  target: RuntimeValues;
+  outcome: "started" | "succeeded" | "failed" | "refused";
+  reason: string | null;
+  completedAt: string | null;
+}
+
+/** The subset of `RuntimeConfig` this store persists; the rest is derived. */
+export interface StoredRuntimeConfig {
+  current: RuntimeValues;
+  defaults: RuntimeValues;
+  contextWindowMax: number | null;
+  contextWindowMaxSource: "model" | "product";
 }
 
 /** Persistence for the session lifecycle; the schema enforces one active row. */
@@ -175,12 +200,112 @@ export class SessionStore {
       });
   }
 
+  /**
+   * The values this run starts with. Written on the first edit and after a
+   * restart succeeds; never before, so the UI cannot claim a value early.
+   */
+  recordRuntimeConfig(sessionId: string, config: StoredRuntimeConfig): void {
+    this.database
+      .prepare(
+        "UPDATE sessions SET runtime_config_json = ? WHERE id = ? AND account_id = ?"
+      )
+      .run(JSON.stringify(config), sessionId, this.accountId);
+  }
+
+  /** Marks a restart as in flight; cleared when it succeeds or fails. */
+  beginRestart(sessionId: string, restart: RestartState): void {
+    this.database
+      .prepare("UPDATE sessions SET restart_json = ? WHERE id = ? AND account_id = ?")
+      .run(JSON.stringify(restart), sessionId, this.accountId);
+  }
+
+  clearRestart(sessionId: string): void {
+    this.database
+      .prepare("UPDATE sessions SET restart_json = NULL WHERE id = ? AND account_id = ?")
+      .run(sessionId, this.accountId);
+  }
+
+  /** Opens an audit row; the same row is completed when the restart settles. */
+  recordRestart(input: {
+    sessionId: string;
+    previous: RuntimeValues;
+    target: RuntimeValues;
+    outcome: "started" | "succeeded" | "failed" | "refused";
+    reason?: string | null;
+    requestedAt?: string;
+    completedAt?: string | null;
+  }): string {
+    const id = randomUUID();
+    this.database
+      .prepare(
+        `INSERT INTO session_restarts
+           (id, session_id, account_id, requested_at, previous_json, target_json, outcome, reason, completed_at)
+         VALUES (@id, @sessionId, @accountId, @requestedAt, @previous, @target, @outcome, @reason, @completedAt)`
+      )
+      .run({
+        id,
+        sessionId: input.sessionId,
+        accountId: this.accountId,
+        requestedAt: input.requestedAt ?? new Date().toISOString(),
+        previous: JSON.stringify(input.previous),
+        target: JSON.stringify(input.target),
+        outcome: input.outcome,
+        reason: input.reason ?? null,
+        completedAt: input.completedAt ?? null
+      });
+
+    return id;
+  }
+
+  completeRestart(
+    restartId: string,
+    outcome: "succeeded" | "failed",
+    reason: string | null = null
+  ): void {
+    this.database
+      .prepare(
+        "UPDATE session_restarts SET outcome = ?, reason = ?, completed_at = ? WHERE id = ? AND account_id = ?"
+      )
+      .run(outcome, reason, new Date().toISOString(), restartId, this.accountId);
+  }
+
+  /** Newest first; the run card shows the last few and the full list on demand. */
+  getRestartHistory(sessionId: string): RestartRecord[] {
+    const rows = this.database
+      .prepare(
+        `SELECT id, session_id, requested_at, previous_json, target_json, outcome, reason, completed_at
+           FROM session_restarts
+          WHERE session_id = ? AND account_id = ?
+          ORDER BY requested_at DESC`
+      )
+      .all(sessionId, this.accountId) as Array<{
+      id: string;
+      session_id: string;
+      requested_at: string;
+      previous_json: string;
+      target_json: string;
+      outcome: RestartRecord["outcome"];
+      reason: string | null;
+      completed_at: string | null;
+    }>;
+
+    return rows.map((row) => ({
+      id: row.id,
+      sessionId: row.session_id,
+      requestedAt: row.requested_at,
+      previous: parseRuntimeValues(row.previous_json),
+      target: parseRuntimeValues(row.target_json),
+      outcome: row.outcome,
+      reason: row.reason,
+      completedAt: row.completed_at
+    }));
+  }
+
   transition(
     sessionId: string,
     state: SessionState,
     patch: { readyAt?: string; endedAt?: string; endReason?: Session["endReason"]; failureCode?: string } = {}
-  ): void {
-    this.database
+  ): void {    this.database
       .prepare(
         `UPDATE sessions
             SET state = @state,
@@ -380,6 +505,54 @@ function toSession(row: SessionRow, events: SessionEvent[] = []): Session {
             reason: row.release_reason,
             phase: row.release_phase,
             elapsedMs: row.release_elapsed_ms ?? 0
-          }
+          },
+    runtimeConfig: parseStoredConfig(row.runtime_config_json),
+    restart: parseRestart(row.restart_json)
   };
+}
+
+function parseStoredConfig(raw: string | null): RuntimeConfig | null {
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<StoredRuntimeConfig>;
+    if (!parsed.current || !parsed.defaults) {
+      return null;
+    }
+
+    return {
+      current: parsed.current,
+      defaults: parsed.defaults,
+      contextWindowMax: parsed.contextWindowMax ?? null,
+      contextWindowMaxSource: parsed.contextWindowMaxSource ?? "product",
+      concurrencyMax: parsed.current.maxConcurrentRequests,
+      estimatedMaxContext: parsed.current.contextWindow,
+      fits: true,
+      restart: null
+    };
+  } catch {
+    return null;
+  }
+}
+
+function parseRestart(raw: string | null): RestartState | null {
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(raw) as RestartState;
+  } catch {
+    return null;
+  }
+}
+
+function parseRuntimeValues(raw: string): RuntimeValues {
+  try {
+    return JSON.parse(raw) as RuntimeValues;
+  } catch {
+    return { contextWindow: 4096, maxConcurrentRequests: 1 };
+  }
 }

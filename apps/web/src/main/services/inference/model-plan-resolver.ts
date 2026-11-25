@@ -28,7 +28,8 @@ export function createModelPlanResolver(options: ModelPlanResolverOptions) {
     modelId: string,
     offer: { gpuRamGb: number },
     contextScale?: number,
-    apiKey?: string
+    apiKey?: string,
+    runtime?: { contextWindow?: number; maxConcurrentRequests?: number }
   ): Promise<LaunchPlan> => {
     let artifacts = options.artifacts(modelId);
     if (artifacts.length === 0) {
@@ -57,6 +58,8 @@ export function createModelPlanResolver(options: ModelPlanResolverOptions) {
       vramGb: offer.gpuRamGb,
       parameterCount: model?.parameterCount ?? null,
       contextWindow: model?.contextWindow ?? null,
+      requestedContextWindow: runtime?.contextWindow ?? null,
+      maxConcurrentRequests: runtime?.maxConcurrentRequests ?? null,
       contextScale: contextScale ?? null,
       engine: options.engine?.(modelId) ?? null,
       apiKey: apiKey ?? null

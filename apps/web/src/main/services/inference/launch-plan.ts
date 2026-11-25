@@ -63,6 +63,10 @@ export interface PlanLaunchInput {
   vramGb?: number | null;
   parameterCount?: number | null;
   contextWindow?: number | null;
+  /** The person's explicit per-request context, when they changed it. */
+  requestedContextWindow?: number | null;
+  /** Requests handled at once; engine defaults when absent. */
+  maxConcurrentRequests?: number | null;
   contextScale?: number | null;
   /** Engine the catalogue pinned for this model, when it has an opinion. */
   engine?: LaunchEngine | null | undefined;
@@ -114,6 +118,10 @@ export function planLaunch(input: PlanLaunchInput): LaunchPlan {
           parameterCount: input.parameterCount ?? null,
           quantization,
           contextWindow: input.contextWindow ?? null,
+          requestedMaxModelLen: input.requestedContextWindow ?? null,
+          maxConcurrentRequests:
+            input.maxConcurrentRequests ?? (engine === "llamacpp" ? 1 : null),
+          concurrencyMultipliesContext: engine === "llamacpp",
           contextScale: input.contextScale ?? null
         })
       : null;
@@ -144,6 +152,8 @@ export function planLaunch(input: PlanLaunchInput): LaunchPlan {
     vramGb: input.vramGb ?? null,
     parameterCount: input.parameterCount ?? null,
     contextWindow: input.contextWindow ?? null,
+    requestedContextWindow: input.requestedContextWindow ?? null,
+    maxConcurrentRequests: input.maxConcurrentRequests ?? null,
     contextScale: input.contextScale ?? null
   });
 
@@ -195,6 +205,9 @@ function planLlamaCpp(input: PlanLaunchInput & {
     ? `${input.modelId}:${input.quantization}`
     : input.modelId;
   const context = input.limits?.maxModelLen ?? DEFAULT_CONTEXT;
+  // llama.cpp's `-c` is the total across `--parallel` slots, so one request must
+  // still get the context the person chose.
+  const concurrency = input.limits?.maxConcurrentRequests ?? 1;
   const args = [
     "-hf",
     reference,
@@ -209,13 +222,13 @@ function planLlamaCpp(input: PlanLaunchInput & {
     "--alias",
     input.modelId,
     "-c",
-    String(context),
+    String(context * concurrency),
     "-ngl",
     LLAMACPP_GPU_LAYERS,
-    // One slot: `-c` is the context budget the planner sized against VRAM,
-    // and llama.cpp splits it across slots (default 4 × 32k ≈ 4× the cache).
+    // The total context is split across `--parallel` slots, so this is what
+    // makes each slot get the value the person chose.
     "--parallel",
-    "1",
+    String(concurrency),
     // `-hf` also fetches the sibling `mmproj-*.gguf` vision projector, which
     // Maia's text chat never uses but which costs VRAM and load time.
     "--no-mmproj",

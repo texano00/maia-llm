@@ -2,8 +2,10 @@ import { Link } from "react-router-dom";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import type {
   ChatImage,
+  ChatTurnResult,
   ConversationDetail,
   ConversationSummary,
+  RuntimeConfig,
   Session
 } from "@maia/contracts";
 import { useWorkspace } from "../../shared/session/WorkspaceProvider";
@@ -14,6 +16,12 @@ import { useKeyboardInset } from "../../shared/useKeyboardInset";
 import { MessageContent } from "./MessageContent";
 import { ReasoningPanel } from "./ReasoningPanel";
 import { defaultSession, readySessions, sessionForModel } from "./ready";
+import {
+  composerAction,
+  copyFeedback,
+  omittedNotice,
+  turnStatusText
+} from "./chat-actions";
 import {
   IMAGE_ACCEPT,
   canAttachImages,
@@ -63,6 +71,11 @@ export function ChatPage() {
   const studentMode = preferences.studentMode;
   const historyOpen = preferences.historyOpen;
   const [atBottom, setAtBottom] = useState(true);
+  const [runtimeConfig, setRuntimeConfig] = useState<RuntimeConfig | null>(null);
+  const [editing, setEditing] = useState<{ id: string; content: string } | null>(null);
+  const [omitted, setOmitted] = useState(0);
+  const [announcement, setAnnouncement] = useState("");
+  const composerRef = useRef<HTMLTextAreaElement>(null);
 
   // On a phone the history rail would take two thirds of the width, so it becomes a
   // drawer over the conversation. The stored preference keeps controlling the
@@ -110,9 +123,18 @@ export function ChatPage() {
   // and teardown belong to Models; Chat is for talking to a ready model.
   const usableSessions = readySessions(sessions);
   const activeSession = usableSessions.find((session) => session.id === activeSessionId) ?? null;
+  // A restart keeps the same run but leaves `usableSessions`; find it in the full
+  // list so Chat can explain the pause instead of calling the model missing.
+  const restartingSession = detail?.conversation.modelId
+    ? sessions.find(
+        (session) =>
+          session.modelId === detail.conversation.modelId && session.restart !== null
+      ) ?? null
+    : null;
   const frozen =
     detail !== null &&
     detail.conversation.modelId !== null &&
+    !restartingSession &&
     !usableSessions.some((session) => session.modelId === detail.conversation.modelId);
 
   const loadConversations = useCallback(async () => {
@@ -160,6 +182,39 @@ export function ChatPage() {
   useEffect(() => {
     void loadConversations();
   }, [loadConversations]);
+
+  // The run's own numbers, so the person can see the machine they are talking
+  // to without leaving the conversation (FR-037).
+  useEffect(() => {
+    const bridge = window.maia;
+    if (!bridge || !activeSession) {
+      setRuntimeConfig(null);
+      return;
+    }
+
+    let cancelled = false;
+    const load = async (): Promise<void> => {
+      const result = await bridge.invoke<RuntimeConfig | null>("session.runtimeConfig", {
+        sessionId: activeSession.id
+      });
+      if (!cancelled && result.ok) {
+        setRuntimeConfig(result.data);
+      }
+    };
+
+    void load();
+    const timer = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) {
+        return;
+      }
+      void load();
+    }, 10_000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [activeSession]);
 
   // Routes are lazily loaded, so coming back to the chat remounts this component.
   // The resume point arrives with the settings, so this waits for it once.
@@ -232,6 +287,8 @@ export function ChatPage() {
                         content: current.content,
                         reasoning: current.reasoning.length > 0 ? current.reasoning : null,
                         images: [],
+                        interrupted: false,
+                        errorCode: null,
                         createdAt: new Date().toISOString()
                       }
                     ]
@@ -391,59 +448,85 @@ export function ChatPage() {
     }
 
     const outgoing = pendingImages;
+    const editingId = editing?.id ?? null;
     setDraft("");
     setPendingImages([]);
     setBusy(true);
     inFlightRef.current = true;
     setError(null);
+    setAnnouncement(turnStatusText("started"));
+    setOmitted(0);
     setPendingUser(
-      activeConversationId
+      activeConversationId || editingId
         ? null
         : {
             content,
             previews: outgoing.map((image) => dataUrlFor(image.mimeType, image.dataBase64))
           }
     );
-    setDetail((existing) =>
-      existing
-        ? {
-            ...existing,
-            messages: [
-              ...existing.messages,
-              {
-                id: `user-${Date.now()}`,
-                role: "user",
-                content,
-                reasoning: null,
-                images: [],
-                createdAt: new Date().toISOString()
-              }
-            ]
-          }
-        : existing
-    );
+    if (!editingId) {
+      setDetail((existing) =>
+        existing
+          ? {
+              ...existing,
+              messages: [
+                ...existing.messages,
+                {
+                  id: `user-${Date.now()}`,
+                  role: "user",
+                  content,
+                  reasoning: null,
+                  images: [],
+                  interrupted: false,
+                  errorCode: null,
+                  createdAt: new Date().toISOString()
+                }
+              ]
+            }
+          : existing
+      );
+    }
     setStreaming({ reasoning: "", content: "" });
 
-    const result = await bridge.invoke<{ conversationId: string }>("chat.send", {
-      sessionId: activeSession.id,
-      conversationId: activeConversationId ?? undefined,
-      content,
-      images: outgoing.map((image) => ({
-        mimeType: image.mimeType,
-        dataBase64: image.dataBase64
-      }))
-    });
+    const result = editingId
+      ? await bridge.invoke<ChatTurnResult>("chat.edit", {
+          sessionId: activeSession.id,
+          conversationId: activeConversationId,
+          userMessageId: editingId,
+          content
+        })
+      : await bridge.invoke<ChatTurnResult>("chat.send", {
+          sessionId: activeSession.id,
+          conversationId: activeConversationId ?? undefined,
+          content,
+          images: outgoing.map((image) => ({
+            mimeType: image.mimeType,
+            dataBase64: image.dataBase64
+          }))
+        });
 
     if (!result.ok) {
       setBusy(false);
       inFlightRef.current = false;
       setStreaming(null);
       setError(result.error.message);
+      setAnnouncement(turnStatusText("failed"));
       // The turn never happened, so the draft and its images are kept.
       setDraft((current) => (current.length > 0 ? current : content));
       setPendingImages((current) => (current.length > 0 ? current : outgoing));
+      // A failed turn is stored as interrupted; reload so the person sees it.
+      if (activeConversationId) {
+        const reloaded = await bridge.invoke<ConversationDetail>("conversation.get", {
+          id: activeConversationId
+        });
+        if (reloaded.ok) {
+          setDetail(reloaded.data);
+        }
+      }
       return;
     }
+
+    const editedConversationId = result.data.conversationId;
 
     if (!activeConversationId) {
       setActiveConversationId(result.data.conversationId);
@@ -452,10 +535,14 @@ export function ChatPage() {
       await loadConversations();
     }
 
+    setOmitted(result.data.omittedMessages);
+    setAnnouncement(turnStatusText("finished"));
+    setEditing(null);
+
     // The first message creates the conversation, so the stored transcript has to
     // be loaded — otherwise the reply streams into a view that never renders it.
     const loaded = await bridge.invoke<ConversationDetail>("conversation.get", {
-      id: activeConversationId ?? result.data.conversationId
+      id: editedConversationId
     });
     if (loaded.ok) {
       setDetail(loaded.data);
@@ -465,6 +552,66 @@ export function ChatPage() {
 
     inFlightRef.current = false;
     setBusy(false);
+  }
+
+  /** Copies a message; the clipboard can be unavailable, so the label says so. */
+  async function copyMessage(content: string): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(content);
+      setAnnouncement(copyFeedback(true));
+    } catch {
+      setAnnouncement(copyFeedback(false));
+    }
+  }
+
+  /** Asks again for one reply; the old attempt stays in storage. */
+  async function regenerate(messageId: string): Promise<void> {
+    const bridge = window.maia;
+    if (!bridge || !activeSession || !activeConversationId) {
+      return;
+    }
+
+    setBusy(true);
+    inFlightRef.current = true;
+    setStreaming({ reasoning: "", content: "" });
+    setAnnouncement(turnStatusText("started"));
+
+    const result = await bridge.invoke<ChatTurnResult>("chat.regenerate", {
+      sessionId: activeSession.id,
+      conversationId: activeConversationId,
+      assistantMessageId: messageId
+    });
+
+    inFlightRef.current = false;
+    setBusy(false);
+    setStreaming(null);
+
+    if (!result.ok) {
+      setError(result.error.message);
+      setAnnouncement(turnStatusText("failed"));
+      return;
+    }
+
+    setOmitted(result.data.omittedMessages);
+    setAnnouncement(turnStatusText("finished"));
+    const loaded = await bridge.invoke<ConversationDetail>("conversation.get", {
+      id: activeConversationId
+    });
+    if (loaded.ok) {
+      setDetail(loaded.data);
+    }
+  }
+
+  function startEdit(messageId: string, content: string): void {
+    setEditing({ id: messageId, content });
+    setDraft(content);
+    // The composer is where the edit happens; put the cursor there.
+    requestAnimationFrame(() => composerRef.current?.focus());
+  }
+
+  function cancelEdit(): void {
+    setEditing(null);
+    setDraft("");
   }
 
   /** Picks up files from the hidden input; each one is validated before it joins the turn. */
@@ -526,6 +673,8 @@ export function ChatPage() {
   }
 
   const showError = error ?? workspaceError;
+  // A rejected run key is fixed by a restart, not by the person pasting it.
+  const credentialFailure = showError ? /rejected the run's key/i.test(showError) : false;
   // Only the two refusals this feature introduced get a shortcut.
   const refusalSection = showError
     ? /vast\.ai/i.test(showError)
@@ -748,7 +897,26 @@ export function ChatPage() {
               Model status
             </Link>
           )}
+
+          {runtimeConfig ? (
+            <span className="chat-run-values" title="This run's context window and concurrency">
+              {runtimeConfig.current.contextWindow.toLocaleString()} tokens ·{" "}
+              {runtimeConfig.current.maxConcurrentRequests} at once
+            </span>
+          ) : null}
         </div>
+
+        {restartingSession ? (
+          <div className="alert" role="status">
+            <span>
+              The model is restarting with new settings. Chat is unavailable for new turns until it
+              serves again; the conversation is kept.
+            </span>
+            <Link className="ghost-button" to={`/models?run=${restartingSession.id}`}>
+              Follow the restart
+            </Link>
+          </div>
+        ) : null}
 
         {showError ? (
           <div className="alert" role="alert">
@@ -757,6 +925,14 @@ export function ChatPage() {
             {refusalSection ? (
               <Link className="ghost-button" to={`/settings?section=${refusalSection}`}>
                 {refusalSection === "vastai" ? "Add the vast.ai key" : "Add the Hugging Face token"}
+              </Link>
+            ) : null}
+            {credentialFailure ? (
+              <Link
+                className="ghost-button"
+                to={activeSession ? `/models?run=${activeSession.id}` : "/models"}
+              >
+                Restart the model
               </Link>
             ) : null}
             <button
@@ -837,11 +1013,18 @@ export function ChatPage() {
           {detail?.messages.map((message) => (
             <MessageBubble
               key={message.id}
+              messageId={message.id}
               role={message.role}
               content={message.content}
               reasoning={message.reasoning}
               images={message.images}
+              interrupted={message.interrupted}
+              errorCode={message.errorCode}
               studentMode={studentMode}
+              busy={busy}
+              onCopy={copyMessage}
+              onRegenerate={regenerate}
+              onEdit={startEdit}
             />
           ))}
           {detail === null && pendingUser ? (
@@ -883,6 +1066,16 @@ export function ChatPage() {
           ) : null}
         </div>
 
+        {omittedNotice(omitted) ? (
+          <p className="chat-omitted" role="status">
+            {omittedNotice(omitted)}
+          </p>
+        ) : null}
+
+        <p className="sr-only" aria-live="polite">
+          {announcement}
+        </p>
+
         <form
           className="composer"
           onSubmit={(event) => {
@@ -890,6 +1083,14 @@ export function ChatPage() {
             void send();
           }}
         >
+          {editing ? (
+            <div className="composer-editing" role="status">
+              <span>Editing a sent message. Sending replaces it and its answer.</span>
+              <button type="button" className="ghost-button" onClick={cancelEdit}>
+                Cancel
+              </button>
+            </div>
+          ) : null}
           {pendingImages.length > 0 ? (
             <div className="composer-attachments">
               {pendingImages.map((image) => (
@@ -909,6 +1110,7 @@ export function ChatPage() {
             </div>
           ) : null}
           <textarea
+            ref={composerRef}
             rows={3}
             value={draft}
             placeholder={
@@ -921,7 +1123,12 @@ export function ChatPage() {
             disabled={!activeSession || busy}
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
+              const action = composerAction({
+                key: event.key,
+                shiftKey: event.shiftKey,
+                isComposing: event.nativeEvent.isComposing
+              });
+              if (action === "send") {
                 event.preventDefault();
                 event.currentTarget.form?.requestSubmit();
               }
@@ -961,6 +1168,7 @@ export function ChatPage() {
                 type="button"
                 className="ghost-button"
                 onClick={async () => {
+                  setAnnouncement(turnStatusText("stopped"));
                   await window.maia?.invoke("chat.abort", { sessionId: activeSession.id });
                 }}
               >
@@ -994,26 +1202,73 @@ function roleLabel(role: string): string {
 
 /** Memoised so the one-second clock tick does not re-render every old message. */
 const MessageBubble = memo(function MessageBubble({
+  messageId,
   role,
   content,
   reasoning,
   images,
-  studentMode
+  interrupted,
+  errorCode,
+  studentMode,
+  busy,
+  onCopy,
+  onRegenerate,
+  onEdit
 }: {
+  messageId: string;
   role: string;
   content: string;
   reasoning?: string | null;
   images?: ChatImage[];
+  interrupted?: boolean;
+  errorCode?: string | null;
   studentMode: boolean;
+  busy: boolean;
+  onCopy: (content: string) => Promise<void>;
+  onRegenerate: (messageId: string) => Promise<void>;
+  onEdit: (messageId: string, content: string) => void;
 }) {
+  const isAssistant = role === "assistant";
+  const isUser = role === "user";
+  const failed = interrupted === true && errorCode !== null && errorCode !== "STOPPED";
+
   return (
-    <article className={`bubble bubble-${role}`}>
+    <article className={`bubble bubble-${role}${interrupted ? " bubble-interrupted" : ""}`}>
       <header>{roleLabel(role)}</header>
       {images && images.length > 0 ? <MessageImages images={images} /> : null}
       {reasoning ? (
         <ReasoningPanel text={reasoning} streaming={false} studentMode={studentMode} variant="inline" />
       ) : null}
-      <MessageContent text={content} />
+      {content.length > 0 ? <MessageContent text={content} /> : null}
+      {interrupted ? (
+        <p className="bubble-turn-note">
+          {failed
+            ? `This reply did not finish. ${errorCode}`
+            : "This reply was stopped. What had arrived is kept below."}
+        </p>
+      ) : null}
+      <div className="bubble-actions">
+        {content.length > 0 ? (
+          <button type="button" className="ghost-button" onClick={() => void onCopy(content)}>
+            Copy
+          </button>
+        ) : null}
+        {isAssistant ? (
+          <button
+            type="button"
+            className="ghost-button"
+            disabled={busy}
+            onClick={() => void onRegenerate(messageId)}
+          >
+            {failed ? "Retry" : "Ask again"}
+          </button>
+        ) : null}
+        {isUser ? (
+          <button type="button" className="ghost-button" onClick={() => onEdit(messageId, content)}>
+            Edit
+          </button>
+        ) : null}
+      </div>
     </article>
   );
 });

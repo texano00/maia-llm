@@ -92,6 +92,30 @@ the tail: `extractRootCause` pulls the deepest error line (OOM, KV-cache sizing,
 `describeMemoryFailure` labels memory arithmetic as such so it is retried instead
 of being blamed on the model.
 
+### Changing runtime settings (0.13.0)
+
+The limits above are the **default**, not a verdict. A ready run exposes two
+values in its Models section:
+
+| Value | Meaning | Ceiling |
+| --- | --- | --- |
+| Context window | per-request tokens | the model's documented window; the product's 32 768 only when the model documents none |
+| Requests at once | how many turns the server handles together | derived from the card, floored at 1 and capped at 8 |
+
+A change is applied by a **restart in place**: the orchestrator stops any reply
+in flight, destroys the instance, confirms the provider no longer lists it, then
+creates a replacement on the **same offer** with the same run key, the same run
+id, `startedAt` and accrued cost. Destroying before creating is what guarantees
+no moment bills two machines. If the replacement cannot be created, the run is
+marked failed and the person is offered a fresh run **with a new estimate**;
+nothing is rented until that estimate is confirmed.
+
+The applied values are written only after the new server answers readiness, so
+the panel never shows a value that is not in force. A request above what the
+card can hold is allowed, with a stated risk: the boot then either succeeds or
+fails with its reason, and the previous values stay visible. vLLM receives
+`--max-model-len`/`--max-num-seqs`; llama.cpp receives `--parallel` and a total
+`-c` of `context × parallel`, so each slot keeps the context the person chose.
 
 ### Model checks before renting
 

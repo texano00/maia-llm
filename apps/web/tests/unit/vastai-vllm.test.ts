@@ -975,7 +975,7 @@ describe("vLLM streaming", () => {
       sessionId: "s1",
       modelId: "Qwen/Qwen2.5-7B-Instruct",
       instanceId: 1,
-      prompt: "hi",
+      messages: [{ role: "user", content: "hi" }],
       signal: new AbortController().signal,
       onDelta: (kind, text) => deltas.push([kind, text])
     });
@@ -996,7 +996,7 @@ describe("vLLM streaming", () => {
         sessionId: "s1",
         modelId: "m",
         instanceId: 1,
-        prompt: "hi",
+        messages: [{ role: "user", content: "hi" }],
         signal: new AbortController().signal,
         onDelta: () => undefined
       })
@@ -1016,7 +1016,7 @@ describe("vLLM streaming", () => {
         sessionId: "s1",
         modelId: "BAAI/bge-small-en-v1.5",
         instanceId: 1,
-        prompt: "hi",
+        messages: [{ role: "user", content: "hi" }],
         signal: new AbortController().signal,
         onDelta: () => undefined
       })
@@ -1044,7 +1044,7 @@ describe("vLLM streaming", () => {
         sessionId: "s1",
         modelId: "openai-community/gpt2",
         instanceId: 1,
-        prompt: "hi",
+        messages: [{ role: "user", content: "hi" }],
         signal: new AbortController().signal,
         onDelta: () => undefined
       })

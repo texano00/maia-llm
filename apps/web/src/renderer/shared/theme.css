@@ -3233,3 +3233,155 @@ body {
     animation: none;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Runtime settings and chat actions (specs/012-mobile-runtime-chat-parity)
+
+   Two rules, both asserted by the responsive contract test:
+   - a boxed surface never refuses to shrink and never widens the page;
+   - a long identifier wraps inside its own box; only the block that contains
+     code scrolls sideways.
+--------------------------------------------------------------------------- */
+.runtime-settings {
+  display: grid;
+  gap: 0.5rem;
+  max-width: 100%;
+  min-width: 0;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid var(--layer-3);
+  border-radius: 0.7rem;
+  background: var(--layer-1);
+}
+
+.runtime-settings > summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.runtime-field {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.runtime-field input,
+.runtime-field select {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.runtime-risk,
+.runtime-restarting {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: 0.85rem;
+}
+
+.runtime-risk {
+  color: var(--warning-text);
+}
+
+.runtime-settings .update-actions {
+  flex-wrap: wrap;
+}
+
+.model-run {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.model-run-facts,
+.model-run-facts div,
+.model-run-facts dd {
+  min-width: 0;
+}
+
+.model-run-facts dd,
+.endpoint-value,
+.external-access code,
+.chat-run-values {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.model-run-logs,
+.external-access,
+.external-access pre,
+.model-run-logs pre {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.model-run-logs pre,
+.external-access pre,
+.bubble pre,
+.bubble table {
+  overflow-x: auto;
+}
+
+.chat-run-values {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  white-space: normal;
+}
+
+.chat-omitted {
+  margin: 0;
+  padding: 0.4rem 0.85rem;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+
+.bubble-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.4rem;
+}
+
+.bubble-turn-note {
+  margin: 0.4rem 0 0;
+  font-size: 0.8rem;
+  color: var(--warning-text);
+  overflow-wrap: anywhere;
+}
+
+.composer-editing {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.85rem;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (max-width: 640px) {
+  .runtime-settings,
+  .runtime-field {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .runtime-settings .update-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .bubble-actions .ghost-button,
+  .composer-editing .ghost-button {
+    flex: 1 1 auto;
+  }
+}

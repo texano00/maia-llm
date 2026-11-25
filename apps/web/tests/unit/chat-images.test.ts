@@ -64,6 +64,7 @@ function harness(
   const sessions = {
     getSession: (id: string) => (id === session.id ? session : null),
     listSessions: () => [session],
+    runtimeConfig: () => null,
     send: async (
       _id: string,
       _content: string,
